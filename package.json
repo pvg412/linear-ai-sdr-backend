@@ -1,0 +1,47 @@
+{
+	"name": "linear-ai-sdr-backend",
+	"version": "1.0.0",
+	"description": "",
+	"main": "index.js",
+	"scripts": {
+		"dev": "ts-node-dev --respawn --transpile-only src/main.ts",
+		"build": "tsc",
+		"start": "node dist/main.js",
+		"prisma:migrate": "prisma migrate dev",
+		"prisma:generate": "prisma generate",
+		"lint": "eslint .",
+		"lint:fix": "eslint . --fix"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/pvg412/linear-ai-sdr-backend.git"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"bugs": {
+		"url": "https://github.com/pvg412/linear-ai-sdr-backend/issues"
+	},
+	"homepage": "https://github.com/pvg412/linear-ai-sdr-backend#readme",
+	"dependencies": {
+		"@fastify/cors": "^11.1.0",
+		"@fastify/swagger": "^9.6.1",
+		"@fastify/swagger-ui": "^5.2.3",
+		"@prisma/adapter-pg": "^7.0.1",
+		"@prisma/client": "^7.0.1",
+		"dotenv": "^17.2.3",
+		"fastify": "^5.6.2",
+		"inversify": "^7.10.4",
+		"reflect-metadata": "^0.2.2",
+		"zod": "^4.1.13"
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.39.1",
+		"@types/node": "^24.10.1",
+		"eslint": "^9.39.1",
+		"prisma": "^7.0.1",
+		"ts-node-dev": "^2.0.0",
+		"typescript": "^5.9.3",
+		"typescript-eslint": "^8.48.0"
+	}
+}

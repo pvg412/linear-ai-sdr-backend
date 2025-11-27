@@ -1,0 +1,122 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum SearchTaskStatus {
+  PENDING
+  RUNNING
+  DONE
+  DONE_NO_RESULTS
+  FAILED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  REPLIED
+  QUALIFIED
+  DISQUALIFIED
+}
+
+enum LeadSource {
+  AMPLELEADS
+  APOLLO
+  SALES_NAVIGATOR
+  MANUAL
+}
+
+model SearchTask {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  prompt String
+
+  industry    String?
+  titles      String[]
+  locations   String[]
+  companySize String?
+  limit       Int
+
+  status SearchTaskStatus @default(PENDING)
+  source LeadSource       @default(AMPLELEADS)
+
+  chatId            String?
+  telegramUserId    String?
+  telegramMessageId String?
+
+  apolloUrl     String?
+  fileName      String?
+  runId         String?
+  lastCheckedAt DateTime?
+
+  totalLeads   Int?
+  errorMessage String?
+
+  leads Lead[]
+
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id])
+
+  @@index([status])
+  @@index([runId])
+  @@index([chatId])
+}
+
+model Lead {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  searchTaskId String
+  searchTask   SearchTask @relation(fields: [searchTaskId], references: [id])
+
+  source     LeadSource @default(AMPLELEADS)
+  externalId String?
+
+  fullName      String?
+  firstName     String?
+  lastName      String?
+  title         String?
+  company       String?
+  companyDomain String?
+  companyUrl    String?
+  linkedinUrl   String?
+  location      String?
+
+  email  String?
+  status LeadStatus @default(NEW)
+
+  raw Json?
+
+  @@index([searchTaskId])
+  @@index([email])
+  @@index([status])
+}
+
+model Campaign {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name        String
+  description String?
+
+  provider    String?
+  externalId  String?
+  externalUrl String?
+
+  searchTasks SearchTask[]
+
+  @@index([provider, externalId])
+}
