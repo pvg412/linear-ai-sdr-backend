@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.coerce.number().default(3000),
-  DATABASE_URL: z.string().url(),
+  PORT: z.coerce.number().default(3001),
+  DATABASE_URL: z.url(),
   AMPLELEADS_API_KEY: z.string().min(1),
 });
 

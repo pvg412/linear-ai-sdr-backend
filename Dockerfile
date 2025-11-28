@@ -30,17 +30,16 @@ FROM base AS prod
 
 ENV NODE_ENV=production
 WORKDIR /app
-
+  
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-
-COPY --from=deps /app/node_modules ./node_modules
-
+  
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-
+  
 COPY prisma ./prisma
 COPY prisma.config.ts ./
-
-ENV PORT=3000
-EXPOSE 3000
-
+  
+ENV PORT=3001
+EXPOSE 3001
+  
 CMD ["sh", "-c", "pnpm prisma migrate deploy && node dist/main.js"]

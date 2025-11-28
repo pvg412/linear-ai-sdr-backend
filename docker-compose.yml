@@ -10,21 +10,26 @@ services:
       - db-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U linear -d linear_ai_sdr"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   app:
     build:
       context: .
       dockerfile: Dockerfile
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       NODE_ENV: production
-      PORT: 3000
+      PORT: 3001
       AMPLELEADS_API_KEY: "changeme-in-prod"
-
-      DATABASE_URL: "postgresql://linear:linear@db:5432/linear_ai_sdr"
+      DATABASE_URL: postgres://linear:linear@db:5432/linear_ai_sdr
     ports:
-      - "3000:3000"
+      - "3001:3001"
     restart: unless-stopped
 
 volumes:
