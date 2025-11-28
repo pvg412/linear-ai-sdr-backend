@@ -15,7 +15,7 @@ export const leadInputSchema = z.object({
   linkedinUrl: z.string().optional(),
   location: z.string().optional(),
 
-  email: z.string().email().optional(),
+  email: z.email().optional(),
   raw: z.unknown().optional(),
 });
 

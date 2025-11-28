@@ -1,7 +1,8 @@
 import { inject, injectable } from "inversify";
 
-import { SEARCH_TASK_TYPES } from "./searchTask.types";
-import { SearchTaskRepository } from "./searchTask.repository";
+import { SEARCH_TASK_TYPES } from "./search-task.types";
+import { SearchTaskRepository } from "./search-task.repository";
+import { GetSearchTaskResponse, ListSearchTasksResponse } from "./search-task.dto";
 
 @injectable()
 export class SearchTaskQueryService {
@@ -10,11 +11,11 @@ export class SearchTaskQueryService {
 		private readonly searchTaskRepository: SearchTaskRepository
 	) {}
 
-	async getById(id: string) {
+	async getById(id: string): Promise<GetSearchTaskResponse> {
 		return this.searchTaskRepository.findById(id);
 	}
 
-	async getActive(limit = 50) {
+	async getActive(limit = 50): Promise<ListSearchTasksResponse> {
 		return this.searchTaskRepository.findActive(limit);
 	}
 }

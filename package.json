@@ -10,7 +10,9 @@
 		"prisma:migrate": "prisma migrate dev",
 		"prisma:generate": "prisma generate",
 		"lint": "eslint .",
-		"lint:fix": "eslint . --fix"
+		"lint:fix": "eslint . --fix",
+		"test": "vitest",
+		"test:watch": "vitest --watch"
 	},
 	"repository": {
 		"type": "git",
@@ -38,10 +40,12 @@
 	"devDependencies": {
 		"@eslint/js": "^9.39.1",
 		"@types/node": "^24.10.1",
+		"@vitest/coverage-v8": "^4.0.14",
 		"eslint": "^9.39.1",
 		"prisma": "^7.0.1",
 		"ts-node-dev": "^2.0.0",
 		"typescript": "^5.9.3",
-		"typescript-eslint": "^8.48.0"
+		"typescript-eslint": "^8.48.0",
+		"vitest": "^4.0.14"
 	}
 }

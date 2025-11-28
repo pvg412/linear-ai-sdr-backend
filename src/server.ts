@@ -4,7 +4,7 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 
 import { loadEnv } from './config/env';
-import { registerSearchTaskRoutes } from './modules/search-task/searchTask.controller';
+import { registerSearchTaskRoutes } from './modules/search-task/search-task.controller';
 import { registerLeadRoutes } from './modules/lead/lead.controller';
 
 export async function buildServer() {

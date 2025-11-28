@@ -4,6 +4,7 @@ import { LeadStatus, Prisma } from "@prisma/client";
 import { LEAD_TYPES } from "./lead.types";
 import { LeadRepository } from "./lead.repository";
 import { BulkCreateLeadsBody } from "./lead.schemas";
+import { BulkCreateLeadsResponse, UpdateLeadStatusResponse } from "./lead.dto";
 
 @injectable()
 export class LeadCommandService {
@@ -12,7 +13,9 @@ export class LeadCommandService {
 		private readonly leadRepository: LeadRepository
 	) {}
 
-	async bulkCreateForSearchTask(body: BulkCreateLeadsBody) {
+	async bulkCreateForSearchTask(
+		body: BulkCreateLeadsBody
+	): Promise<BulkCreateLeadsResponse> {
 		const { searchTaskId, leads } = body;
 
 		const seen = new Set<string>();
@@ -54,7 +57,10 @@ export class LeadCommandService {
 		return this.leadRepository.createMany(data);
 	}
 
-	async updateStatus(id: string, status: LeadStatus) {
+	async updateStatus(
+		id: string,
+		status: LeadStatus
+	): Promise<UpdateLeadStatusResponse> {
 		return this.leadRepository.updateStatus(id, status);
 	}
 }

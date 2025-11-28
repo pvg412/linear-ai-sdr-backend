@@ -1,13 +1,13 @@
 import { FastifyInstance } from "fastify";
 
 import { container } from "../../container";
-import { SEARCH_TASK_TYPES } from "./searchTask.types";
+import { SEARCH_TASK_TYPES } from "./search-task.types";
 import {
 	createSearchTaskBodySchema,
 	getSearchTaskParamsSchema,
-} from "./searchTask.schemas";
-import { SearchTaskCommandService } from "./searchTask.commandService";
-import { SearchTaskQueryService } from "./searchTask.queryService";
+} from "./search-task.schemas";
+import { SearchTaskCommandService } from "./search-task.commandService";
+import { SearchTaskQueryService } from "./search-task.queryService";
 
 export function registerSearchTaskRoutes(app: FastifyInstance) {
 	const commandService = container.get<SearchTaskCommandService>(

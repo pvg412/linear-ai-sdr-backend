@@ -12,6 +12,8 @@ export default defineConfig(
 			"src/generated/prisma/**",
 			"eslint.config.mjs",
 			"prisma.config.ts",
+			"vitest.config.ts",
+			"test/setup.ts",
 		],
 	},
 

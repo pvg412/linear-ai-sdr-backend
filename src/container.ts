@@ -1,10 +1,10 @@
 import "reflect-metadata";
 import { Container } from "inversify";
 
-import { SearchTaskRepository } from "./modules/search-task/searchTask.repository";
-import { SearchTaskCommandService } from "./modules/search-task/searchTask.commandService";
-import { SearchTaskQueryService } from "./modules/search-task/searchTask.queryService";
-import { SEARCH_TASK_TYPES } from "./modules/search-task/searchTask.types";
+import { SearchTaskRepository } from "./modules/search-task/search-task.repository";
+import { SearchTaskCommandService } from "./modules/search-task/search-task.commandService";
+import { SearchTaskQueryService } from "./modules/search-task/search-task.queryService";
+import { SEARCH_TASK_TYPES } from "./modules/search-task/search-task.types";
 import { LEAD_TYPES } from "./modules/lead/lead.types";
 import { LeadRepository } from "./modules/lead/lead.repository";
 import { LeadCommandService } from "./modules/lead/lead.commandService";

@@ -1,9 +1,15 @@
 import { inject, injectable } from "inversify";
 import { SearchTaskStatus } from "@prisma/client";
 
-import { SEARCH_TASK_TYPES } from "./searchTask.types";
-import { SearchTaskRepository } from "./searchTask.repository";
-import { CreateSearchTaskBody } from "./searchTask.schemas";
+import { SEARCH_TASK_TYPES } from "./search-task.types";
+import { SearchTaskRepository } from "./search-task.repository";
+import { CreateSearchTaskBody } from "./search-task.schemas";
+import {
+	CreateSearchTaskResponse,
+	MarkDoneResponse,
+	MarkFailedResponse,
+	MarkRunningResponse,
+} from "./search-task.dto";
 
 @injectable()
 export class SearchTaskCommandService {
@@ -12,7 +18,9 @@ export class SearchTaskCommandService {
 		private readonly searchTaskRepository: SearchTaskRepository
 	) {}
 
-	async createTask(input: CreateSearchTaskBody) {
+	async createTask(
+		input: CreateSearchTaskBody
+	): Promise<CreateSearchTaskResponse> {
 		return this.searchTaskRepository.createTask({
 			prompt: input.prompt,
 			chatId: input.chatId,
@@ -24,7 +32,11 @@ export class SearchTaskCommandService {
 		});
 	}
 
-	async markRunning(id: string, runId: string, fileName: string) {
+	async markRunning(
+		id: string,
+		runId: string,
+		fileName: string
+	): Promise<MarkRunningResponse> {
 		return this.searchTaskRepository.update(id, {
 			status: SearchTaskStatus.RUNNING,
 			runId,
@@ -33,7 +45,7 @@ export class SearchTaskCommandService {
 		});
 	}
 
-	async markDone(id: string, totalLeads: number) {
+	async markDone(id: string, totalLeads: number): Promise<MarkDoneResponse> {
 		return this.searchTaskRepository.update(id, {
 			status:
 				totalLeads > 0
@@ -44,7 +56,7 @@ export class SearchTaskCommandService {
 		});
 	}
 
-	async markFailed(id: string, error: unknown) {
+	async markFailed(id: string, error: unknown): Promise<MarkFailedResponse> {
 		return this.searchTaskRepository.update(id, {
 			status: SearchTaskStatus.FAILED,
 			errorMessage: error instanceof Error ? error.message : String(error),
