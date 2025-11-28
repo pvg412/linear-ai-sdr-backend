@@ -26,7 +26,6 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      AMPLELEADS_API_KEY: "changeme-in-prod"
       DATABASE_URL: postgres://linear:linear@db:5432/linear_ai_sdr
     ports:
       - "3001:3001"

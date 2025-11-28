@@ -18,3 +18,16 @@ export const getSearchTaskParamsSchema = z.object({
 });
 
 export type GetSearchTaskParams = z.infer<typeof getSearchTaskParamsSchema>;
+
+export const markRunningBodySchema = z.object({
+  runId: z.string().min(1),
+  fileName: z.string().min(1),
+});
+
+export const markDoneBodySchema = z.object({
+  totalLeads: z.number().int().nonnegative(),
+});
+
+export const markFailedBodySchema = z.object({
+  error: z.string().min(1),
+});
