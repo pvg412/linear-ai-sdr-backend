@@ -22,13 +22,7 @@ export class SearchTaskCommandService {
 		input: CreateSearchTaskBody
 	): Promise<CreateSearchTaskResponse> {
 		return this.searchTaskRepository.createTask({
-			prompt: input.prompt,
-			chatId: input.chatId,
-			limit: input.limit,
-			industry: input.industry,
-			titles: input.titles,
-			locations: input.locations,
-			companySize: input.companySize,
+			...input,
 		});
 	}
 

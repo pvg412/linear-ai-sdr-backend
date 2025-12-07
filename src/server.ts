@@ -6,6 +6,8 @@ import swaggerUi from '@fastify/swagger-ui';
 import { loadEnv } from './config/env';
 import { registerSearchTaskRoutes } from './modules/search-task/search-task.controller';
 import { registerLeadRoutes } from './modules/lead/lead.controller';
+import { registerScraperRoutes } from './modules/scraper/scraper.controller';
+import { registerTelegramRoutes } from './modules/telegram/telegram.controller';
 
 export async function buildServer() {
   const env = loadEnv();
@@ -26,6 +28,8 @@ export async function buildServer() {
 
   registerSearchTaskRoutes(app);
   registerLeadRoutes(app);
+  registerTelegramRoutes(app);
+  registerScraperRoutes(app);
 
   return { app, env };
 }

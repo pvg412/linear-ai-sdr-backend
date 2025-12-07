@@ -31,21 +31,8 @@ export class LeadCommandService {
 			if (key !== "|") seen.add(key);
 
 			data.push({
+				...lead,
 				searchTaskId,
-				source: lead.source,
-				externalId: lead.externalId,
-
-				fullName: lead.fullName,
-				firstName: lead.firstName,
-				lastName: lead.lastName,
-				title: lead.title,
-				company: lead.company,
-				companyDomain: lead.companyDomain,
-				companyUrl: lead.companyUrl,
-				linkedinUrl: lead.linkedinUrl,
-				location: lead.location,
-
-				email: lead.email,
 				raw: lead.raw as Prisma.InputJsonValue | undefined,
 			});
 		}

@@ -35,6 +35,38 @@ enum LeadSource {
   MANUAL
 }
 
+enum ScraperProvider {
+  SCRAPER_CITY
+  BOOMERANG
+  DADDY_LEADS
+  APIFY
+}
+
+enum ScraperRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+model ScraperRun {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  searchTaskId String
+  searchTask   SearchTask @relation(fields: [searchTaskId], references: [id])
+
+  provider      ScraperProvider
+  status        ScraperRunStatus
+  errorMessage  String?
+  leadsCount    Int?
+  externalRunId String?
+  meta          Json?
+
+  @@index([searchTaskId])
+  @@index([provider, status])
+}
+
 model SearchTask {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -49,7 +81,7 @@ model SearchTask {
   limit       Int
 
   status SearchTaskStatus @default(PENDING)
-  source LeadSource       @default(AMPLELEADS)
+  source LeadSource
 
   chatId            String?
   telegramUserId    String?
@@ -64,6 +96,9 @@ model SearchTask {
   errorMessage String?
 
   leads Lead[]
+
+  scraperProvider ScraperProvider?
+  scraperRuns     ScraperRun[]
 
   campaignId String?
   campaign   Campaign? @relation(fields: [campaignId], references: [id])
@@ -81,7 +116,7 @@ model Lead {
   searchTaskId String
   searchTask   SearchTask @relation(fields: [searchTaskId], references: [id])
 
-  source     LeadSource @default(AMPLELEADS)
+  source     LeadSource
   externalId String?
 
   fullName      String?

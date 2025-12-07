@@ -1,9 +1,11 @@
+import { LeadSource } from '@prisma/client';
 import { z } from 'zod';
 
 export const createSearchTaskBodySchema = z.object({
   prompt: z.string().min(3),
   chatId: z.string().min(1),
   limit: z.number().int().positive().max(1000).default(50),
+  source: z.enum(LeadSource),
 
   industry: z.string().optional(),
   titles: z.array(z.string()).optional(),
