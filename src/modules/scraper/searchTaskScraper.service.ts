@@ -11,6 +11,7 @@ import { ScraperOrchestrator } from "./scraper.orchestrator";
 import { SearchTaskRepository } from "../search-task/search-task.repository";
 import { buildApolloPeopleUrl } from "./apolloUrlBuilder";
 import { msSince, nowNs, type LoggerLike } from "@/infra/observability";
+import { NotFoundError } from "@/infra/errors";
 
 @injectable()
 export class SearchTaskScraperService {
@@ -37,7 +38,7 @@ export class SearchTaskScraperService {
 		const task = await this.queryService.getById(id);
 
 		if (!task) {
-			throw new Error("SearchTask not found");
+			throw new NotFoundError("SearchTask not found");
 		}
 
 		const { apolloUrl: builtUrl } = buildApolloPeopleUrl({

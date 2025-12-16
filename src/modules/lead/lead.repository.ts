@@ -7,8 +7,11 @@ import { getPrisma } from "@/infra/prisma";
 export class LeadRepository {
   async createMany(data: Prisma.LeadCreateManyInput[]) {
     const prisma = getPrisma();
-    
-    return prisma.lead.createMany({ data });
+
+    return prisma.lead.createMany({
+      data,
+      skipDuplicates: true, // relies on unique indexes to avoid duplicate leads per task
+    });
   }
 
   async updateStatus(id: string, status: LeadStatus) {

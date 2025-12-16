@@ -40,6 +40,17 @@ export class LeadDbOrchestrator {
 
     const errors: Partial<Record<ScraperProvider, string>> = {};
 
+    const enabledProviders = providersOrder.filter((provider) => {
+      const adapter = this.getAdapter(provider);
+      return adapter && adapter.isEnabled();
+    });
+
+    if (enabledProviders.length === 0) {
+      throw new Error(
+        `No enabled lead DB adapters for providers: ${providersOrder.join(", ")}`,
+      );
+    }
+
     log?.info(
       {
         searchTaskId,

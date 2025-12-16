@@ -41,6 +41,12 @@ const isScraperCityEnabled =
 	Boolean(env.SCRAPERCITY_API_KEY && env.SCRAPERCITY_API_URL);
 const isScruppEnabled = Boolean(env.SCRUPP_SCRAPER_API_KEY && env.SCRUPP_SCRAPER_API_URL);
 
+if (env.NODE_ENV === "production" && allowedTelegramIds.size === 0) {
+	throw new Error(
+		"TELEGRAM_ALLOWED_USER_IDS must be set in production to avoid exposing the bot publicly"
+	);
+}
+
 container
 	.bind<Set<string>>(TELEGRAM_TYPES.AllowedUserIds)
 	.toConstantValue(allowedTelegramIds);

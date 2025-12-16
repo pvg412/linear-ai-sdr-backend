@@ -14,6 +14,7 @@ import { LeadDbOrchestrator } from "./lead-db.orchestrator";
 import { mergeAndTrimLeadDbResults } from "./lead-db.merger";
 import type { LeadDbApolloFilters } from "./lead-db.dto";
 import { msSince, nowNs, type LoggerLike } from "@/infra/observability";
+import { NotFoundError } from "@/infra/errors";
 
 @injectable()
 export class SearchTaskLeadDbService {
@@ -49,7 +50,7 @@ export class SearchTaskLeadDbService {
     const t0 = nowNs();
     log?.info({ searchTaskId: id }, "Lead DB run started");
     const task = await this.queryService.getById(id);
-    if (!task) throw new Error("SearchTask not found");
+    if (!task) throw new NotFoundError("SearchTask not found");
 
     // Align stored task.limit with provider reality (ScraperCity has min count).
     const effectiveLimit = SearchTaskLeadDbService.normalizeScraperCityCount(
