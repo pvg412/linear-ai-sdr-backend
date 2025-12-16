@@ -25,12 +25,23 @@ export interface TelegramMessage {
   text?: string;
 }
 
+export interface TelegramCallbackQuery {
+  id: string;
+  from: TelegramUser;
+  message?: TelegramMessage;
+  data?: string;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
 }
+
+export type SearchMethod = "LEAD_DB" | "SCRAPING";
 
 export interface PendingIntent {
   prompt: string;
   params: CreateSearchTaskBody;
+  method?: SearchMethod;
 }

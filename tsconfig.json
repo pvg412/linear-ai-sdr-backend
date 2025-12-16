@@ -6,6 +6,10 @@
 		"strict": true,
 		"esModuleInterop": true,
 		"skipLibCheck": true,
+		"baseUrl": ".",
+		"paths": {
+			"@/*": ["src/*"]
+		},
 		"outDir": "dist",
 		"rootDir": "src",
 		"resolveJsonModule": true,

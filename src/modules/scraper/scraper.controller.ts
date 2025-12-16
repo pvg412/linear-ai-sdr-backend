@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 
-import { container } from "../../container";
+import { container } from "@/container";
 import { SearchTaskScraperService } from "./searchTaskScraper.service";
 import { SCRAPER_TYPES } from "./scraper.types";
 import { getSearchTaskParamsSchema } from "../search-task/search-task.schemas";

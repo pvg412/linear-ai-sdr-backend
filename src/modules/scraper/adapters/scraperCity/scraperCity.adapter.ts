@@ -2,14 +2,14 @@ import axios, { AxiosError } from "axios";
 import { injectable } from "inversify";
 import { ScraperProvider, LeadSource } from "@prisma/client";
 
-import { loadEnv } from "../../config/env";
+import { loadEnv } from "@/config/env";
 import {
 	NormalizedLeadForCreate,
 	ScrapeQuery,
 	ScraperAdapter,
 	ScraperAdapterResult,
-	ScraperCityApolloRow,
-} from "./scraper.dto";
+} from "@/modules/scraper/scraper.dto";
+import { ScraperCityApolloRow } from "./scraperCity.dto";
 
 const env = loadEnv();
 
@@ -29,7 +29,7 @@ export class ScraperCityApolloAdapter implements ScraperAdapter {
 	async scrape(query: ScrapeQuery): Promise<ScraperAdapterResult> {
 		try {
 			const startRes = await axios.post<{ runId: string }>(
-				`${env.SCRAPERCITY_API_URL}/scrape/apollo`,
+				`${env.SCRAPERCITY_API_URL}/v1/scrape/apollo`,
 				{
 					url: query.apolloUrl,
 					count: query.limit,
@@ -39,7 +39,7 @@ export class ScraperCityApolloAdapter implements ScraperAdapter {
 						Authorization: `Bearer ${this.apiKey}`,
 						"Content-Type": "application/json",
 					},
-					timeout: 60_000,
+					timeout: 5 * 60 * 1000, // 5 min
 				}
 			);
 
@@ -51,7 +51,7 @@ export class ScraperCityApolloAdapter implements ScraperAdapter {
 
 			for (let i = 0; i < 60; i++) {
 				const statusRes = await axios.get<{ status: string }>(
-					`${env.SCRAPERCITY_API_URL}/scrape/${runId}/status`,
+					`${env.SCRAPERCITY_API_URL}/v1/scrape/status/${runId}`,
 					{
 						headers: { Authorization: `Bearer ${this.apiKey}` },
 						timeout: 30_000,
@@ -74,7 +74,7 @@ export class ScraperCityApolloAdapter implements ScraperAdapter {
 			}
 
 			const downloadRes = await axios.get<ScraperCityApolloRow[]>(
-				`${env.SCRAPERCITY_API_URL}/scrape/${runId}/download?format=json`,
+				`${env.SCRAPERCITY_API_URL}/downloads/${runId}?format=json`,
 				{
 					headers: { Authorization: `Bearer ${this.apiKey}` },
 					timeout: 120_000,
@@ -111,11 +111,24 @@ export class ScraperCityApolloAdapter implements ScraperAdapter {
 				leads,
 			};
 		} catch (e) {
-
-			if(e instanceof AxiosError) {
-				console.error("error", e.response?.data);
+			if (e instanceof AxiosError) {
+				console.error("[Scrupp] error response", {
+					status: e.response?.status,
+					data: e.response?.data as unknown,
+					request: {
+						method: e.config?.method,
+						url: e.config?.url,
+						baseURL: e.config?.baseURL,
+						params: e.config?.params as unknown,
+						data: e.config?.data as unknown,
+					},
+				});
 			} else {
-				console.error("error", (e as Error).message);
+				console.error("[Scrupp] error", (e as Error).message, {
+					request: {
+						url: query.apolloUrl,
+					},
+				});
 			}
 			throw e;
 		}

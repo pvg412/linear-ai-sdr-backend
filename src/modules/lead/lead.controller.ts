@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 
-import { container } from "../../container";
+import { container } from "@/container";
 import { LEAD_TYPES } from "./lead.types";
 import {
   bulkCreateLeadsBodySchema,

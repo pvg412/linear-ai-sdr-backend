@@ -1,7 +1,7 @@
 import { LeadStatus } from "@prisma/client";
 import { describe, it, expect } from "vitest";
 
-import { app } from "../../test/setup";
+import { app } from "@/test/setup";
 import { CreateSearchTaskResponse } from "../search-task/search-task.dto";
 import { BulkCreateLeadsResponse, GetLeadsByTaskResponse } from "./lead.dto";
 

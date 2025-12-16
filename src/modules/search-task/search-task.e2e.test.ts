@@ -1,7 +1,7 @@
 import { SearchTaskStatus } from "@prisma/client";
 import { describe, it, expect } from "vitest";
 
-import { app } from '../../test/setup';
+import { app } from '@/test/setup';
 import { CreateSearchTaskResponse, GetSearchTaskResponse } from "./search-task.dto";
 
 

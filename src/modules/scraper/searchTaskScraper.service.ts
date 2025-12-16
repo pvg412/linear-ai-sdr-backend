@@ -10,6 +10,7 @@ import { SCRAPER_TYPES } from "./scraper.types";
 import { ScraperOrchestrator } from "./scraper.orchestrator";
 import { SearchTaskRepository } from "../search-task/search-task.repository";
 import { buildApolloPeopleUrl } from "./apolloUrlBuilder";
+import { msSince, nowNs, type LoggerLike } from "@/infra/observability";
 
 @injectable()
 export class SearchTaskScraperService {
@@ -30,7 +31,9 @@ export class SearchTaskScraperService {
 		private readonly searchTaskRepository: SearchTaskRepository
 	) {}
 
-	async run(id: string): Promise<void> {
+	async run(id: string, log?: LoggerLike): Promise<void> {
+		const t0 = nowNs();
+		log?.info({ searchTaskId: id }, "Scraping run started");
 		const task = await this.queryService.getById(id);
 
 		if (!task) {
@@ -50,31 +53,57 @@ export class SearchTaskScraperService {
 
 		await this.commandService.markRunning(id, "PENDING", "PENDING");
 
-		const result = await this.scraperOrchestrator.scrapeWithFallback(
-			task.id,
-			{ apolloUrl, limit: task.limit },
-			{
-				providersOrder: [ScraperProvider.SCRAPER_CITY],
-				minLeads: task.limit,
-				allowUnderDeliveryFallback: true,
-			}
-		);
+		try {
+			log?.info(
+				{
+					searchTaskId: task.id,
+					limit: task.limit,
+					providersOrder: [ScraperProvider.SCRUPP],
+				},
+				"Scraping orchestrator started"
+			);
 
-		await this.searchTaskRepository.update(task.id, {
-			scraperProvider: result.provider,
-		});
+			const result = await this.scraperOrchestrator.scrapeWithFallback(
+				task.id,
+				{ apolloUrl, limit: task.limit },
+				{
+					providersOrder: [ScraperProvider.SCRUPP],
+					minLeads: task.limit,
+					allowUnderDeliveryFallback: true,
+				}
+			);
 
-		const { count } = await this.leadCommandService.bulkCreateForSearchTask({
-			searchTaskId: task.id,
-			leads: result.leads,
-		});
+			await this.searchTaskRepository.update(task.id, {
+				scraperProvider: result.provider,
+			});
 
-		await this.commandService.markRunning(
-			task.id,
-			result.providerRunId ?? "N/A",
-			result.fileNameHint ?? "N/A"
-		);
+			const { count } = await this.leadCommandService.bulkCreateForSearchTask({
+				searchTaskId: task.id,
+				leads: result.leads,
+			});
 
-		await this.commandService.markDone(task.id, count);
+			await this.commandService.markRunning(
+				task.id,
+				result.providerRunId ?? "N/A",
+				result.fileNameHint ?? "N/A"
+			);
+
+			await this.commandService.markDone(task.id, count);
+			log?.info(
+				{
+					searchTaskId: task.id,
+					leadsInserted: count,
+					durationMs: msSince(t0),
+				},
+				"Scraping run finished successfully"
+			);
+		} catch (error) {
+			log?.error(
+				{ err: error, searchTaskId: task.id, durationMs: msSince(t0) },
+				"Scraping run failed"
+			);
+			await this.commandService.markFailed(task.id, error);
+			throw error;
+		}
 	}
 }

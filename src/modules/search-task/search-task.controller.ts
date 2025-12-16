@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 
-import { container } from "../../container";
+import { container } from "@/container";
 import { SEARCH_TASK_TYPES } from "./search-task.types";
 import {
 	createSearchTaskBodySchema,

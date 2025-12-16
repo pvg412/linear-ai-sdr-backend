@@ -13,37 +13,43 @@ import { LeadQueryService } from "./modules/lead/lead.queryService";
 import { SearchTaskScraperService } from "./modules/scraper/searchTaskScraper.service";
 import { SCRAPER_TYPES } from "./modules/scraper/scraper.types";
 import { ScraperOrchestrator } from "./modules/scraper/scraper.orchestrator";
-import { ScraperCityApolloAdapter } from "./modules/scraper/scraperCity.adapter";
 import { ScraperAdapter } from "./modules/scraper/scraper.dto";
 import { AiPromptParserService } from "./modules/ai/aiPromptParser.service";
 import { AI_TYPES } from "./modules/ai/ai.types";
 import { TelegramService } from "./modules/telegram/telegram.service";
 import { TELEGRAM_TYPES } from "./modules/telegram/telegram.types";
 import { TelegramClient } from "./modules/telegram/telegram.client";
+import { ScraperCityApolloAdapter } from "./modules/scraper/adapters/scraperCity/scraperCity.adapter";
+import { ScruppApolloAdapter } from "./modules/scraper/adapters/scrupp/scrupp.adapter";
+import { LeadDbOrchestrator } from "./modules/lead-db/lead-db.orchestrator";
+import { SearchTaskLeadDbService } from "./modules/lead-db/searchTaskLeadDb.service";
+import { LEAD_DB_TYPES } from "./modules/lead-db/lead-db.types";
+import type { LeadDbAdapter } from "./modules/lead-db/lead-db.dto";
+import { ScraperCityLeadDbAdapter } from "./modules/lead-db/adapters/scraperCity/scraperCity.adapter";
 
 const container = new Container();
 
 const env = loadEnv();
 
 const allowedTelegramIds = new Set(
-  env.TELEGRAM_ALLOWED_USER_IDS.split(",")
-    .map((id) => id.trim())
-    .filter(Boolean),
+	env.TELEGRAM_ALLOWED_USER_IDS.split(",")
+		.map((id) => id.trim())
+		.filter(Boolean)
 );
 
 container
-  .bind<Set<string>>(TELEGRAM_TYPES.AllowedUserIds)
-  .toConstantValue(allowedTelegramIds);
+	.bind<Set<string>>(TELEGRAM_TYPES.AllowedUserIds)
+	.toConstantValue(allowedTelegramIds);
 
 container
-  .bind<TelegramClient>(TELEGRAM_TYPES.TelegramClient)
-  .toDynamicValue(() => new TelegramClient(env.TELEGRAM_BOT_ACCESS_TOKEN))
-  .inSingletonScope();
+	.bind<TelegramClient>(TELEGRAM_TYPES.TelegramClient)
+	.toDynamicValue(() => new TelegramClient(env.TELEGRAM_BOT_ACCESS_TOKEN))
+	.inSingletonScope();
 
 container
-  .bind<TelegramService>(TELEGRAM_TYPES.TelegramService)
-  .to(TelegramService)
-  .inSingletonScope();
+	.bind<TelegramService>(TELEGRAM_TYPES.TelegramService)
+	.to(TelegramService)
+	.inSingletonScope();
 
 container
 	.bind<SearchTaskScraperService>(SCRAPER_TYPES.SearchTaskScraperService)
@@ -59,6 +65,13 @@ container
 	.bind<ScraperAdapter>(SCRAPER_TYPES.ScraperAdapter)
 	.toDynamicValue(() => {
 		return new ScraperCityApolloAdapter(env.SCRAPERCITY_API_KEY, true);
+	})
+	.inSingletonScope();
+
+container
+	.bind<ScraperAdapter>(SCRAPER_TYPES.ScraperAdapter)
+	.toDynamicValue(() => {
+		return new ScruppApolloAdapter(env.SCRUPP_SCRAPER_API_KEY, true);
 	})
 	.inSingletonScope();
 
@@ -98,5 +111,22 @@ container
 	.bind<LeadQueryService>(LEAD_TYPES.LeadQueryService)
 	.to(LeadQueryService)
 	.inSingletonScope();
+
+container
+  .bind<LeadDbOrchestrator>(LEAD_DB_TYPES.LeadDbOrchestrator)
+  .to(LeadDbOrchestrator)
+  .inSingletonScope();
+
+container
+	.bind<LeadDbAdapter>(LEAD_DB_TYPES.LeadDbAdapter)
+	.toDynamicValue(() => {
+		return new ScraperCityLeadDbAdapter(env.SCRAPERCITY_API_KEY, true);
+	})
+	.inSingletonScope();
+
+container
+  .bind<SearchTaskLeadDbService>(LEAD_DB_TYPES.SearchTaskLeadDbService)
+  .to(SearchTaskLeadDbService)
+  .inSingletonScope();
 
 export { container };

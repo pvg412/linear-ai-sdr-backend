@@ -1,5 +1,28 @@
-import { LeadSource } from '@prisma/client';
-import { z } from 'zod';
+import { LeadSource } from "@prisma/client";
+import { z } from "zod";
+
+export const leadDbFiltersSchema = z
+  .object({
+    seniorityLevel: z.string().optional(),
+    functionDept: z.string().optional(),
+
+    personTitles: z.array(z.string().min(1)).optional(),
+    personCountry: z.string().optional(),
+    personState: z.string().optional(),
+    personCities: z.array(z.string().min(1)).optional(),
+
+    companyIndustry: z.string().optional(),
+    companySize: z.string().optional(),
+    companyCountry: z.string().optional(),
+    companyState: z.string().optional(),
+    companyCities: z.array(z.string().min(1)).optional(),
+
+    companyDomains: z.array(z.string().min(1)).optional(),
+    companyKeywords: z.array(z.string().min(1)).optional(),
+
+    hasPhone: z.boolean().optional(),
+  })
+  .strict();
 
 export const createSearchTaskBodySchema = z.object({
   prompt: z.string().min(3),
@@ -11,6 +34,8 @@ export const createSearchTaskBodySchema = z.object({
   titles: z.array(z.string()).optional(),
   locations: z.array(z.string()).optional(),
   companySize: z.string().optional(),
+
+  leadDbFilters: leadDbFiltersSchema.optional(),
 });
 
 export type CreateSearchTaskBody = z.infer<typeof createSearchTaskBodySchema>;

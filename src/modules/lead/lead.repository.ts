@@ -1,7 +1,7 @@
 import { injectable } from "inversify";
 import { LeadStatus, Prisma } from "@prisma/client";
 
-import { getPrisma } from "../../infra/prisma";
+import { getPrisma } from "@/infra/prisma";
 
 @injectable()
 export class LeadRepository {

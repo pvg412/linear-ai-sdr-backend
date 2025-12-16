@@ -1,7 +1,7 @@
 import { injectable } from "inversify";
 import { SearchTaskStatus, type Prisma } from "@prisma/client";
 
-import { getPrisma } from "../../infra/prisma";
+import { getPrisma } from "@/infra/prisma";
 
 @injectable()
 export class SearchTaskRepository {
