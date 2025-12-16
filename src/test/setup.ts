@@ -1,32 +1,38 @@
-import { beforeAll, afterAll, beforeEach } from 'vitest';
-import * as dotenv from 'dotenv';
+import { beforeAll, afterAll, beforeEach } from "vitest";
+import * as dotenv from "dotenv";
+import type { PrismaClient } from "@prisma/client";
+import type { FastifyInstance } from "fastify";
+import { execSync } from "node:child_process";
 
-import { getPrisma } from '../infra/prisma';
-import { buildServer } from '../server';
+dotenv.config({ path: ".env.test" });
 
-dotenv.config({ path: '.env.test' });
-
-let app: Awaited<ReturnType<typeof buildServer>>['app'];
+let app: FastifyInstance;
+let prisma: PrismaClient;
 
 beforeAll(async () => {
-  const server = await buildServer();
-  app = server.app;
+	// Ensure the test DB schema matches the current Prisma schema.
+	// `migrate deploy` is non-interactive and safe for CI/tests.
+	execSync("pnpm exec prisma migrate deploy", { stdio: "inherit" });
+
+	const { buildServer } = await import("../server");
+	const server = await buildServer();
+	app = server.app;
+
+	const { getPrisma } = await import("../infra/prisma");
+	prisma = getPrisma();
 });
 
 beforeEach(async () => {
-  const prisma = getPrisma();
-
-  await prisma.$transaction([
-    prisma.lead.deleteMany(),
-    prisma.searchTask.deleteMany(),
-    prisma.campaign.deleteMany(),
-  ]);
+	await prisma.$transaction([
+		prisma.lead.deleteMany(),
+		prisma.searchTask.deleteMany(),
+		prisma.campaign.deleteMany(),
+	]);
 });
 
 afterAll(async () => {
-  const prisma = getPrisma();
-  await prisma.$disconnect();
-  await app.close();
+	await prisma.$disconnect();
+	await app.close();
 });
 
 export { app };

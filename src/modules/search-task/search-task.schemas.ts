@@ -28,11 +28,12 @@ export const createSearchTaskBodySchema = z.object({
   prompt: z.string().min(3),
   chatId: z.string().min(1),
   limit: z.number().int().positive().max(1000).default(50),
-  source: z.enum(LeadSource),
+  source: z.enum(LeadSource).default(LeadSource.MANUAL),
 
   industry: z.string().optional(),
-  titles: z.array(z.string()).optional(),
-  locations: z.array(z.string()).optional(),
+  // Prisma fields are non-null String[]; default to empty arrays.
+  titles: z.array(z.string()).default([]),
+  locations: z.array(z.string()).default([]),
   companySize: z.string().optional(),
 
   leadDbFilters: leadDbFiltersSchema.optional(),

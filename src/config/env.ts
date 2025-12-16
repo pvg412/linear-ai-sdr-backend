@@ -13,14 +13,14 @@ const EnvSchema = z.object({
 	OPENAI_API_KEY: z.string(),
 	OPENAI_MODEL: z.string(),
 
-	SCRAPERCITY_API_KEY: z.string(),
-  SCRAPERCITY_API_URL: z.url(),
+	SCRAPERCITY_API_KEY: z.string().optional(),
+  SCRAPERCITY_API_URL: z.string().url().optional(),
 
-	SEARCH_LEADS_API_KEY: z.string(),
-	SEARCH_LEADS_API_URL: z.url(),
+	SEARCH_LEADS_API_KEY: z.string().optional(),
+	SEARCH_LEADS_API_URL: z.string().url().optional(),
 
-	SCRUPP_SCRAPER_API_KEY: z.string(),
-	SCRUPP_SCRAPER_API_URL: z.url(),
+	SCRUPP_SCRAPER_API_KEY: z.string().optional(),
+	SCRUPP_SCRAPER_API_URL: z.string().url().optional(),
 	SCRUPP_ACCOUNT_EMAIL: z.string().optional(),
   SCRUPP_ACCOUNT_TYPE: z.enum(["linkedin", "apollo"]).optional(),
   SCRUPP_ACCOUNT_COOKIE: z.string().optional(),

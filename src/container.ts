@@ -37,6 +37,10 @@ const allowedTelegramIds = new Set(
 		.filter(Boolean)
 );
 
+const isScraperCityEnabled =
+	Boolean(env.SCRAPERCITY_API_KEY && env.SCRAPERCITY_API_URL);
+const isScruppEnabled = Boolean(env.SCRUPP_SCRAPER_API_KEY && env.SCRUPP_SCRAPER_API_URL);
+
 container
 	.bind<Set<string>>(TELEGRAM_TYPES.AllowedUserIds)
 	.toConstantValue(allowedTelegramIds);
@@ -64,14 +68,20 @@ container
 container
 	.bind<ScraperAdapter>(SCRAPER_TYPES.ScraperAdapter)
 	.toDynamicValue(() => {
-		return new ScraperCityApolloAdapter(env.SCRAPERCITY_API_KEY, true);
+		return new ScraperCityApolloAdapter(
+			env.SCRAPERCITY_API_KEY ?? "",
+			isScraperCityEnabled
+		);
 	})
 	.inSingletonScope();
 
 container
 	.bind<ScraperAdapter>(SCRAPER_TYPES.ScraperAdapter)
 	.toDynamicValue(() => {
-		return new ScruppApolloAdapter(env.SCRUPP_SCRAPER_API_KEY, true);
+		return new ScruppApolloAdapter(
+			env.SCRUPP_SCRAPER_API_KEY ?? "",
+			isScruppEnabled
+		);
 	})
 	.inSingletonScope();
 
@@ -120,7 +130,10 @@ container
 container
 	.bind<LeadDbAdapter>(LEAD_DB_TYPES.LeadDbAdapter)
 	.toDynamicValue(() => {
-		return new ScraperCityLeadDbAdapter(env.SCRAPERCITY_API_KEY, true);
+		return new ScraperCityLeadDbAdapter(
+			env.SCRAPERCITY_API_KEY ?? "",
+			isScraperCityEnabled
+		);
 	})
 	.inSingletonScope();
 

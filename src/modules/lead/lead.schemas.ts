@@ -2,7 +2,7 @@ import { z } from "zod";
 import { LeadSource, LeadStatus } from "@prisma/client";
 
 export const leadInputSchema = z.object({
-  source: z.enum(LeadSource),
+  source: z.enum(LeadSource).default(LeadSource.MANUAL),
   externalId: z.string().optional(),
 
   fullName: z.string().optional(),
