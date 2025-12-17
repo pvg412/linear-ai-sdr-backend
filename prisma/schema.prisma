@@ -48,6 +48,26 @@ enum ScraperRunStatus {
   FAILED
 }
 
+enum UserRole {
+  ADMIN
+  SALE_MANAGER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(SALE_MANAGER)
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+
+  @@index([role])
+  @@index([isActive])
+}
+
 model ScraperRun {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
