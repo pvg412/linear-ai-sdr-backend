@@ -1,0 +1,26 @@
+{
+  "log": {
+    "LogID": "5875125b-8cef-43e8-a613-221da57f328c",
+    "status": "completed",
+    "fileName": "lead_export",
+    "url": "https://docs.google.com/spreadsheets/d/example",
+    "data": [
+      {
+        "id": "609ad97bdba3a000012c76f0",
+        "first_name": "John",
+        "last_name": "Doe",
+        "name": "John Doe",
+        "email": "john.doe@example.com",
+        "personal_email": null,
+        "linkedin_url": "https://www.linkedin.com/in/john-doe/?trk=public_profile",
+        "title": "Chief Technology Officer (CTO)",
+        "organization_name": "Example GmbH",
+        "organization_primary_domain": "www.example.com",
+        "website_url": "https://example.com",
+        "city": "Berlin",
+        "state": "Berlin",
+        "country": "Germany"
+      }
+    ]
+  }
+}

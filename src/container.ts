@@ -10,27 +10,30 @@ import { LEAD_TYPES } from "./modules/lead/lead.types";
 import { LeadRepository } from "./modules/lead/lead.repository";
 import { LeadCommandService } from "./modules/lead/lead.commandService";
 import { LeadQueryService } from "./modules/lead/lead.queryService";
-import { SearchTaskScraperService } from "./modules/scraper/searchTaskScraper.service";
-import { SCRAPER_TYPES } from "./modules/scraper/scraper.types";
-import { ScraperOrchestrator } from "./modules/scraper/scraper.orchestrator";
-import { ScraperAdapter } from "./modules/scraper/scraper.dto";
+import { SearchTaskScraperService } from "./capabilities/scraper/searchTaskScraper.service";
+import { SCRAPER_TYPES } from "./capabilities/scraper/scraper.types";
+import { ScraperOrchestrator } from "./capabilities/scraper/scraper.orchestrator";
+import { ScraperAdapter } from "./capabilities/scraper/scraper.dto";
 import { AiPromptParserService } from "./modules/ai/aiPromptParser.service";
 import { AI_TYPES } from "./modules/ai/ai.types";
 import { TelegramService } from "./modules/telegram/telegram.service";
 import { TELEGRAM_TYPES } from "./modules/telegram/telegram.types";
 import { TelegramClient } from "./modules/telegram/telegram.client";
-import { ScraperCityApolloAdapter } from "./modules/scraper/adapters/scraperCity/scraperCity.adapter";
-import { ScruppApolloAdapter } from "./modules/scraper/adapters/scrupp/scrupp.adapter";
-import { LeadDbOrchestrator } from "./modules/lead-db/lead-db.orchestrator";
-import { SearchTaskLeadDbService } from "./modules/lead-db/searchTaskLeadDb.service";
-import { LEAD_DB_TYPES } from "./modules/lead-db/lead-db.types";
-import type { LeadDbAdapter } from "./modules/lead-db/lead-db.dto";
-import { ScraperCityLeadDbAdapter } from "./modules/lead-db/adapters/scraperCity/scraperCity.adapter";
-import { SearchLeadsLeadDbAdapter } from "./modules/lead-db/adapters/searchLeads/searchLeads.adapter";
+import { ScraperCityApolloAdapter } from "./capabilities/scraper/providers/scraperCity/scraperCity.adapter";
+import { ScruppApolloAdapter } from "./capabilities/scraper/providers/scrupp/scrupp.adapter";
+import { LeadDbOrchestrator } from "./capabilities/lead-db/lead-db.orchestrator";
+import { SearchTaskLeadDbService } from "./capabilities/lead-db/searchTaskLeadDb.service";
+import { LEAD_DB_TYPES } from "./capabilities/lead-db/lead-db.types";
+import type { LeadDbAdapter } from "./capabilities/lead-db/lead-db.dto";
+import { ScraperCityLeadDbAdapter } from "./capabilities/lead-db/providers/scrapercity/scrapercity.adapter";
+import { SearchLeadsLeadDbAdapter } from "./capabilities/lead-db/providers/searchleads/searchleads.adapter";
 
 const container = new Container();
 
 const env = loadEnv();
+
+const isOpenAiEnabled = Boolean(env.OPENAI_API_KEY && env.OPENAI_MODEL);
+const isTelegramEnabled = Boolean(env.TELEGRAM_BOT_ACCESS_TOKEN && isOpenAiEnabled);
 
 const allowedTelegramIds = new Set(
 	env.TELEGRAM_ALLOWED_USER_IDS.split(",")
@@ -48,25 +51,27 @@ const isSearchLeadsEnabled = Boolean(
 	env.SEARCH_LEADS_API_KEY && env.SEARCH_LEADS_API_URL
 );
 
-if (env.NODE_ENV === "production" && allowedTelegramIds.size === 0) {
+if (env.NODE_ENV === "production" && isTelegramEnabled && allowedTelegramIds.size === 0) {
 	throw new Error(
 		"TELEGRAM_ALLOWED_USER_IDS must be set in production to avoid exposing the bot publicly"
 	);
 }
 
-container
-	.bind<Set<string>>(TELEGRAM_TYPES.AllowedUserIds)
-	.toConstantValue(allowedTelegramIds);
+if (isTelegramEnabled) {
+	container
+		.bind<Set<string>>(TELEGRAM_TYPES.AllowedUserIds)
+		.toConstantValue(allowedTelegramIds);
 
-container
-	.bind<TelegramClient>(TELEGRAM_TYPES.TelegramClient)
-	.toDynamicValue(() => new TelegramClient(env.TELEGRAM_BOT_ACCESS_TOKEN))
-	.inSingletonScope();
+	container
+		.bind<TelegramClient>(TELEGRAM_TYPES.TelegramClient)
+		.toDynamicValue(() => new TelegramClient(env.TELEGRAM_BOT_ACCESS_TOKEN!))
+		.inSingletonScope();
 
-container
-	.bind<TelegramService>(TELEGRAM_TYPES.TelegramService)
-	.to(TelegramService)
-	.inSingletonScope();
+	container
+		.bind<TelegramService>(TELEGRAM_TYPES.TelegramService)
+		.to(TelegramService)
+		.inSingletonScope();
+}
 
 container
 	.bind<SearchTaskScraperService>(SCRAPER_TYPES.SearchTaskScraperService)
@@ -109,12 +114,14 @@ container
 	)
 	.inSingletonScope();
 
-container
-	.bind<AiPromptParserService>(AI_TYPES.AiPromptParserService)
-	.toDynamicValue(() => {
-		return new AiPromptParserService(env.OPENAI_API_KEY, env.OPENAI_MODEL);
-	})
-	.inSingletonScope();
+if (isOpenAiEnabled) {
+	container
+		.bind<AiPromptParserService>(AI_TYPES.AiPromptParserService)
+		.toDynamicValue(() => {
+			return new AiPromptParserService(env.OPENAI_API_KEY!, env.OPENAI_MODEL!);
+		})
+		.inSingletonScope();
+}
 
 container
 	.bind<SearchTaskRepository>(SEARCH_TASK_TYPES.SearchTaskRepository)

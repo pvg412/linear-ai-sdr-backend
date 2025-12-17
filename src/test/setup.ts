@@ -23,6 +23,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+	if (!prisma) return;
 	await prisma.$transaction([
 		prisma.lead.deleteMany(),
 		prisma.searchTask.deleteMany(),
@@ -31,8 +32,8 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-	await prisma.$disconnect();
-	await app.close();
+	if (prisma) await prisma.$disconnect();
+	if (app) await app.close();
 });
 
 export { app };

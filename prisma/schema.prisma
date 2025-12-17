@@ -30,6 +30,7 @@ enum LeadSource {
   APOLLO
   SALES_NAVIGATOR
   SEARCH_LEADS
+  SCRAPER_CITY
   MANUAL
 }
 
@@ -155,6 +156,10 @@ model Lead {
   status LeadStatus @default(NEW)
 
   raw Json?
+
+  @@unique([searchTaskId, email])
+  @@unique([searchTaskId, linkedinUrl])
+  @@unique([searchTaskId, source, externalId])
 
   @@index([searchTaskId])
   @@index([email])

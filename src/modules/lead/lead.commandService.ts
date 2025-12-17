@@ -18,21 +18,46 @@ export class LeadCommandService {
 	): Promise<BulkCreateLeadsResponse> {
 		const { searchTaskId, leads } = body;
 
+		const normalizeOptional = (v?: string | null): string | undefined => {
+			const trimmed = typeof v === "string" ? v.trim() : "";
+			return trimmed ? trimmed : undefined;
+		};
+
+		const normalizeEmail = (v?: string | null): string | undefined => {
+			const trimmed = normalizeOptional(v);
+			return trimmed ? trimmed.toLowerCase() : undefined;
+		};
+
+		const normalizeUrl = (v?: string | null): string | undefined => {
+			const trimmed = normalizeOptional(v);
+			return trimmed ? trimmed.toLowerCase() : undefined;
+		};
+
 		const seen = new Set<string>();
 		const data: Prisma.LeadCreateManyInput[] = [];
 
 		for (const lead of leads) {
-			const key =
-				(lead.email?.toLowerCase().trim() ?? "") +
-				"|" +
-				(lead.externalId ?? "");
+			const email = normalizeEmail(lead.email);
+			const linkedinUrl = normalizeUrl(lead.linkedinUrl);
+			const externalId = normalizeOptional(lead.externalId);
 
-			if (key !== "|" && seen.has(key)) continue;
-			if (key !== "|") seen.add(key);
+			const key = email
+				? `email:${email}`
+				: linkedinUrl
+					? `linkedin:${linkedinUrl}`
+					: externalId
+						? `external:${lead.source}:${externalId}`
+						: null;
+
+			if (key && seen.has(key)) continue;
+			if (key) seen.add(key);
 
 			data.push({
 				...lead,
 				searchTaskId,
+				email,
+				linkedinUrl,
+				externalId,
 				raw: lead.raw as Prisma.InputJsonValue | undefined,
 			});
 		}

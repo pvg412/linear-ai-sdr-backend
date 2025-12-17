@@ -1,0 +1,40 @@
+[
+  {
+    "id": "person_1",
+    "name": "Alice Example",
+    "first_name": "Alice",
+    "last_name": "Example",
+    "title": "Chief Technology Officer",
+
+    "company_name": "Example GmbH",
+    "company_domain": "example.com",
+    "company_website": "https://example.com",
+
+    "linkedin_url": "https://www.linkedin.com/in/alice-example/?utm_source=test#fragment",
+    "location": "Berlin, Germany",
+
+    "work_email": "alice@example.com",
+    "email": null,
+
+    "some_unknown_field_from_provider": "keep_me"
+  },
+  {
+    "id": "person_2",
+    "name": null,
+    "first_name": "Bob",
+    "last_name": "Builder",
+    "title": "CTO",
+
+    "company_name": "Builder AG",
+    "company_domain": "www.builder.io",
+    "company_website": "https://builder.io",
+
+    "linkedin_url": "https://www.linkedin.com/in/bob-builder/",
+    "location": "Munich, Germany",
+
+    "work_email": null,
+    "email": null,
+
+    "another_unknown_field": 123
+  }
+]

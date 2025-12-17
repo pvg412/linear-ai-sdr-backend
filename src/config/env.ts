@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+const optionalTrimmedString = z
+	.string()
+	.optional()
+	.transform((v) => {
+		if (typeof v !== "string") return undefined;
+		const trimmed = v.trim();
+		return trimmed ? trimmed : undefined;
+	});
+
 const EnvSchema = z.object({
 	NODE_ENV: z
 		.enum(["development", "production", "test"])
@@ -20,14 +29,14 @@ const EnvSchema = z.object({
 	AUTH_INITIAL_ADMIN_EMAIL: z.email().optional(),
 	AUTH_INITIAL_ADMIN_PASSWORD: z.string().min(8).optional(),
 
-	TELEGRAM_BOT_ACCESS_TOKEN: z.string(),
+	TELEGRAM_BOT_ACCESS_TOKEN: optionalTrimmedString,
 	TELEGRAM_ALLOWED_USER_IDS: z.string().default(""),
 
-	OPENAI_API_KEY: z.string(),
-	OPENAI_MODEL: z.string(),
+	OPENAI_API_KEY: optionalTrimmedString,
+	OPENAI_MODEL: optionalTrimmedString,
 
 	SCRAPERCITY_API_KEY: z.string().optional(),
-  SCRAPERCITY_API_URL: z.url().optional(),
+	SCRAPERCITY_API_URL: z.url().optional(),
 
 	SEARCH_LEADS_API_KEY: z.string().optional(),
 	SEARCH_LEADS_API_URL: z.url().optional(),
@@ -35,13 +44,13 @@ const EnvSchema = z.object({
 	SCRUPP_SCRAPER_API_KEY: z.string().optional(),
 	SCRUPP_SCRAPER_API_URL: z.url().optional(),
 	SCRUPP_ACCOUNT_EMAIL: z.string().optional(),
-  SCRUPP_ACCOUNT_TYPE: z.enum(["linkedin", "apollo"]).optional(),
-  SCRUPP_ACCOUNT_COOKIE: z.string().optional(),
-  SCRUPP_ACCOUNT_AGENT: z.string().optional(),
-  SCRUPP_ACCOUNT_PREMIUM: z
-    .string()
-    .optional()
-    .transform((v) => v === "true"),
+	SCRUPP_ACCOUNT_TYPE: z.enum(["linkedin", "apollo"]).optional(),
+	SCRUPP_ACCOUNT_COOKIE: z.string().optional(),
+	SCRUPP_ACCOUNT_AGENT: z.string().optional(),
+	SCRUPP_ACCOUNT_PREMIUM: z
+		.string()
+		.optional()
+		.transform((v) => v === "true"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -51,6 +60,12 @@ export const loadEnv = (): Env => {
 	if (!parsed.success) {
 		console.error(z.treeifyError(parsed.error));
 		throw new Error("Invalid environment variables");
+	}
+
+	const hasOpenAiKey = typeof parsed.data.OPENAI_API_KEY === "string";
+	const hasOpenAiModel = typeof parsed.data.OPENAI_MODEL === "string";
+	if (hasOpenAiKey !== hasOpenAiModel) {
+		throw new Error("OPENAI_API_KEY and OPENAI_MODEL must be set together");
 	}
 
 	if (

@@ -5,14 +5,14 @@ import { SEARCH_TASK_TYPES } from "../search-task/search-task.types";
 import { SearchTaskCommandService } from "../search-task/search-task.commandService";
 import { SearchTaskQueryService } from "../search-task/search-task.queryService";
 
-import { SCRAPER_TYPES } from "../scraper/scraper.types";
-import { SearchTaskScraperService } from "../scraper/searchTaskScraper.service";
+import { SCRAPER_TYPES } from "@/capabilities/scraper/scraper.types";
+import { SearchTaskScraperService } from "@/capabilities/scraper/searchTaskScraper.service";
 
-import { LEAD_DB_TYPES } from "../lead-db/lead-db.types";
-import { SearchTaskLeadDbService } from "../lead-db/searchTaskLeadDb.service";
+import { LEAD_DB_TYPES } from "@/capabilities/lead-db/lead-db.types";
+import { SearchTaskLeadDbService } from "@/capabilities/lead-db/searchTaskLeadDb.service";
 
-import { AI_TYPES } from "../ai/ai.types";
-import { AiPromptParserService } from "../ai/aiPromptParser.service";
+import { AI_TYPES } from "@/modules/ai/ai.types";
+import { AiPromptParserService } from "@/modules/ai/aiPromptParser.service";
 
 import { TELEGRAM_TYPES } from "./telegram.types";
 import { InlineKeyboardMarkup, TelegramClient } from "./telegram.client";
@@ -23,7 +23,7 @@ import {
   industryToKeywordTokens,
   resolveScraperCityCompanyIndustry,
   shouldMoveIndustryToKeywords,
-} from "../lead-db/adapters/scraperCity/scraperCity.companyIndustryResolver";
+} from "@/capabilities/lead-db/providers/scrapercity/resolvers/scrapercity.companyIndustry.resolver";
 
 const CB = {
   methodDb: "method:LEAD_DB",
