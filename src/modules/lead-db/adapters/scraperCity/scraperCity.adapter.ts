@@ -395,6 +395,10 @@ export class ScraperCityLeadDbAdapter implements LeadDbAdapter {
 	}
 
 	private buildDownloadUrl(runId: string, outputUrl?: string | null): string {
+		if (!env.SCRAPERCITY_API_URL) {
+			throw new Error("SCRAPERCITY_API_URL is not set");
+		}
+
 		if (outputUrl) {
 			const origin = new URL(env.SCRAPERCITY_API_URL).origin;
 			const path = outputUrl.startsWith("/") ? outputUrl : `/${outputUrl}`;

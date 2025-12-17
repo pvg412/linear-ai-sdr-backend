@@ -26,6 +26,7 @@ import { SearchTaskLeadDbService } from "./modules/lead-db/searchTaskLeadDb.serv
 import { LEAD_DB_TYPES } from "./modules/lead-db/lead-db.types";
 import type { LeadDbAdapter } from "./modules/lead-db/lead-db.dto";
 import { ScraperCityLeadDbAdapter } from "./modules/lead-db/adapters/scraperCity/scraperCity.adapter";
+import { SearchLeadsLeadDbAdapter } from "./modules/lead-db/adapters/searchLeads/searchLeads.adapter";
 
 const container = new Container();
 
@@ -37,9 +38,15 @@ const allowedTelegramIds = new Set(
 		.filter(Boolean)
 );
 
-const isScraperCityEnabled =
-	Boolean(env.SCRAPERCITY_API_KEY && env.SCRAPERCITY_API_URL);
-const isScruppEnabled = Boolean(env.SCRUPP_SCRAPER_API_KEY && env.SCRUPP_SCRAPER_API_URL);
+const isScraperCityEnabled = Boolean(
+	env.SCRAPERCITY_API_KEY && env.SCRAPERCITY_API_URL
+);
+const isScruppEnabled = Boolean(
+	env.SCRUPP_SCRAPER_API_KEY && env.SCRUPP_SCRAPER_API_URL
+);
+const isSearchLeadsEnabled = Boolean(
+	env.SEARCH_LEADS_API_KEY && env.SEARCH_LEADS_API_URL
+);
 
 if (env.NODE_ENV === "production" && allowedTelegramIds.size === 0) {
 	throw new Error(
@@ -92,6 +99,17 @@ container
 	.inSingletonScope();
 
 container
+	.bind<LeadDbAdapter>(LEAD_DB_TYPES.LeadDbAdapter)
+	.toDynamicValue(
+		() =>
+			new SearchLeadsLeadDbAdapter(
+				env.SEARCH_LEADS_API_KEY ?? "",
+				isSearchLeadsEnabled
+			)
+	)
+	.inSingletonScope();
+
+container
 	.bind<AiPromptParserService>(AI_TYPES.AiPromptParserService)
 	.toDynamicValue(() => {
 		return new AiPromptParserService(env.OPENAI_API_KEY, env.OPENAI_MODEL);
@@ -129,9 +147,9 @@ container
 	.inSingletonScope();
 
 container
-  .bind<LeadDbOrchestrator>(LEAD_DB_TYPES.LeadDbOrchestrator)
-  .to(LeadDbOrchestrator)
-  .inSingletonScope();
+	.bind<LeadDbOrchestrator>(LEAD_DB_TYPES.LeadDbOrchestrator)
+	.to(LeadDbOrchestrator)
+	.inSingletonScope();
 
 container
 	.bind<LeadDbAdapter>(LEAD_DB_TYPES.LeadDbAdapter)
@@ -144,8 +162,8 @@ container
 	.inSingletonScope();
 
 container
-  .bind<SearchTaskLeadDbService>(LEAD_DB_TYPES.SearchTaskLeadDbService)
-  .to(SearchTaskLeadDbService)
-  .inSingletonScope();
+	.bind<SearchTaskLeadDbService>(LEAD_DB_TYPES.SearchTaskLeadDbService)
+	.to(SearchTaskLeadDbService)
+	.inSingletonScope();
 
 export { container };
