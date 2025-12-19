@@ -1,16 +1,16 @@
 import { injectable } from "inversify";
-import { ScraperProvider } from "@prisma/client";
+import { LeadProvider } from "@prisma/client";
 
 import type { LeadDbAdapter, LeadDbAdapterResult, LeadDbQuery } from "@/capabilities/lead-db/lead-db.dto";
 import { buildScraperCityPayload } from "./scrapercity.filterMapper";
 import { ScraperCityClient } from "./scrapercity.client";
 import { mapScraperCityRowsToLeads } from "./scrapercity.leadMapper";
-import { validateNormalizedLeads } from "@/capabilities/lead-db/shared/leadValidate";
+import { validateNormalizedLeads } from "@/capabilities/shared/leadValidate";
 import { wrapScraperCityAxiosError } from "./scrapercity.errors";
 
 @injectable()
 export class ScraperCityLeadDbAdapter implements LeadDbAdapter {
-  public readonly provider = ScraperProvider.SCRAPER_CITY;
+  public readonly provider = LeadProvider.SCRAPER_CITY;
 
   private readonly client: ScraperCityClient;
 
@@ -39,7 +39,7 @@ export class ScraperCityLeadDbAdapter implements LeadDbAdapter {
 
       const leads = validateNormalizedLeads(leadsRaw, {
         mode: "drop",
-        provider: ScraperProvider.SCRAPER_CITY,
+        provider: LeadProvider.SCRAPER_CITY,
         minValid: 0, // allow empty result
       });
 

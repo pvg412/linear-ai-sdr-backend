@@ -2,7 +2,7 @@ import axios from "axios";
 import z from "zod";
 
 import { loadEnv } from "@/config/env";
-import { pollUntil } from "@/capabilities/lead-db/shared/polling";
+import { pollUntil } from "@/capabilities/shared/polling";
 import {
 	ScraperCityStartResponseSchema,
 	ScraperCityStatusResponseSchema,

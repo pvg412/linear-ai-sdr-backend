@@ -3,7 +3,7 @@ import {
   isAxiosError,
   formatAxiosErrorForLog,
   safeJson,
-} from "@/capabilities/lead-db/shared/axiosError";
+} from "@/capabilities/shared/axiosError";
 
 type UnknownRecord = Record<string, unknown>;
 

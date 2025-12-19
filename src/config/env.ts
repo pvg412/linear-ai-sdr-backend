@@ -29,9 +29,6 @@ const EnvSchema = z.object({
 	AUTH_INITIAL_ADMIN_EMAIL: z.email().optional(),
 	AUTH_INITIAL_ADMIN_PASSWORD: z.string().min(8).optional(),
 
-	TELEGRAM_BOT_ACCESS_TOKEN: optionalTrimmedString,
-	TELEGRAM_ALLOWED_USER_IDS: z.string().default(""),
-
 	OPENAI_API_KEY: optionalTrimmedString,
 	OPENAI_MODEL: optionalTrimmedString,
 

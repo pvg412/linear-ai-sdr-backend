@@ -9,7 +9,7 @@ We isolate provider-specific logic to keep the core Lead DB flow consistent and 
 - **Adapter must stay thin**: orchestration only, no heavy mapping/parsing inside it.
 - **Client is HTTP-only**: network calls + polling + Zod validation of responses.
 - **FilterMapper is input-only**: canonical filters → provider payload.
-- **LeadMapper is output-only**: provider rows → `NormalizedLeadForCreate`.
+- **LeadMapper is output-only**: provider rows → `NormalizedLead`.
 - **Errors layer**: translate provider errors → `UserFacingError` when possible.
 - Always keep the final output in **our unified Lead shape**.
 
@@ -70,7 +70,7 @@ tests/
 - parse responses via Zod schemas (Guarantee A)
 
 **Does NOT:**
-- know about `LeadDbQuery` or `NormalizedLeadForCreate`.
+- know about `LeadDbQuery` or `NormalizedLead`.
 
 ---
 
@@ -95,7 +95,7 @@ tests/
 ---
 
 ### `<provider>.leadMapper.ts`
-**Purpose:** provider rows → `NormalizedLeadForCreate[]`.  
+**Purpose:** provider rows → `NormalizedLead[]`.  
 **Does:**
 - map fields into our standard Lead shape
 - use `shared/leadNormalize.ts`

@@ -2,7 +2,7 @@
 
 ## Project Structure & Modules
 - Application source lives in `src` with Fastify bootstrapping in `src/main.ts` and `src/server.ts`.
-- Domain logic is grouped under `src/modules` (AI, lead, lead-db, scraper, search-task, telegram) with DI wiring in `src/container.ts`.
+- Domain logic is grouped under `src/modules` (AI, chat, lead, lead-db, scraper, search-task) with DI wiring in `src/container.ts`.
 - Shared config sits in `src/config` (environment validation via Zod). Test helpers live in `src/test`.
 - Database schema and migrations are in `prisma/`; generated client outputs to `node_modules/.prisma` during dev.
 - Docker support (`Dockerfile`, `docker-compose.yml`) targets a Postgres-backed API.
@@ -23,7 +23,7 @@
 ## Testing Guidelines
 - Vitest is the test runner; bootstrap logic lives in `src/test/setup.ts`.
 - Co-locate unit tests near modules or in `src/test` and name with `.spec.ts`.
-- Aim for coverage on critical service methods (scraper integrations, lead status transitions, env validation). Mock external HTTP/Telegram/OpenAI calls.
+- Aim for coverage on critical service methods (scraper integrations, lead status transitions, env validation). Mock external HTTP/OpenAI calls.
 - Run `pnpm test` before opening a PR; include new fixtures/mocks when adding providers.
 
 ## Commit & Pull Request Practices
@@ -32,5 +32,5 @@
 - PRs should describe behavior changes, list key commands run (tests/lint/migrations), and link issues. Include API contract notes or screenshots for user-facing changes.
 
 ## Security & Configuration
-- Required env vars are validated via `src/config/env.ts`; ensure `.env` (or deployment secrets) provides DB URL, OpenAI, Telegram, and scraper credentials.
+- Required env vars are validated via `src/config/env.ts`; ensure `.env` (or deployment secrets) provides DB URL, OpenAI, and scraper credentials.
 - When adding new providers, enforce URL/API key checks in the env schema and avoid logging sensitive values.

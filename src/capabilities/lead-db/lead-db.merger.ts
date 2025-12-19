@@ -1,13 +1,13 @@
 import type {
   LeadDbAdapterResult,
-  NormalizedLeadForCreate,
 } from "./lead-db.dto";
+import { NormalizedLead } from "../shared/leadValidate";
 
 export function mergeAndTrimLeadDbResults(
   providerResults: LeadDbAdapterResult[],
   limit: number,
-): NormalizedLeadForCreate[] {
-  const out: NormalizedLeadForCreate[] = [];
+): NormalizedLead[] {
+  const out: NormalizedLead[] = [];
   const seen = new Set<string>();
 
   for (const r of providerResults) {
@@ -24,7 +24,7 @@ export function mergeAndTrimLeadDbResults(
   return out;
 }
 
-function buildLeadDedupeKey(lead: NormalizedLeadForCreate): string | null {
+function buildLeadDedupeKey(lead: NormalizedLead): string | null {
   const norm = (v?: string) => (v ?? "").trim().toLowerCase();
 
   const email = norm(lead.email);

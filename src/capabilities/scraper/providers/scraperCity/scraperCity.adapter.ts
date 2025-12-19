@@ -1,21 +1,21 @@
 import axios, { AxiosError } from "axios";
 import { injectable } from "inversify";
-import { ScraperProvider, LeadSource } from "@prisma/client";
+import { LeadProvider } from "@prisma/client";
 
 import { loadEnv } from "@/config/env";
 import {
-	NormalizedLeadForCreate,
 	ScrapeQuery,
 	ScraperAdapter,
 	ScraperAdapterResult,
 } from "@/capabilities/scraper/scraper.dto";
 import { ScraperCityApolloRow } from "./scraperCity.dto";
+import { NormalizedLead } from "@/capabilities/shared/leadValidate";
 
 const env = loadEnv();
 
 @injectable()
 export class ScraperCityApolloAdapter implements ScraperAdapter {
-	public readonly provider = ScraperProvider.SCRAPER_CITY;
+	public readonly provider = LeadProvider.SCRAPER_CITY;
 
 	constructor(
 		private readonly apiKey: string,
@@ -101,8 +101,8 @@ export class ScraperCityApolloAdapter implements ScraperAdapter {
 				rows: Array.isArray(rows) ? rows.length : 0,
 			});
 
-			const leads: NormalizedLeadForCreate[] = rows.map((row) => ({
-				source: LeadSource.APOLLO,
+			const leads: NormalizedLead[] = rows.map((row) => ({
+				source: LeadProvider.SCRAPER_CITY,
 
 				externalId: row.id ?? undefined,
 

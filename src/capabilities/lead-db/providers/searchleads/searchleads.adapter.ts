@@ -1,5 +1,5 @@
 import { injectable } from "inversify";
-import { ScraperProvider } from "@prisma/client";
+import { LeadProvider } from "@prisma/client";
 
 import type {
   LeadDbAdapter,
@@ -9,12 +9,12 @@ import type {
 import { buildSearchLeadsCreateExportRequest } from "./searchleads.filterMapper";
 import { SearchLeadsClient } from "./searchleads.client";
 import { mapSearchLeadsRowsToLeads } from "./searchleads.leadMapper";
-import { validateNormalizedLeads } from "@/capabilities/lead-db/shared/leadValidate";
+import { validateNormalizedLeads } from "@/capabilities/shared/leadValidate";
 import { wrapSearchLeadsAxiosError } from "./searchleads.errors";
 
 @injectable()
 export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
-  public readonly provider = ScraperProvider.SEARCH_LEADS;
+  public readonly provider = LeadProvider.SEARCH_LEADS;
 
   private readonly client: SearchLeadsClient;
 
@@ -43,7 +43,7 @@ export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
 
       const leads = validateNormalizedLeads(leadsRaw, {
         mode: "drop",
-        provider: ScraperProvider.SEARCH_LEADS,
+        provider: LeadProvider.SEARCH_LEADS,
         minValid: 0, // allow empty result
       });
 

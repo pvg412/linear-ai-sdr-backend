@@ -7,7 +7,7 @@ import {
   type AxiosRequestConfig,
   type AxiosResponse,
 } from "axios";
-import { ScraperProvider } from "@prisma/client";
+import { LeadProvider } from "@prisma/client";
 
 import {
   SearchLeadsCreateExportResponseSchema,
@@ -16,7 +16,7 @@ import {
   type SearchLeadsLeadRow,
 } from "../searchleads.schemas";
 import { mapSearchLeadsRowsToLeads } from "../searchleads.leadMapper";
-import { validateNormalizedLeads } from "@/capabilities/lead-db/shared/leadValidate";
+import { validateNormalizedLeads } from "@/capabilities/shared/leadValidate";
 import { wrapSearchLeadsAxiosError } from "../searchleads.errors";
 import { UserFacingError } from "@/infra/userFacingError";
 
@@ -94,7 +94,7 @@ describe("SearchLeads contract", () => {
 
     const validated = validateNormalizedLeads(leads, {
       mode: "strict",
-      provider: ScraperProvider.SEARCH_LEADS,
+      provider: LeadProvider.SEARCH_LEADS,
       minValid: 1,
     });
 

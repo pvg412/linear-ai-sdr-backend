@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,7 +6,7 @@ datasource db {
   provider = "postgresql"
 }
 
-enum SearchTaskStatus {
+enum LeadSearchStatus {
   PENDING
   RUNNING
   DONE
@@ -17,24 +14,13 @@ enum SearchTaskStatus {
   FAILED
 }
 
-enum LeadStatus {
-  NEW
-  CONTACTED
-  REPLIED
-  QUALIFIED
-  DISQUALIFIED
+enum LeadSearchRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
 }
 
-enum LeadSource {
-  AMPLELEADS
-  APOLLO
-  SALES_NAVIGATOR
-  SEARCH_LEADS
-  SCRAPER_CITY
-  MANUAL
-}
-
-enum ScraperProvider {
+enum LeadProvider {
   SCRAPER_CITY
   SEARCH_LEADS
   BOOMERANG
@@ -43,10 +29,16 @@ enum ScraperProvider {
   SCRUPP
 }
 
-enum ScraperRunStatus {
-  RUNNING
-  SUCCESS
-  FAILED
+enum LeadOrigin {
+  PROVIDER
+  MANUAL
+  CSV_IMPORT
+}
+
+enum LeadListStatus {
+  NEW
+  CONTACTED
+  REPLIED
 }
 
 enum UserRole {
@@ -54,81 +46,110 @@ enum UserRole {
   SALE_MANAGER
 }
 
-model User {
-  id           String   @id @default(cuid())
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+enum LeadSearchKind {
+  LEAD_DB
+  SCRAPER
+}
 
-  email        String   @unique
+enum ChatMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum ChatMessageType {
+  TEXT
+  JSON
+  EVENT
+}
+
+model User {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  email        String    @unique
   passwordHash String
-  role         UserRole @default(SALE_MANAGER)
-  isActive     Boolean  @default(true)
+  role         UserRole  @default(SALE_MANAGER)
+  isActive     Boolean   @default(true)
   lastLoginAt  DateTime?
+
+  leadSearchesCreated     LeadSearch[]    @relation("LeadSearchCreatedBy")
+  leadSearchRunsTriggered LeadSearchRun[] @relation("LeadSearchRunTriggeredBy")
+
+  leadsCreated    Lead[]           @relation("LeadCreatedBy")
+  leadSearchLeads LeadSearchLead[]
+  chatFolders     ChatFolder[]     @relation("ChatFolderOwner")
+  chatThreads     ChatThread[]     @relation("ChatThreadOwner")
+  chatMessages    ChatMessage[]    @relation("ChatMessageAuthor")
 
   @@index([role])
   @@index([isActive])
 }
 
-model ScraperRun {
+model LeadSearch {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  searchTaskId String
-  searchTask   SearchTask @relation(fields: [searchTaskId], references: [id])
+  createdById String
+  createdBy   User   @relation("LeadSearchCreatedBy", fields: [createdById], references: [id])
 
-  provider      ScraperProvider
-  status        ScraperRunStatus
-  errorMessage  String?
-  leadsCount    Int?
-  externalRunId String?
-  meta          Json?
+  provider LeadProvider
+  kind     LeadSearchKind
 
-  @@index([searchTaskId])
-  @@index([provider, status])
-}
+  capability LeadProviderCapability @relation(fields: [provider, kind], references: [provider, kind])
 
-model SearchTask {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  threadId String?
+  thread   ChatThread? @relation(fields: [threadId], references: [id], onDelete: SetNull)
 
-  prompt String
+  prompt String?
+  query  Json
+  limit  Int
 
-  industry    String?
-  titles      String[]
-  locations   String[]
-  companySize String?
-  limit       Int
-
-  status SearchTaskStatus @default(PENDING)
-  source LeadSource
-
-  chatId            String?
-  telegramUserId    String?
-  telegramMessageId String?
-
-  apolloUrl     String?
-  fileName      String?
-  runId         String?
-  lastCheckedAt DateTime?
-
+  status       LeadSearchStatus @default(PENDING)
   totalLeads   Int?
   errorMessage String?
 
-  leadDbFilters Json?
+  runs         LeadSearchRun[]
+  leads        LeadSearchLead[]
+  chatMessages ChatMessage[]
 
-  leads Lead[]
-
-  scraperProvider ScraperProvider?
-  scraperRuns     ScraperRun[]
-
-  campaignId String?
-  campaign   Campaign? @relation(fields: [campaignId], references: [id])
-
+  @@index([createdById])
   @@index([status])
-  @@index([runId])
-  @@index([chatId])
+  @@index([threadId])
+  @@index([provider, kind])
+}
+
+model LeadSearchRun {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leadSearchId String
+  leadSearch   LeadSearch @relation(fields: [leadSearchId], references: [id], onDelete: Cascade)
+
+  provider LeadProvider
+  attempt  Int          @default(1)
+
+  triggeredById String?
+  triggeredBy   User?   @relation("LeadSearchRunTriggeredBy", fields: [triggeredById], references: [id])
+
+  status       LeadSearchRunStatus @default(RUNNING)
+  errorMessage String?
+
+  leadsCount    Int?
+  externalRunId String?
+
+  requestPayload Json?
+  responseMeta   Json?
+
+  results LeadSearchRunResult[]
+
+  @@unique([leadSearchId, provider, attempt])
+  @@index([leadSearchId])
+  @@index([provider, status])
+  @@index([triggeredById])
 }
 
 model Lead {
@@ -136,11 +157,10 @@ model Lead {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  searchTaskId String
-  searchTask   SearchTask @relation(fields: [searchTaskId], references: [id])
+  origin LeadOrigin @default(PROVIDER)
 
-  source     LeadSource
-  externalId String?
+  createdById String?
+  createdBy   User?   @relation("LeadCreatedBy", fields: [createdById], references: [id])
 
   fullName      String?
   firstName     String?
@@ -151,34 +171,153 @@ model Lead {
   companyUrl    String?
   linkedinUrl   String?
   location      String?
+  email         String?
 
-  email  String?
-  status LeadStatus @default(NEW)
+  meta Json?
 
-  raw Json?
+  providerRefs LeadProviderRef[]
+  searches     LeadSearchLead[]
+  runResults   LeadSearchRunResult[]
 
-  @@unique([searchTaskId, email])
-  @@unique([searchTaskId, linkedinUrl])
-  @@unique([searchTaskId, source, externalId])
-
-  @@index([searchTaskId])
+  @@unique([email])
+  @@unique([linkedinUrl])
   @@index([email])
-  @@index([status])
+  @@index([linkedinUrl])
+  @@index([companyDomain])
 }
 
-model Campaign {
+model LeadProviderRef {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  name        String
-  description String?
+  provider   LeadProvider
+  externalId String
 
-  provider    String?
-  externalId  String?
-  externalUrl String?
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
-  searchTasks SearchTask[]
+  @@unique([provider, externalId])
+  @@index([leadId])
+}
 
-  @@index([provider, externalId])
+model LeadSearchLead {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leadSearchId String
+  leadSearch   LeadSearch @relation(fields: [leadSearchId], references: [id], onDelete: Cascade)
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  status LeadListStatus @default(NEW)
+  notes  String?
+
+  assignedToId String?
+  assignedTo   User?   @relation(fields: [assignedToId], references: [id])
+
+  @@unique([leadSearchId, leadId])
+  @@index([leadSearchId, status])
+  @@index([assignedToId])
+}
+
+model LeadSearchRunResult {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  runId String
+  run   LeadSearchRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  provider           LeadProvider
+  providerExternalId String?
+
+  raw Json?
+
+  @@unique([runId, leadId])
+  @@index([runId])
+  @@index([leadId])
+  @@index([provider, providerExternalId])
+}
+
+model LeadProviderCapability {
+  provider LeadProvider
+  kind     LeadSearchKind
+
+  label        String?
+  description  String?
+  leadSearches LeadSearch[]
+
+  @@id([provider, kind])
+}
+
+model ChatFolder {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ownerId String
+  owner   User   @relation("ChatFolderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  name String
+
+  threads ChatThread[]
+
+  @@unique([ownerId, name])
+  @@index([ownerId])
+}
+
+model ChatThread {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ownerId String
+  owner   User   @relation("ChatThreadOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  folderId String?
+  folder   ChatFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
+  title String?
+
+  defaultProvider LeadProvider?
+  defaultKind     LeadSearchKind?
+
+  lastMessageAt DateTime?
+  meta          Json?
+
+  messages     ChatMessage[]
+  leadSearches LeadSearch[]
+
+  @@index([ownerId, updatedAt])
+  @@index([folderId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  threadId String
+  thread   ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  role ChatMessageRole
+  type ChatMessageType @default(TEXT)
+
+  authorUserId String?
+  authorUser   User?   @relation("ChatMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  text    String?
+  payload Json?
+
+  leadSearchId String?
+  leadSearch   LeadSearch? @relation(fields: [leadSearchId], references: [id], onDelete: SetNull)
+
+  @@index([threadId, createdAt])
+  @@index([authorUserId])
+  @@index([leadSearchId])
 }

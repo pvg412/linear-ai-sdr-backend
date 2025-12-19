@@ -1,4 +1,4 @@
-import { ScraperProvider } from "@prisma/client";
+import { LeadProvider } from "@prisma/client";
 import type {
 	LeadDbCanonicalFilters,
 	LeadDbQuery,
@@ -91,7 +91,7 @@ export function buildSearchLeadsCreateExportRequest(query: LeadDbQuery): {
 	const noOfLeads = normalizeNoOfLeads(query.limit);
 	const fileName = normalizeFileName(query.fileName) ?? `search_${Date.now()}`;
 
-	const override = query.providerOverrides?.[ScraperProvider.SEARCH_LEADS];
+	const override = query.providerOverrides?.[LeadProvider.SEARCH_LEADS];
 	if (isRecord(override)) {
 		const filter = sanitizeFilter(override as SearchLeadsFilter, noOfLeads);
 		return {

@@ -1,4 +1,4 @@
-import { ScraperProvider } from "@prisma/client";
+import { LeadProvider } from "@prisma/client";
 import type { LeadDbQuery } from "@/capabilities/lead-db/lead-db.dto";
 import { UserFacingError } from "@/infra/userFacingError";
 
@@ -55,7 +55,7 @@ export function buildScraperCityPayload(
 	const count = normalizeCount(query.limit);
 	const fileName = normalizeFileName(query.fileName);
 
-	const override = query.providerOverrides?.[ScraperProvider.SCRAPER_CITY];
+	const override = query.providerOverrides?.[LeadProvider.SCRAPER_CITY];
 	if (isRecord(override)) {
 		const payload: Record<string, unknown> = {
 			...override,

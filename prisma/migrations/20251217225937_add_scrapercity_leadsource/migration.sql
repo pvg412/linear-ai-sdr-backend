@@ -1,2 +1,0 @@
--- AlterEnum
-ALTER TYPE "LeadSource" ADD VALUE 'SCRAPER_CITY';

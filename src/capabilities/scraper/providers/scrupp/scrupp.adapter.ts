@@ -1,15 +1,15 @@
 import axios, { AxiosError } from "axios";
 import { injectable } from "inversify";
-import { LeadSource, ScraperProvider } from "@prisma/client";
+import { LeadProvider } from "@prisma/client";
 
 import { loadEnv } from "@/config/env";
 import {
-  NormalizedLeadForCreate,
   ScrapeQuery,
   ScraperAdapter,
   ScraperAdapterResult,
 } from "@/capabilities/scraper/scraper.dto";
 import { ScruppApolloRow } from "./scrupp.dto";
+import { NormalizedLead } from "@/capabilities/shared/leadValidate";
 
 const env = loadEnv();
 
@@ -28,7 +28,7 @@ const scruppAccount =
 
 @injectable()
 export class ScruppApolloAdapter implements ScraperAdapter {
-  public readonly provider = ScraperProvider.SCRUPP;
+  public readonly provider = LeadProvider.SCRUPP;
 
   constructor(
     private readonly apiKey: string,
@@ -64,8 +64,8 @@ export class ScruppApolloAdapter implements ScraperAdapter {
       const rows = res.data;
       console.log("[Scrupp] rows length:", rows.length);
 
-      const leads: NormalizedLeadForCreate[] = rows.map((row) => ({
-        source: LeadSource.APOLLO,
+      const leads: NormalizedLead[] = rows.map((row) => ({
+        source: LeadProvider.SCRUPP,
 
         externalId: row.id ?? undefined,
 

@@ -1,5 +1,5 @@
 import { UserFacingError } from "@/infra/userFacingError";
-import { isAxiosError, formatAxiosErrorForLog } from "@/capabilities/lead-db/shared/axiosError";
+import { isAxiosError, formatAxiosErrorForLog } from "@/capabilities/shared/axiosError";
 import { SCRAPERCITY_ALLOWED_COMPANY_INDUSTRIES } from "./allowlists/scrapercity.allowedIndustries";
 
 type UnknownRecord = Record<string, unknown>;

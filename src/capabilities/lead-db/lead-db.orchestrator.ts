@@ -1,215 +1,114 @@
 import { injectable, multiInject } from "inversify";
-import {
-  PrismaClient,
-  ScraperProvider,
-  ScraperRunStatus,
-} from "@prisma/client";
+import { LeadProvider } from "@prisma/client";
 
-import { getPrisma } from "@/infra/prisma";
-import {
-  LeadDbAdapter,
-  LeadDbAdapterResult,
-  LeadDbOrchestratorOptions,
-  LeadDbOrchestratorResult,
-  LeadDbQuery,
+import type {
+	LeadDbAdapter,
+	LeadDbAdapterResult,
+	LeadDbOrchestratorOptions,
+	LeadDbOrchestratorResult,
+	LeadDbQuery,
 } from "./lead-db.dto";
 import { LEAD_DB_TYPES } from "./lead-db.types";
 import { msSince, nowNs, type LoggerLike } from "@/infra/observability";
 
 @injectable()
 export class LeadDbOrchestrator {
-  private readonly prisma: PrismaClient = getPrisma();
+	constructor(
+		@multiInject(LEAD_DB_TYPES.LeadDbAdapter)
+		private readonly adapters: LeadDbAdapter[]
+	) {}
 
-  constructor(
-    @multiInject(LEAD_DB_TYPES.LeadDbAdapter)
-    private readonly adapters: LeadDbAdapter[],
-  ) {}
+	private getAdapter(provider: LeadProvider): LeadDbAdapter | undefined {
+		return this.adapters.find((a) => a.provider === provider);
+	}
 
-  private getAdapter(provider: ScraperProvider): LeadDbAdapter | undefined {
-    return this.adapters.find((a) => a.provider === provider);
-  }
+	/**
+	 * Sequential orchestrator.
+	 * - No DB writes here (runner owns persistence + statuses).
+	 * - Tries providers in order.
+	 * - Can stop on first success (default true).
+	 */
+	async scrape(
+		leadSearchId: string,
+		query: LeadDbQuery,
+		options: LeadDbOrchestratorOptions,
+		log?: LoggerLike
+	): Promise<LeadDbOrchestratorResult> {
+		const t0 = nowNs();
 
-  async scrapeParallel(
-    searchTaskId: string,
-    query: LeadDbQuery,
-    options: LeadDbOrchestratorOptions,
-    log?: LoggerLike,
-  ): Promise<LeadDbOrchestratorResult> {
-    const t0 = nowNs();
-    const { providersOrder } = options;
+		const providersOrder = options.providersOrder ?? [];
+		if (providersOrder.length === 0) {
+			throw new Error("LeadDbOrchestrator: providersOrder is empty");
+		}
 
-    const errors: Partial<Record<ScraperProvider, string>> = {};
+		const stopOnFirstSuccess = options.stopOnFirstSuccess ?? true;
 
-    const enabledProviders = providersOrder.filter((provider) => {
-      const a = this.getAdapter(provider);
-      return a && a.isEnabled();
-    });
+		const errors: Partial<Record<LeadProvider, string>> = {};
+		const providerResults: LeadDbAdapterResult[] = [];
 
-    if (enabledProviders.length === 0) {
-      throw new Error(
-        `No enabled lead DB adapters for providers: ${providersOrder.join(", ")}`,
-      );
-    }
+		log?.info(
+			{ leadSearchId, providersOrder, stopOnFirstSuccess, limit: query.limit },
+			"Lead DB orchestrator: starting (sequential)"
+		);
 
-    log?.info(
-      { searchTaskId, providersOrder, enabledProviders, limit: query.limit },
-      "Lead DB orchestrator: starting providers",
-    );
+		for (const provider of providersOrder) {
+			const adapter = this.getAdapter(provider);
 
-    const tasks = enabledProviders.map((provider) => ({
-      provider,
-      promise: this.runProvider(
-        searchTaskId,
-        provider,
-        query,
-        log?.child ? log.child({ provider }) : log,
-      ),
-    }));
+			if (!adapter) {
+				const msg = "Adapter is not registered in DI container";
+				errors[provider] = msg;
+				log?.error({ leadSearchId, provider }, msg);
+				continue;
+			}
 
-    const settled = await Promise.allSettled(tasks.map((t) => t.promise));
+			if (!adapter.isEnabled()) {
+				const msg = "Adapter is disabled (missing API key or disabled flag)";
+				errors[provider] = msg;
+				log?.warn({ leadSearchId, provider }, msg);
+				continue;
+			}
 
-    const resultsByProvider = new Map<ScraperProvider, LeadDbAdapterResult>();
+			try {
+				const r = await adapter.scrape(query);
 
-    for (let i = 0; i < settled.length; i++) {
-      const provider = tasks[i]?.provider;
-      const item = settled[i];
+				providerResults.push(r);
 
-      if (item.status === "fulfilled") {
-        resultsByProvider.set(provider, item.value);
-        log?.info(
-          {
-            searchTaskId,
-            provider,
-            leads: item.value.leads.length,
-            providerRunId: item.value.providerRunId ?? undefined,
-          },
-          "Lead DB provider succeeded",
-        );
-      } else {
-        const err: unknown = item.reason;
-        const message = err instanceof Error ? err.message : String(err);
-        errors[provider] = message;
-        log?.error({ err, searchTaskId, provider }, "Lead DB provider failed");
-      }
-    }
+				log?.info(
+					{
+						leadSearchId,
+						provider,
+						leads: r.leads.length,
+						providerRunId: r.providerRunId ?? undefined,
+						fileNameHint: r.fileNameHint ?? undefined,
+					},
+					"Lead DB provider succeeded"
+				);
 
-    // Keep original ordering for those who succeeded
-    const providerResults: LeadDbAdapterResult[] = [];
-    for (const p of providersOrder) {
-      const r = resultsByProvider.get(p);
-      if (r) providerResults.push(r);
-    }
+				if (stopOnFirstSuccess) break;
+			} catch (err: unknown) {
+				const message = err instanceof Error ? err.message : String(err);
+				errors[provider] = message;
+				log?.error({ err, leadSearchId, provider }, "Lead DB provider failed");
+				// continue to next provider (fallback)
+			}
+		}
 
-    if (providerResults.length === 0) {
-      throw new Error(`All lead DB providers failed: ${JSON.stringify(errors)}`);
-    }
+		if (providerResults.length === 0) {
+			throw new Error(
+				`All lead DB providers failed (sequential): ${JSON.stringify(errors)}`
+			);
+		}
 
-    log?.info(
-      {
-        searchTaskId,
-        durationMs: msSince(t0),
-        succeededProviders: providerResults.map((r) => r.provider),
-        failedProviders: Object.keys(errors),
-      },
-      "Lead DB orchestrator: finished",
-    );
+		log?.info(
+			{
+				leadSearchId,
+				durationMs: msSince(t0),
+				succeededProviders: providerResults.map((r) => r.provider),
+				failedProviders: Object.keys(errors),
+			},
+			"Lead DB orchestrator: finished (sequential)"
+		);
 
-    return { providerResults, errors };
-  }
-
-  private async runProvider(
-    searchTaskId: string,
-    provider: ScraperProvider,
-    query: LeadDbQuery,
-    log?: LoggerLike,
-  ): Promise<LeadDbAdapterResult> {
-    const t0 = nowNs();
-    const adapter = this.getAdapter(provider);
-
-    if (!adapter) {
-      await this.prisma.scraperRun.create({
-        data: {
-          searchTaskId,
-          provider,
-          status: ScraperRunStatus.FAILED,
-          errorMessage: "Adapter is not registered in DI container",
-          leadsCount: 0,
-        },
-      });
-      throw new Error(`Adapter not registered: ${provider}`);
-    }
-
-    if (!adapter.isEnabled()) {
-      await this.prisma.scraperRun.create({
-        data: {
-          searchTaskId,
-          provider,
-          status: ScraperRunStatus.FAILED,
-          errorMessage: "Adapter is disabled (missing API key or disabled flag)",
-          leadsCount: 0,
-        },
-      });
-      throw new Error(`Adapter disabled: ${provider}`);
-    }
-
-    const run = await this.prisma.scraperRun.create({
-      data: {
-        searchTaskId,
-        provider,
-        status: ScraperRunStatus.RUNNING,
-      },
-    });
-
-    try {
-      log?.info(
-        { searchTaskId, provider, scraperRunId: run.id, limit: query.limit },
-        "Lead DB adapter scrape started",
-      );
-
-      const result = await adapter.scrape(query);
-
-      await this.prisma.scraperRun.update({
-        where: { id: run.id },
-        data: {
-          status: ScraperRunStatus.SUCCESS,
-          leadsCount: result.leads.length,
-          externalRunId: result.providerRunId ?? null,
-          meta: {
-            fileNameHint: result.fileNameHint ?? null,
-          },
-        },
-      });
-
-      log?.info(
-        {
-          searchTaskId,
-          provider,
-          scraperRunId: run.id,
-          durationMs: msSince(t0),
-          leads: result.leads.length,
-          externalRunId: result.providerRunId ?? undefined,
-        },
-        "Lead DB adapter scrape completed",
-      );
-
-      return result;
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-
-      await this.prisma.scraperRun.update({
-        where: { id: run.id },
-        data: {
-          status: ScraperRunStatus.FAILED,
-          errorMessage: message,
-          leadsCount: 0,
-        },
-      });
-
-      log?.error(
-        { err: e, searchTaskId, provider, scraperRunId: run.id, durationMs: msSince(t0) },
-        "Lead DB adapter scrape failed",
-      );
-      throw e;
-    }
-  }
+		return { providerResults, errors };
+	}
 }

@@ -1,7 +1,7 @@
 import axios from "axios";
 
 import { loadEnv } from "@/config/env";
-import { pollUntil } from "@/capabilities/lead-db/shared/polling";
+import { pollUntil } from "@/capabilities/shared/polling";
 import {
   SearchLeadsCreateExportResponseSchema,
   SearchLeadsResultResponseSchema,

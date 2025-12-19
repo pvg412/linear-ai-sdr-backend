@@ -9,7 +9,7 @@ import {
 	ScraperCityStatusResponseSchema,
 } from "../scrapercity.schemas";
 import { mapScraperCityRowsToLeads } from "../scrapercity.leadMapper";
-import { validateNormalizedLeads } from "../../../shared/leadValidate";
+import { validateNormalizedLeads } from "../../../../shared/leadValidate";
 import { wrapScraperCityAxiosError } from "../scrapercity.errors";
 import { UserFacingError } from "@/infra/userFacingError";
 
@@ -52,7 +52,7 @@ describe("ScraperCity contract (fixtures)", () => {
 		const validated = validateNormalizedLeads(leads, {
 			mode: "strict",
 			// provider is used only for logs in drop mode, but ok to set anyway
-			// provider: ScraperProvider.SCRAPER_CITY,
+			// provider: LeadProvider.SCRAPER_CITY,
 			minValid: 1,
 		});
 

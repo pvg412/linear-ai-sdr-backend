@@ -3,14 +3,12 @@ import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 
+import { websocketPlugin } from './plugins/websocket';
 import { loadEnv } from './config/env';
 import { registerAuthRoutes } from './modules/auth/auth.controller';
 import { createAuthGuard } from './modules/auth/auth.guard';
 import { AuthService } from './modules/auth/auth.service';
-import { registerSearchTaskRoutes } from './modules/search-task/search-task.controller';
-import { registerLeadRoutes } from './modules/lead/lead.controller';
-import { registerScraperRoutes } from './capabilities/scraper/scraper.controller';
-import { registerTelegramRoutes } from './modules/telegram/telegram.controller';
+import { registerChatRoutes } from './modules/chat/chat.controller';
 
 export async function buildServer() {
   const env = loadEnv();
@@ -19,6 +17,7 @@ export async function buildServer() {
     logger: true,
   });
 
+  await app.register(websocketPlugin);
   await app.register(cors);
   await app.register(swagger, {
     openapi: {
@@ -48,10 +47,7 @@ export async function buildServer() {
   // Protect everything else
   app.addHook("onRequest", createAuthGuard(env));
 
-  registerSearchTaskRoutes(app);
-  registerLeadRoutes(app);
-  registerTelegramRoutes(app);
-  registerScraperRoutes(app);
+  registerChatRoutes(app);
 
   return { app, env };
 }
