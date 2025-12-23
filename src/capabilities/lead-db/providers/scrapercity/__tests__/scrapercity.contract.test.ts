@@ -1,4 +1,4 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { AxiosError } from "axios";
@@ -15,7 +15,6 @@ import { UserFacingError } from "@/infra/userFacingError";
 
 // English comments by request
 function readFixtureJson<T = unknown>(fileName: string): T {
-	// Assumes tests run from repo root
 	const fixturesDir = path.join(
 		process.cwd(),
 		"src",
@@ -39,52 +38,88 @@ describe("ScraperCity contract (fixtures)", () => {
 		expect(() => ScraperCityStatusResponseSchema.parse(status)).not.toThrow();
 	});
 
-	test("rows fixture parses, maps to normalized leads, and passes strict validation (Guarantee A + B)", () => {
-		const rowsJson = readFixtureJson("rows.response.json");
+	const ROW_FIXTURES = [
+		"rows.snake.response.json",
+		"rows.camel.response.json",
+	] as const;
 
-		// A: provider row schema validation
-		const rows = ScraperCityApolloRowSchema.array().parse(rowsJson);
+	for (const fileName of ROW_FIXTURES) {
+		test(`rows fixture '${fileName}' parses, maps, and passes strict validation (Guarantee A + B)`, () => {
+			const rowsJson = readFixtureJson(fileName);
 
-		// B: mapping + normalization
-		const leads = mapScraperCityRowsToLeads(rows);
+			// A: provider row schema validation
+			const rows = ScraperCityApolloRowSchema.array().parse(rowsJson);
 
-		// B: strict contract on normalized lead shape
-		const validated = validateNormalizedLeads(leads, {
-			mode: "strict",
-			// provider is used only for logs in drop mode, but ok to set anyway
-			// provider: LeadProvider.SCRAPER_CITY,
-			minValid: 1,
+			// Ensure passthrough keeps unknown fields
+			expect(
+				(rows[0] as Record<string, unknown>)["some_unknown_field_from_provider"]
+			).toBe("keep_me");
+			expect(
+				(rows[1] as Record<string, unknown>)["another_unknown_field"]
+			).toBe(123);
+
+			// B: mapping + normalization
+			const leads = mapScraperCityRowsToLeads(rows);
+
+			// B: strict contract on normalized lead shape
+			const validated = validateNormalizedLeads(leads, {
+				mode: "strict",
+				minValid: 2,
+			});
+
+			expect(validated.length).toBe(2);
+
+			const alice = validated[0];
+			expect(alice.company).toBe("Example GmbH");
+			expect(alice.companyDomain).toBe("example.com");
+			expect(alice.companyUrl).toBe("https://example.com");
+			expect(alice.title).toBe("Chief Technology Officer");
+			expect(alice.email).toBe("alice@example.com");
+			expect(alice.linkedinUrl).toBe(
+				"https://www.linkedin.com/in/alice-example/"
+			);
+
+			const bob = validated[1];
+			expect(bob.fullName).toBeTruthy();
+			expect(bob.company).toBe("Builder AG");
+			expect(bob.companyDomain).toBe("builder.io"); // www removed
+			expect(bob.companyUrl).toBe("https://builder.io");
+			expect(bob.title).toBe("CTO");
+			expect(bob.linkedinUrl).toBe("https://www.linkedin.com/in/bob-builder/");
 		});
-
-		expect(validated.length).toBeGreaterThan(0);
-
-		// Extra checks: normalization behavior is stable
-		const alice = validated[0];
-		expect(alice.companyDomain).toBe("example.com");
-		expect(alice.linkedinUrl).toBe(
-			"https://www.linkedin.com/in/alice-example/"
-		);
-
-		const bob = validated[1];
-		expect(bob.companyDomain).toBe("builder.io"); // www removed
-	});
+	}
 
 	test("invalid-input fixture is wrapped into UserFacingError (Guarantee C for negative path)", () => {
 		const errorData = readFixtureJson("error.invalid-input.response.json");
 
-		const axErr = new AxiosError("Request failed with status code 400");
-		// Patch required fields used by wrapScraperCityAxiosError()
-		(axErr as { response: { status: number; data: unknown } }).response = {
-			status: 400,
-			data: errorData,
-		};
-		(axErr as { config: { method: string; url: string; params: unknown; data: unknown } }).config = {
-			method: "post",
-			url: "https://app.scrapercity.com/api/v1/scrape/apollo-filters",
-			params: undefined,
-			data: '{"count":500}',
-		};
+		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const axErr = new AxiosError("Request failed with status code 400");
+			(
+				axErr as unknown as { response: { status: number; data: unknown } }
+			).response = {
+				status: 400,
+				data: errorData,
+			};
+			(
+				axErr as unknown as {
+					config: {
+						method: string;
+						url: string;
+						params: unknown;
+						data: unknown;
+					};
+				}
+			).config = {
+				method: "post",
+				url: "https://app.scrapercity.com/api/v1/scrape/apollo-filters",
+				params: undefined,
+				data: '{"count":500}',
+			};
 
-		expect(() => wrapScraperCityAxiosError(axErr)).toThrow(UserFacingError);
+			expect(() => wrapScraperCityAxiosError(axErr)).toThrow(UserFacingError);
+		} finally {
+			errSpy.mockRestore();
+		}
 	});
 });

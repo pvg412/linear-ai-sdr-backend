@@ -88,8 +88,7 @@ export class ScraperCityClient {
 			timeout: 120_000,
 		});
 
-		const data = z.array(ScraperCityApolloRowSchema).parse(res.data);
-		return data;
+		return z.array(ScraperCityApolloRowSchema).parse(res.data);
 	}
 
 	private buildDownloadUrl(runId: string, outputUrl?: string | null): string {

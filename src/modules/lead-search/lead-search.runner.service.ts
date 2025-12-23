@@ -12,7 +12,15 @@ import {
 } from "@prisma/client";
 
 import { getPrisma } from "@/infra/prisma";
-import { msSince, nowNs, type LoggerLike } from "@/infra/observability";
+import {
+	ensureLogger,
+	hasAnyDefined,
+	isP2002Unique,
+	msSince,
+	nowNs,
+	uniqueTarget,
+	type LoggerLike,
+} from "@/infra/observability";
 
 import { LEAD_DB_TYPES } from "@/capabilities/lead-db/lead-db.types";
 import { LeadDbOrchestrator } from "@/capabilities/lead-db/lead-db.orchestrator";
@@ -59,9 +67,12 @@ export class LeadSearchRunnerService {
 		triggeredById?: string,
 		log?: LoggerLike
 	): void {
+		const lg = ensureLogger(log);
+
 		setImmediate(() => {
-			void this.run(leadSearchId, triggeredById, log).catch((err) => {
-				log?.error(
+			void this.run(leadSearchId, triggeredById, lg).catch((err) => {
+				// IMPORTANT: do not swallow silently when log is missing
+				lg.error(
 					{ err: err as Error, leadSearchId },
 					"LeadSearchRunner dispatch failed"
 				);
@@ -74,17 +85,19 @@ export class LeadSearchRunnerService {
 		triggeredById?: string,
 		log?: LoggerLike
 	): Promise<void> {
+		const lg = ensureLogger(log);
+
 		const leadSearch = await this.leadSearchRepository.getById(leadSearchId);
 		if (!leadSearch) throw new Error("LeadSearch not found");
 
 		if (leadSearch.kind === LeadSearchKind.LEAD_DB) {
-			await this.runLeadDb(leadSearchId, triggeredById, log);
+			await this.runLeadDb(leadSearchId, triggeredById, lg);
 			return;
 		}
 
 		if (leadSearch.kind === LeadSearchKind.SCRAPER) {
-			// TODO: Scraper is not supported yet.
-			// await this.runScraper(leadSearchId, triggeredById, log);
+			// TODO: enable when ready
+			// await this.runScraper(leadSearchId, triggeredById, lg);
 			return;
 		}
 
@@ -100,6 +113,7 @@ export class LeadSearchRunnerService {
 		triggeredById?: string,
 		log?: LoggerLike
 	): Promise<void> {
+		const lg = ensureLogger(log);
 		const t0 = nowNs();
 
 		const leadSearch = await this.leadSearchRepository.getById(leadSearchId);
@@ -135,6 +149,10 @@ export class LeadSearchRunnerService {
 				},
 			});
 
+			lg.error(
+				{ leadSearchId, provider, kind, issues },
+				"LeadSearch failed: invalid query schema"
+			);
 			throw new Error(msg);
 		}
 
@@ -156,7 +174,7 @@ export class LeadSearchRunnerService {
 
 		await this.leadSearchRepository.markRunning(leadSearchId);
 
-		log?.info(
+		lg.info(
 			{ leadSearchId, provider, attempt, limit: leadSearch.limit },
 			"LeadSearch (LEAD_DB) run started"
 		);
@@ -170,7 +188,7 @@ export class LeadSearchRunnerService {
 					fileName: `lead_search_${leadSearchId}`,
 				},
 				{ providersOrder: [provider] },
-				log?.child ? log.child({ component: "LeadDbOrchestrator" }) : log
+				lg.child ? lg.child({ component: "LeadDbOrchestrator" }) : lg
 			);
 
 			const merged = mergeAndTrimLeadDbResults(
@@ -184,6 +202,7 @@ export class LeadSearchRunnerService {
 				provider,
 				leads: merged,
 				createdById: triggeredById,
+				log: lg,
 			});
 
 			await this.leadSearchRepository.markRunSuccess({
@@ -211,7 +230,6 @@ export class LeadSearchRunnerService {
 				total > 0 ? LeadSearchStatus.DONE : LeadSearchStatus.DONE_NO_RESULTS;
 
 			const durationMs = msSince(t0);
-
 			const previewLimit = 100;
 			const shown = Math.min(total, previewLimit);
 
@@ -248,7 +266,7 @@ export class LeadSearchRunnerService {
 				},
 			});
 
-			log?.info(
+			lg.info(
 				{ leadSearchId, provider, attempt, totalLeads: total, durationMs },
 				"LeadSearch (LEAD_DB) run finished"
 			);
@@ -272,7 +290,8 @@ export class LeadSearchRunnerService {
 				},
 			});
 
-			log?.error(
+			// IMPORTANT: log to console even if original log was not provided
+			lg.error(
 				{ err, leadSearchId, provider, attempt },
 				"LeadSearch (LEAD_DB) run failed"
 			);
@@ -288,6 +307,7 @@ export class LeadSearchRunnerService {
 		triggeredById?: string,
 		log?: LoggerLike
 	): Promise<void> {
+		const lg = ensureLogger(log);
 		const t0 = nowNs();
 
 		const leadSearch = await this.leadSearchRepository.getById(leadSearchId);
@@ -333,6 +353,10 @@ export class LeadSearchRunnerService {
 				},
 			});
 
+			lg.error(
+				{ leadSearchId, provider: providerSelected, kind, issues },
+				"LeadSearch (SCRAPER) failed: invalid query schema"
+			);
 			throw new Error(msg);
 		}
 
@@ -340,7 +364,7 @@ export class LeadSearchRunnerService {
 
 		await this.leadSearchRepository.markRunning(leadSearchId);
 
-		log?.info(
+		lg.info(
 			{ leadSearchId, provider: providerSelected, limit: leadSearch.limit },
 			"LeadSearch (SCRAPER) run started"
 		);
@@ -421,16 +445,16 @@ export class LeadSearchRunnerService {
 								);
 							}
 
-							log?.warn(
+							lg.warn(
 								{ provider, attemptInfo, err },
 								"Scraper provider failed"
 							);
 						},
 						onProviderSkip: (provider, attemptInfo) => {
-							log?.info({ provider, attemptInfo }, "Scraper provider skipped");
+							lg.info({ provider, attemptInfo }, "Scraper provider skipped");
 						},
 					},
-					log?.child ? log.child({ component: "ScraperOrchestrator" }) : log
+					lg.child ? lg.child({ component: "ScraperOrchestrator" }) : lg
 				);
 
 			const insertedLeadIds = await this.persistLeadsAndRelations({
@@ -442,6 +466,7 @@ export class LeadSearchRunnerService {
 				provider: result.provider,
 				leads: result.leads,
 				createdById: triggeredById,
+				log: lg,
 			});
 
 			await this.leadSearchRepository.markDone(
@@ -454,7 +479,6 @@ export class LeadSearchRunnerService {
 				total > 0 ? LeadSearchStatus.DONE : LeadSearchStatus.DONE_NO_RESULTS;
 
 			const durationMs = msSince(t0);
-
 			const previewLimit = 100;
 			const shown = Math.min(total, previewLimit);
 
@@ -494,7 +518,7 @@ export class LeadSearchRunnerService {
 				},
 			});
 
-			log?.info(
+			lg.info(
 				{ leadSearchId, provider, totalLeads: total, durationMs },
 				"LeadSearch (SCRAPER) run finished"
 			);
@@ -516,7 +540,7 @@ export class LeadSearchRunnerService {
 				},
 			});
 
-			log?.error(
+			lg.error(
 				{ err, leadSearchId, provider: providerSelected },
 				"LeadSearch (SCRAPER) run failed"
 			);
@@ -525,7 +549,7 @@ export class LeadSearchRunnerService {
 	}
 
 	// -------------------------
-	// Persistence (unchanged)
+	// Persistence
 	// -------------------------
 	private async persistLeadsAndRelations(input: {
 		leadSearchId: string;
@@ -533,14 +557,17 @@ export class LeadSearchRunnerService {
 		provider: LeadProvider;
 		leads: NormalizedLead[];
 		createdById?: string;
+		log?: LoggerLike;
 	}): Promise<string[]> {
 		const leadIds: string[] = [];
+		const lg = ensureLogger(input.log);
 
 		for (const lead of input.leads) {
 			const leadId = await this.upsertLead({
 				provider: input.provider,
 				createdById: input.createdById,
 				lead,
+				log: lg,
 			});
 
 			leadIds.push(leadId);
@@ -586,61 +613,95 @@ export class LeadSearchRunnerService {
 		provider: LeadProvider;
 		createdById?: string;
 		lead: NormalizedLead;
+		log?: LoggerLike;
 	}): Promise<string> {
+		const lg = ensureLogger(input.log);
+
 		const email =
 			typeof input.lead.email === "string"
 				? input.lead.email.trim().toLowerCase()
 				: undefined;
-		const linkedinUrl = input.lead.linkedinUrl ?? undefined;
-		const externalId = input.lead.externalId ?? undefined;
 
-		if (email) {
-			const existing = await this.prisma.lead.findUnique({ where: { email } });
-			if (existing) {
-				await this.prisma.lead.update({
-					where: { id: existing.id },
-					data: this.buildSafeLeadPatch(existing, { ...input.lead, email }),
-				});
-				await this.ensureProviderRef(existing.id, input.provider, externalId);
-				return existing.id;
+		const linkedinUrl =
+			typeof input.lead.linkedinUrl === "string" &&
+			input.lead.linkedinUrl.trim().length > 0
+				? input.lead.linkedinUrl.trim()
+				: undefined;
+
+		const externalId =
+			typeof input.lead.externalId === "string" &&
+			input.lead.externalId.trim().length > 0
+				? input.lead.externalId.trim()
+				: undefined;
+
+		const incoming: NormalizedLead = {
+			...input.lead,
+			email,
+			linkedinUrl,
+			externalId,
+		};
+
+		const tryUpdateExisting = async (existing: Lead): Promise<string> => {
+			const patch = this.buildSafeLeadPatch(existing, incoming);
+
+			// If nothing to patch – still ensure providerRef
+			if (hasAnyDefined(patch as unknown as Record<string, unknown>)) {
+				try {
+					await this.prisma.lead.update({
+						where: { id: existing.id },
+						data: patch,
+					});
+				} catch (e) {
+					// If patch tries to set unique fields that conflict, retry without them
+					if (isP2002Unique(e)) {
+						const target = uniqueTarget(e);
+
+						lg.warn(
+							{
+								target,
+								leadId: existing.id,
+								email,
+								linkedinUrl,
+								externalId,
+								provider: input.provider,
+							},
+							"Lead update hit unique constraint; retrying without conflicting unique fields"
+						);
+
+						const retry: Prisma.LeadUpdateInput = {
+							...patch,
+						};
+
+						if (target.includes("email")) delete retry.email;
+						if (target.includes("linkedinUrl")) delete retry.linkedinUrl;
+
+						if (hasAnyDefined(retry as unknown as Record<string, unknown>)) {
+							await this.prisma.lead.update({
+								where: { id: existing.id },
+								data: retry,
+							});
+						}
+					} else {
+						throw e;
+					}
+				}
 			}
 
-			const created = await this.prisma.lead.create({
-				data: {
-					origin: LeadOrigin.PROVIDER,
-					createdById: input.createdById ?? null,
-					email,
-					...this.pickLeadFields(input.lead),
-				},
-			});
+			await this.ensureProviderRef(existing.id, input.provider, externalId);
+			return existing.id;
+		};
 
-			await this.ensureProviderRef(created.id, input.provider, externalId);
-			return created.id;
+		// 1) Find existing by any stable identifier (email OR linkedin OR provider+externalId)
+		if (email) {
+			const byEmail = await this.prisma.lead.findUnique({ where: { email } });
+			if (byEmail) return tryUpdateExisting(byEmail);
 		}
 
 		if (linkedinUrl) {
-			const existing = await this.prisma.lead.findUnique({
+			const byLinkedin = await this.prisma.lead.findUnique({
 				where: { linkedinUrl },
 			});
-			if (existing) {
-				await this.prisma.lead.update({
-					where: { id: existing.id },
-					data: this.buildSafeLeadPatch(existing, input.lead),
-				});
-				await this.ensureProviderRef(existing.id, input.provider, externalId);
-				return existing.id;
-			}
-
-			const created = await this.prisma.lead.create({
-				data: {
-					origin: LeadOrigin.PROVIDER,
-					createdById: input.createdById ?? null,
-					...this.pickLeadFields(input.lead),
-				},
-			});
-
-			await this.ensureProviderRef(created.id, input.provider, externalId);
-			return created.id;
+			if (byLinkedin) return tryUpdateExisting(byLinkedin);
 		}
 
 		if (externalId) {
@@ -652,29 +713,61 @@ export class LeadSearchRunnerService {
 			});
 
 			if (ref?.leadId) {
-				const existing = await this.prisma.lead.findUnique({
+				const byId = await this.prisma.lead.findUnique({
 					where: { id: ref.leadId },
 				});
-				if (existing) {
-					await this.prisma.lead.update({
-						where: { id: existing.id },
-						data: this.buildSafeLeadPatch(existing, input.lead),
-					});
-					return existing.id;
-				}
+				if (byId) return tryUpdateExisting(byId);
 			}
 		}
 
-		const created = await this.prisma.lead.create({
-			data: {
-				origin: LeadOrigin.PROVIDER,
-				createdById: input.createdById ?? null,
-				...this.pickLeadFields(input.lead),
-			},
-		});
+		// 2) Create new lead
+		try {
+			const created = await this.prisma.lead.create({
+				data: {
+					origin: LeadOrigin.PROVIDER,
+					createdById: input.createdById ?? null,
+					...(email ? { email } : {}),
+					...this.pickLeadFields(incoming),
+				},
+			});
 
-		await this.ensureProviderRef(created.id, input.provider, externalId);
-		return created.id;
+			await this.ensureProviderRef(created.id, input.provider, externalId);
+			return created.id;
+		} catch (e) {
+			// 3) If unique constraint, log details and reuse existing instead of failing whole search
+			if (isP2002Unique(e)) {
+				const target = uniqueTarget(e);
+
+				lg.warn(
+					{
+						target,
+						email,
+						linkedinUrl,
+						externalId,
+						provider: input.provider,
+					},
+					"Lead create hit unique constraint; will try to reuse existing lead"
+				);
+
+				const reuse =
+					(email
+						? await this.prisma.lead.findUnique({ where: { email } })
+						: null) ??
+					(linkedinUrl
+						? await this.prisma.lead.findUnique({ where: { linkedinUrl } })
+						: null);
+
+				if (reuse) {
+					return tryUpdateExisting(reuse);
+				}
+			}
+
+			lg.error(
+				{ err: e, email, linkedinUrl, externalId, provider: input.provider },
+				"Lead create failed"
+			);
+			throw e;
+		}
 	}
 
 	private pickLeadFields(lead: NormalizedLead) {

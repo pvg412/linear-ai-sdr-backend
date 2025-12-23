@@ -35,6 +35,9 @@ export class ScraperCityLeadDbAdapter implements LeadDbAdapter {
       const status = await this.client.waitForSucceeded(runId, { intervalMs: 5_000, maxAttempts: 180 });
 
       const rows = await this.client.downloadJsonRows(runId, status);
+
+      console.info("[ScraperCityLeadDb] rows", { rows });
+
       const leadsRaw = mapScraperCityRowsToLeads(rows);
 
       const leads = validateNormalizedLeads(leadsRaw, {
