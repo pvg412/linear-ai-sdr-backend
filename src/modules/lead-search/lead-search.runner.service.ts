@@ -26,6 +26,8 @@ import {
 	ScrapeQuerySchema,
 	type ScrapeQuery,
 } from "@/capabilities/scraper/scraper.dto";
+import { RealtimeHub } from "@/infra/realtime/realtimeHub";
+import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";
 
 import { LEAD_SEARCH_TYPES } from "./lead-search.types";
 import { LeadSearchRepository } from "./lead-search.repository";
@@ -42,7 +44,10 @@ export class LeadSearchRunnerService {
 		private readonly leadDbOrchestrator: LeadDbOrchestrator,
 
 		@inject(SCRAPER_TYPES.ScraperOrchestrator)
-		private readonly scraperOrchestrator: ScraperOrchestrator
+		private readonly scraperOrchestrator: ScraperOrchestrator,
+
+		@inject(REALTIME_TYPES.RealtimeHub)
+		private readonly realtimeHub: RealtimeHub
 	) {}
 
 	/**
@@ -78,17 +83,17 @@ export class LeadSearchRunnerService {
 		}
 
 		if (leadSearch.kind === LeadSearchKind.SCRAPER) {
-			await this.runScraper(leadSearchId, triggeredById, log);
+			// TODO: Scraper is not supported yet.
+			// await this.runScraper(leadSearchId, triggeredById, log);
 			return;
 		}
 
-		// Exhaustive check: if LeadSearchKind gets a new variant, TS will fail here.
 		const _exhaustive: never = leadSearch.kind;
 		throw new Error(`LeadSearch kind=${String(_exhaustive)} is not supported`);
 	}
 
 	// -------------------------
-	// LEAD_DB (existing)
+	// LEAD_DB
 	// -------------------------
 	private async runLeadDb(
 		leadSearchId: string,
@@ -100,6 +105,9 @@ export class LeadSearchRunnerService {
 		const leadSearch = await this.leadSearchRepository.getById(leadSearchId);
 		if (!leadSearch) throw new Error("LeadSearch not found");
 
+		const provider = leadSearch.provider;
+		const kind = leadSearch.kind;
+
 		// Validate stored query JSON (user could edit it)
 		const parsedQuery = LeadDbCanonicalFiltersSchema.safeParse(
 			leadSearch.query
@@ -110,18 +118,26 @@ export class LeadSearchRunnerService {
 				message: i.message,
 			}));
 
-			const message = `Invalid LeadSearch.query schema: ${JSON.stringify(
-				issues
-			)}`;
-			await this.leadSearchRepository.markFailed(leadSearchId, message);
+			const msg = `Invalid LeadSearch.query schema: ${JSON.stringify(issues)}`;
+			await this.leadSearchRepository.markFailed(leadSearchId, msg);
+
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
 				text: "Lead search failed: invalid JSON schema.",
-				payload: { leadSearchId, error: issues },
+				payload: {
+					event: "leadSearch.failed",
+					leadSearchId,
+					status: LeadSearchStatus.FAILED,
+					provider,
+					kind,
+					errorMessage: "Invalid JSON schema.",
+					errorDetails: issues,
+					durationMs: msSince(t0),
+				},
 			});
-			throw new Error(message);
+
+			throw new Error(msg);
 		}
 
-		const provider = leadSearch.provider;
 		const attempt = await this.leadSearchRepository.getNextAttempt(
 			leadSearchId,
 			provider
@@ -146,17 +162,16 @@ export class LeadSearchRunnerService {
 		);
 
 		try {
-			const { providerResults, errors } =
-				await this.leadDbOrchestrator.scrape(
-					leadSearchId,
-					{
-						limit: leadSearch.limit,
-						filters: parsedQuery.data,
-						fileName: `lead_search_${leadSearchId}`,
-					},
-					{ providersOrder: [provider] },
-					log?.child ? log.child({ component: "LeadDbOrchestrator" }) : log
-				);
+			const { providerResults, errors } = await this.leadDbOrchestrator.scrape(
+				leadSearchId,
+				{
+					limit: leadSearch.limit,
+					filters: parsedQuery.data,
+					fileName: `lead_search_${leadSearchId}`,
+				},
+				{ providersOrder: [provider] },
+				log?.child ? log.child({ component: "LeadDbOrchestrator" }) : log
+			);
 
 			const merged = mergeAndTrimLeadDbResults(
 				providerResults,
@@ -191,28 +206,50 @@ export class LeadSearchRunnerService {
 				insertedLeadIds.length
 			);
 
+			const total = insertedLeadIds.length;
+			const status =
+				total > 0 ? LeadSearchStatus.DONE : LeadSearchStatus.DONE_NO_RESULTS;
+
+			const durationMs = msSince(t0);
+
+			const previewLimit = 100;
+			const shown = Math.min(total, previewLimit);
+
+			const previewLeads = merged.slice(0, shown).map((l, idx) => ({
+				leadId: insertedLeadIds[idx] ?? null,
+				fullName: l.fullName ?? null,
+				title: l.title ?? null,
+				company: l.company ?? null,
+				email: l.email ?? null,
+				linkedinUrl: l.linkedinUrl ?? null,
+				companyDomain: l.companyDomain ?? null,
+				location: l.location ?? null,
+			}));
+
+			const text =
+				status === LeadSearchStatus.DONE_NO_RESULTS
+					? `No leads found for these filters`
+					: `Lead search completed. Found ${total} leads`;
+
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
-				text: "Lead search completed.",
+				text,
 				payload: {
+					event: "leadSearch.completed",
 					leadSearchId,
-					status:
-						insertedLeadIds.length > 0
-							? LeadSearchStatus.DONE
-							: LeadSearchStatus.DONE_NO_RESULTS,
-					totalLeads: insertedLeadIds.length,
+					status,
 					provider,
+					kind,
 					attempt,
+					totalLeads: total,
+					shownLeads: shown,
+					previewLimit,
+					previewLeads,
+					durationMs,
 				},
 			});
 
 			log?.info(
-				{
-					leadSearchId,
-					provider,
-					attempt,
-					totalLeads: insertedLeadIds.length,
-					durationMs: msSince(t0),
-				},
+				{ leadSearchId, provider, attempt, totalLeads: total, durationMs },
 				"LeadSearch (LEAD_DB) run finished"
 			);
 		} catch (err) {
@@ -223,7 +260,16 @@ export class LeadSearchRunnerService {
 
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
 				text: "Lead search failed.",
-				payload: { leadSearchId, provider, attempt, error: message },
+				payload: {
+					event: "leadSearch.failed",
+					leadSearchId,
+					status: LeadSearchStatus.FAILED,
+					provider,
+					kind,
+					attempt,
+					errorMessage: message,
+					durationMs: msSince(t0),
+				},
 			});
 
 			log?.error(
@@ -247,9 +293,9 @@ export class LeadSearchRunnerService {
 		const leadSearch = await this.leadSearchRepository.getById(leadSearchId);
 		if (!leadSearch) throw new Error("LeadSearch not found");
 
+		const kind = leadSearch.kind;
 		const providerSelected = leadSearch.provider;
 
-		// Expect leadSearch.query to contain at least { apolloUrl }, limit comes from LeadSearch.limit.
 		const queryObj =
 			leadSearch.query &&
 			typeof leadSearch.query === "object" &&
@@ -268,17 +314,26 @@ export class LeadSearchRunnerService {
 				message: i.message,
 			}));
 
-			const message = `Invalid LeadSearch.query schema for SCRAPER: ${JSON.stringify(
+			const msg = `Invalid LeadSearch.query schema for SCRAPER: ${JSON.stringify(
 				issues
 			)}`;
-			await this.leadSearchRepository.markFailed(leadSearchId, message);
+			await this.leadSearchRepository.markFailed(leadSearchId, msg);
 
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
 				text: "Lead search failed: invalid JSON schema.",
-				payload: { leadSearchId, error: issues },
+				payload: {
+					event: "leadSearch.failed",
+					leadSearchId,
+					status: LeadSearchStatus.FAILED,
+					provider: providerSelected,
+					kind,
+					errorMessage: "Invalid JSON schema.",
+					errorDetails: issues,
+					durationMs: msSince(t0),
+				},
 			});
 
-			throw new Error(message);
+			throw new Error(msg);
 		}
 
 		const scrapeQuery: ScrapeQuery = parsedQuery.data;
@@ -290,10 +345,8 @@ export class LeadSearchRunnerService {
 			"LeadSearch (SCRAPER) run started"
 		);
 
-		// NOTE: UI selects one provider. We still keep the fallback mechanism by passing providersOrder.
 		const providersOrder: LeadProvider[] = [providerSelected];
 
-		// We'll create/update LeadSearchRun rows via hooks.
 		const runCtxByProvider = new Map<
 			LeadProvider,
 			{ runId: string; attempt: number }
@@ -351,9 +404,8 @@ export class LeadSearchRunnerService {
 								fileNameHint: res.fileNameHint ?? null,
 							};
 
-							// Mark run success even if under-delivered; the attemptInfo.status will reflect it.
 							await this.leadSearchRepository.markRunSuccess({
-								runId: (ctx as { runId: string }).runId,
+								runId: ctx.runId,
 								leadsCount: res.leads.length,
 								externalRunId: res.providerRunId ?? null,
 								responseMeta,
@@ -364,30 +416,25 @@ export class LeadSearchRunnerService {
 
 							if (ctx && typeof ctx.runId === "string") {
 								await this.leadSearchRepository.markRunFailed(
-									(ctx as { runId: string }).runId,
+									ctx.runId,
 									message
 								);
 							}
 
-							// Even if start hook failed and ctx is undefined, we still keep the error in orchestrator result.
 							log?.warn(
 								{ provider, attemptInfo, err },
 								"Scraper provider failed"
 							);
 						},
 						onProviderSkip: (provider, attemptInfo) => {
-							// Optional: you can choose to create a DB run row here too, but usually it's noise.
 							log?.info({ provider, attemptInfo }, "Scraper provider skipped");
 						},
 					},
 					log?.child ? log.child({ component: "ScraperOrchestrator" }) : log
 				);
 
-			// Persist results
 			const insertedLeadIds = await this.persistLeadsAndRelations({
 				leadSearchId,
-				// If you only run one provider, ctx exists. With multi-provider fallback, this runId is per provider.
-				// We store per-run raw data in LeadSearchRunResult; when fallback exists, you can store under the chosen provider runId.
 				runId:
 					runCtxByProvider.get(result.provider)?.runId ??
 					runCtxByProvider.get(providerSelected)?.runId ??
@@ -402,28 +449,53 @@ export class LeadSearchRunnerService {
 				insertedLeadIds.length
 			);
 
+			const total = insertedLeadIds.length;
+			const status =
+				total > 0 ? LeadSearchStatus.DONE : LeadSearchStatus.DONE_NO_RESULTS;
+
+			const durationMs = msSince(t0);
+
+			const previewLimit = 100;
+			const shown = Math.min(total, previewLimit);
+
+			const previewLeads = result.leads.slice(0, shown).map((l, idx) => ({
+				leadId: insertedLeadIds[idx] ?? null,
+				fullName: l.fullName ?? null,
+				title: l.title ?? null,
+				company: l.company ?? null,
+				email: l.email ?? null,
+				linkedinUrl: l.linkedinUrl ?? null,
+				companyDomain: l.companyDomain ?? null,
+				location: l.location ?? null,
+			}));
+
+			const provider = result.provider;
+
+			const text =
+				status === LeadSearchStatus.DONE_NO_RESULTS
+					? `No leads found for these filters`
+					: `Lead search completed. Found ${total} leads`;
+
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
-				text: "Lead search completed.",
+				text,
 				payload: {
+					event: "leadSearch.completed",
 					leadSearchId,
-					status:
-						insertedLeadIds.length > 0
-							? LeadSearchStatus.DONE
-							: LeadSearchStatus.DONE_NO_RESULTS,
-					totalLeads: insertedLeadIds.length,
-					provider: result.provider,
+					status,
+					provider,
+					kind,
 					attempts,
 					errors,
+					totalLeads: total,
+					shownLeads: shown,
+					previewLimit,
+					previewLeads,
+					durationMs,
 				},
 			});
 
 			log?.info(
-				{
-					leadSearchId,
-					provider: result.provider,
-					totalLeads: insertedLeadIds.length,
-					durationMs: msSince(t0),
-				},
+				{ leadSearchId, provider, totalLeads: total, durationMs },
 				"LeadSearch (SCRAPER) run finished"
 			);
 		} catch (err) {
@@ -433,7 +505,15 @@ export class LeadSearchRunnerService {
 
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
 				text: "Lead search failed.",
-				payload: { leadSearchId, provider: providerSelected, error: message },
+				payload: {
+					event: "leadSearch.failed",
+					leadSearchId,
+					status: LeadSearchStatus.FAILED,
+					provider: providerSelected,
+					kind,
+					errorMessage: message,
+					durationMs: msSince(t0),
+				},
 			});
 
 			log?.error(
@@ -445,7 +525,7 @@ export class LeadSearchRunnerService {
 	}
 
 	// -------------------------
-	// Persistence (your existing code)
+	// Persistence (unchanged)
 	// -------------------------
 	private async persistLeadsAndRelations(input: {
 		leadSearchId: string;
@@ -663,7 +743,7 @@ export class LeadSearchRunnerService {
 	): Promise<void> {
 		if (!threadId) return;
 
-		await this.prisma.chatMessage.create({
+		const message = await this.prisma.chatMessage.create({
 			data: {
 				threadId,
 				role: ChatMessageRole.ASSISTANT,
@@ -678,6 +758,11 @@ export class LeadSearchRunnerService {
 		await this.prisma.chatThread.update({
 			where: { id: threadId },
 			data: { lastMessageAt: new Date() },
+		});
+
+		this.realtimeHub.broadcast(threadId, {
+			type: "message.created",
+			payload: { message },
 		});
 	}
 }

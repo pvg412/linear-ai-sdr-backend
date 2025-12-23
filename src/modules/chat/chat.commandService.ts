@@ -199,6 +199,7 @@ export class ChatCommandService {
 			type: ChatMessageType.EVENT,
 			text: "We started searching for leads.",
 			payload: {
+				event: "leadSearch.started",
 				leadSearchId: leadSearch.id,
 				provider,
 				kind,

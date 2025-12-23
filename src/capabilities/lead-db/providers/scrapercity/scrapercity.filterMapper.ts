@@ -1,3 +1,5 @@
+// scrapercity.filterMapper.ts
+
 import { LeadProvider } from "@prisma/client";
 import type { LeadDbQuery } from "@/capabilities/lead-db/lead-db.dto";
 import { UserFacingError } from "@/infra/userFacingError";
@@ -5,12 +7,16 @@ import { UserFacingError } from "@/infra/userFacingError";
 import { resolveScraperCityPersonTitles } from "./resolvers/scrapercity.personTitles.resolver";
 import { resolveScraperCitySeniorityLevel } from "./resolvers/scrapercity.seniority.resolver";
 import { SCRAPERCITY_ALLOWED_SENIORITY_LEVELS } from "./allowlists/scrapercity.allowedSeniority";
+
 import {
 	mergeKeywords,
 	industryToKeywordTokens,
 	resolveScraperCityCompanyIndustry,
 	shouldMoveIndustryToKeywords,
 } from "./resolvers/scrapercity.companyIndustry.resolver";
+
+import { resolveScraperCityPersonFunctionIncludes } from "./resolvers/scrapercity.personFunction.resolver";
+import { SCRAPERCITY_ALLOWED_PERSON_FUNCTIONS } from "./allowlists/scrapercity.allowedPersonFunctions";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -75,6 +81,9 @@ export function buildScraperCityPayload(
 	const getRaw = (key: string): unknown =>
 		firstNonNullish(filtersRec?.[key], legacyRec?.[key]);
 
+	// -------------------------
+	// personTitles
+	// -------------------------
 	const personTitlesRaw = getRaw("personTitles");
 
 	if (personTitlesRaw != null && !Array.isArray(personTitlesRaw)) {
@@ -111,6 +120,9 @@ export function buildScraperCityPayload(
 		});
 	}
 
+	// -------------------------
+	// seniorityLevel
+	// -------------------------
 	const requestedSeniorityRaw = getRaw("seniorityLevel");
 
 	if (
@@ -136,6 +148,9 @@ export function buildScraperCityPayload(
 		});
 	}
 
+	// -------------------------
+	// companyIndustry -> companyKeywords (your logic stays)
+	// -------------------------
 	const requestedIndustryRaw = getRaw("companyIndustry");
 
 	if (
@@ -165,17 +180,61 @@ export function buildScraperCityPayload(
 		);
 		console.warn(
 			"[ScraperCityLeadDb] dropped unsupported companyIndustry, moved to companyKeywords",
-			{
-				requestedIndustry,
-			}
+			{ requestedIndustry }
 		);
 	}
 
-	// Safe mapped fields only (as you intended)
+	// -------------------------
+	// functionDept / personFunctionIncludes (FIX)
+	// -------------------------
+	// We accept BOTH input keys, but we always output personFunctionIncludes[] for ScraperCity API.
+	const functionDeptRaw = getRaw("functionDept");
+	const personFunctionIncludesRaw = getRaw("personFunctionIncludes");
+
+	const functionInputs: string[] | undefined =
+		asStringArray(personFunctionIncludesRaw) ??
+		(asString(personFunctionIncludesRaw)
+			? [asString(personFunctionIncludesRaw)!]
+			: undefined) ??
+		asStringArray(functionDeptRaw) ??
+		(asString(functionDeptRaw) ? [asString(functionDeptRaw)!] : undefined);
+
+	const {
+		resolved: personFunctionIncludes,
+		unmapped: unmappedFunctions,
+		mapping: functionMapping,
+	} = resolveScraperCityPersonFunctionIncludes(functionInputs);
+
+	// fail-fast if user provided something but nothing is mappable
+	if (
+		(functionInputs?.length ?? 0) > 0 &&
+		personFunctionIncludes.length === 0
+	) {
+		throw new UserFacingError({
+			code: "SCRAPERCITY_INVALID_PERSON_FUNCTION",
+			userMessage:
+				`Invalid functionDept/personFunctionIncludes: ${unmappedFunctions.join(
+					", "
+				)}.\n` +
+				`Allowed values: ${SCRAPERCITY_ALLOWED_PERSON_FUNCTIONS.join(", ")}.`,
+			details: { unmappedFunctions, functionMapping },
+		});
+	}
+
+	if ((unmappedFunctions?.length ?? 0) > 0) {
+		console.warn("[ScraperCityLeadDb] dropped unsupported person functions", {
+			unmappedFunctions,
+			functionMapping,
+			resolved: personFunctionIncludes,
+		});
+	}
+
+	// -------------------------
+	// Build payload
+	// -------------------------
+	// Safe mapped fields only
 	const payload: Record<string, unknown> = {
-		...(asString(getRaw("functionDept"))
-			? { functionDept: asString(getRaw("functionDept")) }
-			: {}),
+		...(personFunctionIncludes.length > 0 ? { personFunctionIncludes } : {}),
 
 		...(resolved.length > 0 ? { personTitles: resolved } : {}),
 		...(seniorityLevel ? { seniorityLevel } : {}),

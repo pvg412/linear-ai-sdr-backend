@@ -24,23 +24,64 @@ import {
 
 import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";
 import { RealtimeHub } from "@/infra/realtime/realtimeHub";
+import { safePreview } from "@/infra/observability";
+
 
 /**
  * Minimal WS connection shape we rely on.
- * We keep it structural to avoid type-resolution issues with @fastify/websocket/ws
- * that can cause `conn`/`conn.socket` to become a TS `error` type under ESLint.
+ * Structural typing to avoid ws/@fastify/websocket type issues.
  */
 type ChatWsSocket = {
 	readonly readyState: number;
 	send(data: string): void;
 	close(): void;
 	on(event: "message", listener: (data: unknown) => void): void;
-	on(event: "close" | "error", listener: () => void): void;
+	on(event: "close" | "error", listener: (...args: unknown[]) => void): void;
 };
 
-type ChatWsConn = {
-	socket: ChatWsSocket;
-};
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is UnknownRecord {
+	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Fastify websocket plugins differ:
+ * - sometimes handler gets SocketStream { socket: WebSocket }
+ * - sometimes handler gets WebSocket directly
+ *
+ * We support both.
+ */
+function extractWsSocket(conn: unknown): ChatWsSocket {
+	const candidate = isRecord(conn) && "socket" in conn ? conn.socket : conn;
+
+	if (!isRecord(candidate)) {
+		const keys = isRecord(conn) ? Object.keys(conn) : [];
+		throw new Error(`WS socket is not an object (connKeys=${keys.join(",")})`);
+	}
+
+	const send = candidate.send;
+	const on = candidate.on;
+	const close = candidate.close;
+	const readyState = candidate.readyState;
+
+	if (
+		typeof send !== "function" ||
+		typeof on !== "function" ||
+		typeof close !== "function"
+	) {
+		const keys = Object.keys(candidate);
+		throw new Error(`WS socket has invalid shape (keys=${keys.join(",")})`);
+	}
+
+	if (typeof readyState !== "number") {
+		// not fatal, but we rely on it for hub send checks
+		// keep it strict to catch unexpected socket impls
+		throw new Error("WS socket readyState is not a number");
+	}
+
+	return candidate as unknown as ChatWsSocket;
+}
 
 function requireUserId(req: FastifyRequest): string {
 	const userId = req.user?.id;
@@ -75,9 +116,9 @@ async function ensureUserId(req: FastifyRequest): Promise<string> {
 	});
 }
 
-function wsSend(conn: ChatWsConn, event: ChatWsServerEvent): void {
+function wsSend(socket: ChatWsSocket, event: ChatWsServerEvent): void {
 	try {
-		conn.socket.send(JSON.stringify(event));
+		socket.send(JSON.stringify(event));
 	} catch {
 		// ignore
 	}
@@ -205,32 +246,66 @@ export function registerChatRoutes(app: FastifyInstance): void {
 	// WS: realtime chat
 	// -------------------------
 	app.get("/ws/chat/threads/:threadId", { websocket: true }, (conn, req) => {
-		const wsConn = conn as unknown as ChatWsConn;
+		let socket: ChatWsSocket | null = null;
+
+		try {
+			socket = extractWsSocket(conn);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			console.warn("[ws/chat] failed to extract socket", { message: msg });
+			return;
+		}
+
+		const connId = `${Date.now().toString(36)}-${Math.random()
+			.toString(36)
+			.slice(2, 7)}`;
+		const tag = `[ws/chat ${connId}]`;
+
+		console.log(tag, "connection accepted");
+
 		void (async () => {
+			console.log(tag, "handshake start");
+
 			const userId = await ensureUserId(req);
 			const params = req.params as { threadId: string };
 			const threadId = params.threadId;
 
-			// Access check (must throw if not owned / not found)
+			console.log(tag, "handshake ok", { userId, threadId });
+
+			// Access check
+			console.log(tag, "access check start", { userId, threadId });
 			await chatQueryService.getThread(userId, threadId);
+			console.log(tag, "access check ok", { userId, threadId });
 
-			realtimeHub.subscribe(threadId, wsConn.socket);
+			realtimeHub.subscribe(threadId, socket);
+			console.log(tag, "realtime subscribed", { threadId });
 
-			wsSend(wsConn, {
+			wsSend(socket, {
 				type: "thread.ready",
 				payload: { threadId, serverTime: new Date().toISOString() },
 			});
+			console.log(tag, "sent thread.ready", { threadId });
 
-			wsConn.socket.on("message", (buf: unknown) => {
+			socket.on("message", (buf: unknown) => {
 				void (async () => {
+					console.log(tag, "incoming message");
+
 					let parsed: unknown;
 					try {
 						const txt = Buffer.isBuffer(buf)
 							? buf.toString("utf8")
 							: String(buf);
+
+						console.log(tag, "incoming message raw", {
+							isBuffer: Buffer.isBuffer(buf),
+							length: txt.length,
+							preview: safePreview(txt),
+						});
+
 						parsed = JSON.parse(txt);
 					} catch {
-						wsSend(wsConn, {
+						console.warn(tag, "BAD_JSON");
+						wsSend(socket, {
 							type: "error",
 							payload: { code: "BAD_JSON", message: "Invalid JSON." },
 						});
@@ -239,7 +314,8 @@ export function registerChatRoutes(app: FastifyInstance): void {
 
 					const cmd = ChatWsClientCommandSchema.safeParse(parsed);
 					if (!cmd.success) {
-						wsSend(wsConn, {
+						console.warn(tag, "BAD_COMMAND", { issues: cmd.error.issues });
+						wsSend(socket, {
 							type: "error",
 							payload: {
 								code: "BAD_COMMAND",
@@ -251,17 +327,31 @@ export function registerChatRoutes(app: FastifyInstance): void {
 					}
 
 					if (cmd.data.type === "ping") {
-						wsSend(wsConn, { type: "ack", payload: { ok: true } });
+						console.log(tag, "cmd ping");
+						wsSend(socket, { type: "ack", payload: { ok: true } });
 						return;
 					}
 
 					if (cmd.data.type === "message.send") {
-						await chatCommandService.sendMessage(
+						const result = await chatCommandService.sendMessage(
 							userId,
 							threadId,
 							cmd.data.payload
 						);
-						wsSend(wsConn, {
+
+						// 1) broadcast user message
+						realtimeHub.broadcast(threadId, {
+							type: "message.created",
+							payload: { message: result.userMessage },
+						});
+
+						// 2) broadcast assistant JSON message
+						realtimeHub.broadcast(threadId, {
+							type: "message.created",
+							payload: { message: result.assistantMessage },
+						});
+
+						wsSend(socket, {
 							type: "ack",
 							payload: {
 								ok: true,
@@ -272,23 +362,38 @@ export function registerChatRoutes(app: FastifyInstance): void {
 					}
 
 					if (cmd.data.type === "json.apply") {
-						await chatCommandService.applyJson(
+						const result = await chatCommandService.applyJson(
 							userId,
 							threadId,
 							cmd.data.payload
 						);
-						wsSend(wsConn, {
+
+						// 1) broadcast USER JSON audit message
+						realtimeHub.broadcast(threadId, {
+							type: "message.created",
+							payload: { message: result.userJsonMessage },
+						});
+
+						// 2) broadcast ASSISTANT EVENT "We started searching..."
+						realtimeHub.broadcast(threadId, {
+							type: "message.created",
+							payload: { message: result.eventMessage },
+						});
+
+						wsSend(socket, {
 							type: "ack",
 							payload: {
 								ok: true,
 								clientMessageId: cmd.data.payload.clientMessageId,
 							},
 						});
+
 						return;
 					}
 				})().catch((err) => {
 					const msg = err instanceof Error ? err.message : String(err);
-					wsSend(wsConn, {
+					console.error(tag, "handler error", { message: msg });
+					wsSend(socket, {
 						type: "error",
 						payload: { code: "INTERNAL", message: msg },
 					});
@@ -296,12 +401,16 @@ export function registerChatRoutes(app: FastifyInstance): void {
 			});
 		})().catch((err) => {
 			const msg = err instanceof Error ? err.message : String(err);
-			wsSend(wsConn, {
+			console.warn(tag, "handshake failed", { message: msg });
+
+			// Best-effort error frame
+			wsSend(socket, {
 				type: "error",
 				payload: { code: "UNAUTHORIZED", message: msg },
 			});
+
 			try {
-				wsConn.socket.close();
+				socket.close();
 			} catch {
 				// ignore
 			}
