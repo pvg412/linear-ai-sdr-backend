@@ -16,7 +16,7 @@ import { LEAD_DB_TYPES } from "./capabilities/lead-db/lead-db.types";
 import type { LeadDbAdapter } from "./capabilities/lead-db/lead-db.dto";
 import { ScraperCityLeadDbAdapter } from "./capabilities/lead-db/providers/scrapercity/scrapercity.adapter";
 import { SearchLeadsLeadDbAdapter } from "./capabilities/lead-db/providers/searchleads/searchleads.adapter";
-import { ChatCommandService } from "./modules/chat/chat.commandService";
+import { ChatCommandService } from "./modules/chat/chat.command.service";
 import { CHAT_TYPES } from "./modules/chat/chat.types";
 import { ChatQueryService } from "./modules/chat/chat.queryService";
 import { ChatRepository } from "./modules/chat/chat.repository";

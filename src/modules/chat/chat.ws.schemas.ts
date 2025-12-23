@@ -1,62 +1,43 @@
 import { z } from "zod";
-import { LeadProvider, LeadSearchKind } from "@prisma/client";
+import { LeadSearchKind } from "@prisma/client";
 
-import { ChatSendMessageSchema } from "./chat.schemas";
+import { ChatParserIdSchema } from "./chat.parsers";
 
-export const ChatWsJsonApplyPayloadSchema = z.object({
-  clientMessageId: z.string().min(1),
+const ClientMessageIdSchema = z.string().min(1).max(64).optional();
 
-  query: z.record(z.string(), z.unknown()),
-  limit: z.coerce.number().int().min(1).max(50_000),
-
-  provider: z.enum(LeadProvider).optional(),
-  kind: z.enum(LeadSearchKind).optional(),
-
-  parsedMessageId: z.cuid().optional(),
-});
-
-/**
- * Client -> Server commands.
- * Keep it explicit and versionable.
- */
 export const ChatWsClientCommandSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("ping"),
-  }),
+	z.object({
+		type: z.literal("ping"),
+		payload: z.object({}).optional(),
+	}),
+	z.object({
+		type: z.literal("message.send"),
+		payload: z.object({
+			clientMessageId: ClientMessageIdSchema,
+			text: z.string().trim().min(1).max(4000),
+		}),
+	}),
+	z.object({
+		type: z.literal("json.apply"),
+		payload: z.object({
+			clientMessageId: ClientMessageIdSchema,
+			query: z.record(z.string(), z.unknown()),
+			limit: z.coerce.number().int().min(1).max(50_000),
 
-  z.object({
-    type: z.literal("message.send"),
-    payload: ChatSendMessageSchema.extend({
-      clientMessageId: z.string().min(1).optional(),
-    }),
-  }),
+			parser: ChatParserIdSchema.nullable().optional(),
+			kind: z.nativeEnum(LeadSearchKind).nullable().optional(),
 
-  z.object({
-    type: z.literal("json.apply"),
-    payload: ChatWsJsonApplyPayloadSchema,
-  }),
+			parsedMessageId: z.string().optional(),
+		}),
+	}),
 ]);
 
 export type ChatWsClientCommand = z.infer<typeof ChatWsClientCommandSchema>;
 
-/**
- * Server -> Client events.
- * (No need to zod-validate on server side; we control output.)
- */
 export type ChatWsServerEvent =
-  | {
-      type: "thread.ready";
-      payload: { threadId: string; serverTime: string };
-    }
-  | {
-      type: "message.created";
-      payload: { messageId: string };
-    }
-  | {
-      type: "ack";
-      payload: { clientMessageId?: string; ok: true };
-    }
-  | {
-      type: "error";
-      payload: { code: string; message: string; details?: unknown };
-    };
+	| { type: "thread.ready"; payload: { threadId: string; serverTime: string } }
+	| { type: "ack"; payload: { ok: boolean; clientMessageId?: string | null } }
+	| {
+			type: "error";
+			payload: { code: string; message: string; details?: unknown };
+	  };

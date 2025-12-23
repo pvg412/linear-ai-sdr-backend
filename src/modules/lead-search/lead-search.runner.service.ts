@@ -39,6 +39,10 @@ import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";
 
 import { LEAD_SEARCH_TYPES } from "./lead-search.types";
 import { LeadSearchRepository } from "./lead-search.repository";
+import {
+	resolveParserIdFromProvider,
+	resolveParserLabelFromProvider,
+} from "../chat/chat.parsers";
 
 @injectable()
 export class LeadSearchRunnerService {
@@ -135,13 +139,15 @@ export class LeadSearchRunnerService {
 			const msg = `Invalid LeadSearch.query schema: ${JSON.stringify(issues)}`;
 			await this.leadSearchRepository.markFailed(leadSearchId, msg);
 
+			const pub = this.toPublicParserMeta(provider);
+
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
 				text: "Lead search failed: invalid JSON schema.",
 				payload: {
 					event: "leadSearch.failed",
 					leadSearchId,
 					status: LeadSearchStatus.FAILED,
-					provider,
+					...pub,
 					kind,
 					errorMessage: "Invalid JSON schema.",
 					errorDetails: issues,
@@ -249,13 +255,15 @@ export class LeadSearchRunnerService {
 					? `No leads found for these filters`
 					: `Lead search completed. Found ${total} leads`;
 
+			const pub = this.toPublicParserMeta(provider);
+
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
 				text,
 				payload: {
 					event: "leadSearch.completed",
 					leadSearchId,
 					status,
-					provider,
+					...pub,
 					kind,
 					attempt,
 					totalLeads: total,
@@ -276,13 +284,15 @@ export class LeadSearchRunnerService {
 			await this.leadSearchRepository.markRunFailed(run.id, message);
 			await this.leadSearchRepository.markFailed(leadSearchId, message);
 
+			const pub = this.toPublicParserMeta(provider);
+
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
 				text: "Lead search failed.",
 				payload: {
 					event: "leadSearch.failed",
 					leadSearchId,
 					status: LeadSearchStatus.FAILED,
-					provider,
+					...pub,
 					kind,
 					attempt,
 					errorMessage: message,
@@ -339,13 +349,15 @@ export class LeadSearchRunnerService {
 			)}`;
 			await this.leadSearchRepository.markFailed(leadSearchId, msg);
 
+			const pub = this.toPublicParserMeta(providerSelected);
+
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
 				text: "Lead search failed: invalid JSON schema.",
 				payload: {
 					event: "leadSearch.failed",
 					leadSearchId,
 					status: LeadSearchStatus.FAILED,
-					provider: providerSelected,
+					...pub,
 					kind,
 					errorMessage: "Invalid JSON schema.",
 					errorDetails: issues,
@@ -500,13 +512,15 @@ export class LeadSearchRunnerService {
 					? `No leads found for these filters`
 					: `Lead search completed. Found ${total} leads`;
 
+			const pub = this.toPublicParserMeta(provider);
+
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
 				text,
 				payload: {
 					event: "leadSearch.completed",
 					leadSearchId,
 					status,
-					provider,
+					...pub,
 					kind,
 					attempts,
 					errors,
@@ -527,13 +541,15 @@ export class LeadSearchRunnerService {
 
 			await this.leadSearchRepository.markFailed(leadSearchId, message);
 
+			const pub = this.toPublicParserMeta(providerSelected);
+
 			await this.postChatEventIfAny(leadSearch.threadId, leadSearchId, {
 				text: "Lead search failed.",
 				payload: {
 					event: "leadSearch.failed",
 					leadSearchId,
 					status: LeadSearchStatus.FAILED,
-					provider: providerSelected,
+					...pub,
 					kind,
 					errorMessage: message,
 					durationMs: msSince(t0),
@@ -857,5 +873,17 @@ export class LeadSearchRunnerService {
 			type: "message.created",
 			payload: { message },
 		});
+	}
+
+	private toPublicParserMeta(provider: LeadProvider): {
+		parser: string;
+		parserLabel?: string;
+	} {
+		const parser = resolveParserIdFromProvider(provider);
+		const parserLabel = resolveParserLabelFromProvider(provider) ?? undefined;
+
+		// IMPORTANT: never leak provider to frontend
+		if (!parser) return { parser: "UNKNOWN" };
+		return { parser, ...(parserLabel ? { parserLabel } : {}) };
 	}
 }

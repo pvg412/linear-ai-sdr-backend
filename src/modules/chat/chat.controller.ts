@@ -1,10 +1,11 @@
+// src/modules/chat/chat.routes.ts
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import { UserFacingError } from "@/infra/userFacingError";
 import { container } from "@/container";
 
 import { CHAT_TYPES } from "./chat.types";
-import { ChatCommandService } from "./chat.commandService";
+import { ChatCommandService } from "./chat.command.service";
 import { ChatQueryService } from "./chat.queryService";
 
 import {
@@ -26,10 +27,13 @@ import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";
 import { RealtimeHub } from "@/infra/realtime/realtimeHub";
 import { safePreview } from "@/infra/observability";
 
+import {
+	sanitizeMessageToPublic,
+	sanitizeThreadToPublic,
+} from "./chat.parsers";
 
 /**
  * Minimal WS connection shape we rely on.
- * Structural typing to avoid ws/@fastify/websocket type issues.
  */
 type ChatWsSocket = {
 	readonly readyState: number;
@@ -40,18 +44,10 @@ type ChatWsSocket = {
 };
 
 type UnknownRecord = Record<string, unknown>;
-
 function isRecord(v: unknown): v is UnknownRecord {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/**
- * Fastify websocket plugins differ:
- * - sometimes handler gets SocketStream { socket: WebSocket }
- * - sometimes handler gets WebSocket directly
- *
- * We support both.
- */
 function extractWsSocket(conn: unknown): ChatWsSocket {
 	const candidate = isRecord(conn) && "socket" in conn ? conn.socket : conn;
 
@@ -75,8 +71,6 @@ function extractWsSocket(conn: unknown): ChatWsSocket {
 	}
 
 	if (typeof readyState !== "number") {
-		// not fatal, but we rely on it for hub send checks
-		// keep it strict to catch unexpected socket impls
 		throw new Error("WS socket readyState is not a number");
 	}
 
@@ -93,10 +87,6 @@ function requireUserId(req: FastifyRequest): string {
 	});
 }
 
-/**
- * WS handshake may not have req.user populated unless jwtVerify ran.
- * We try to verify token if possible.
- */
 async function ensureUserId(req: FastifyRequest): Promise<string> {
 	const existing = req.user?.id;
 	if (typeof existing === "string" && existing.length > 0) return existing;
@@ -122,6 +112,48 @@ function wsSend(socket: ChatWsSocket, event: ChatWsServerEvent): void {
 	} catch {
 		// ignore
 	}
+}
+
+// Generic sanitizer for REST responses (threads/messages)
+function sanitizeAny(v: unknown): unknown {
+	if (Array.isArray(v)) {
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+		return v.map((x) => (isRecord(x) ? sanitizeThreadToPublic(x) : x));
+	}
+	if (!isRecord(v)) return v;
+
+	// threads list
+	if (
+		Array.isArray(v.items) &&
+		v.items.length &&
+		isRecord(v.items[0]) &&
+		("defaultProvider" in v.items[0] || "defaultParser" in v.items[0])
+	) {
+		return {
+			...v,
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+			items: v.items.map((x) => (isRecord(x) ? sanitizeThreadToPublic(x) : x)),
+		};
+	}
+
+	// messages list
+	if (
+		Array.isArray(v.items) &&
+		v.items.length &&
+		isRecord(v.items[0]) &&
+		"payload" in v.items[0]
+	) {
+		return {
+			...v,
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+			items: v.items.map((x) => (isRecord(x) ? sanitizeMessageToPublic(x) : x)),
+		};
+	}
+
+	// single thread
+	if ("defaultProvider" in v) return sanitizeThreadToPublic(v);
+
+	return v;
 }
 
 const chatQueryService = container.get<ChatQueryService>(
@@ -170,25 +202,31 @@ export function registerChatRoutes(app: FastifyInstance): void {
 			typeof folderId === "string" && folderId.length > 0
 				? folderId
 				: undefined;
-		return chatQueryService.listThreads(userId, folder);
+
+		const res = await chatQueryService.listThreads(userId, folder);
+		return sanitizeAny(res);
 	});
 
 	app.post("/chat/threads", async (req) => {
 		const userId = requireUserId(req);
 		const dto = ChatThreadCreateSchema.parse(req.body);
 
-		return chatCommandService.createThread(userId, {
+		const res = await chatCommandService.createThread(userId, {
 			folderId: dto.folderId,
 			title: dto.title,
-			defaultProvider: dto.defaultProvider,
-			defaultKind: dto.defaultKind,
+			defaultParser: dto.defaultParser ?? undefined,
+			defaultKind: dto.defaultKind ?? undefined,
 		});
+
+		return sanitizeAny(res);
 	});
 
 	app.get("/chat/threads/:threadId", async (req) => {
 		const userId = requireUserId(req);
 		const params = req.params as { threadId: string };
-		return chatQueryService.getThread(userId, params.threadId);
+
+		const res = await chatQueryService.getThread(userId, params.threadId);
+		return sanitizeAny(res);
 	});
 
 	app.patch("/chat/threads/:threadId", async (req) => {
@@ -196,12 +234,14 @@ export function registerChatRoutes(app: FastifyInstance): void {
 		const params = req.params as { threadId: string };
 		const dto = ChatThreadPatchSchema.parse(req.body);
 
-		return chatCommandService.patchThread(userId, params.threadId, {
+		const res = await chatCommandService.patchThread(userId, params.threadId, {
 			folderId: dto.folderId,
 			title: dto.title,
-			defaultProvider: dto.defaultProvider,
-			defaultKind: dto.defaultKind,
+			defaultParser: dto.defaultParser ?? undefined,
+			defaultKind: dto.defaultKind ?? undefined,
 		});
+
+		return sanitizeAny(res);
 	});
 
 	app.delete("/chat/threads/:threadId", async (req) => {
@@ -218,28 +258,54 @@ export function registerChatRoutes(app: FastifyInstance): void {
 		const params = req.params as { threadId: string };
 		const q = CursorPaginationSchema.parse(req.query);
 
-		return chatQueryService.listMessages(userId, params.threadId, {
+		const res = await chatQueryService.listMessages(userId, params.threadId, {
 			limit: q.limit,
 			cursor: q.cursor,
 		});
+
+		return sanitizeAny(res);
 	});
 
-	// REST: send (keep for debug/backward compatibility)
 	app.post("/chat/threads/:threadId/messages", async (req) => {
 		const userId = requireUserId(req);
 		const params = req.params as { threadId: string };
 		const dto = ChatSendMessageSchema.parse(req.body);
 
-		return chatCommandService.sendMessage(userId, params.threadId, dto);
+		const res = await chatCommandService.sendMessage(
+			userId,
+			params.threadId,
+			dto
+		);
+		return {
+			...res,
+			userMessage: sanitizeMessageToPublic(
+				res.userMessage as unknown as UnknownRecord
+			),
+			assistantMessage: sanitizeMessageToPublic(
+				res.assistantMessage as unknown as UnknownRecord
+			),
+		};
 	});
 
-	// REST: Apply JSON (creates LeadSearch + event)
 	app.post("/chat/threads/:threadId/apply", async (req) => {
 		const userId = requireUserId(req);
 		const params = req.params as { threadId: string };
 		const dto = ChatApplyJsonSchema.parse(req.body);
 
-		return chatCommandService.applyJson(userId, params.threadId, dto);
+		const res = await chatCommandService.applyJson(
+			userId,
+			params.threadId,
+			dto
+		);
+		return {
+			...res,
+			userJsonMessage: sanitizeMessageToPublic(
+				res.userJsonMessage as unknown as UnknownRecord
+			),
+			eventMessage: sanitizeMessageToPublic(
+				res.eventMessage as unknown as UnknownRecord
+			),
+		};
 	});
 
 	// -------------------------
@@ -264,32 +330,22 @@ export function registerChatRoutes(app: FastifyInstance): void {
 		console.log(tag, "connection accepted");
 
 		void (async () => {
-			console.log(tag, "handshake start");
-
 			const userId = await ensureUserId(req);
 			const params = req.params as { threadId: string };
 			const threadId = params.threadId;
 
-			console.log(tag, "handshake ok", { userId, threadId });
-
 			// Access check
-			console.log(tag, "access check start", { userId, threadId });
 			await chatQueryService.getThread(userId, threadId);
-			console.log(tag, "access check ok", { userId, threadId });
 
 			realtimeHub.subscribe(threadId, socket);
-			console.log(tag, "realtime subscribed", { threadId });
 
 			wsSend(socket, {
 				type: "thread.ready",
 				payload: { threadId, serverTime: new Date().toISOString() },
 			});
-			console.log(tag, "sent thread.ready", { threadId });
 
 			socket.on("message", (buf: unknown) => {
 				void (async () => {
-					console.log(tag, "incoming message");
-
 					let parsed: unknown;
 					try {
 						const txt = Buffer.isBuffer(buf)
@@ -304,7 +360,6 @@ export function registerChatRoutes(app: FastifyInstance): void {
 
 						parsed = JSON.parse(txt);
 					} catch {
-						console.warn(tag, "BAD_JSON");
 						wsSend(socket, {
 							type: "error",
 							payload: { code: "BAD_JSON", message: "Invalid JSON." },
@@ -314,7 +369,6 @@ export function registerChatRoutes(app: FastifyInstance): void {
 
 					const cmd = ChatWsClientCommandSchema.safeParse(parsed);
 					if (!cmd.success) {
-						console.warn(tag, "BAD_COMMAND", { issues: cmd.error.issues });
 						wsSend(socket, {
 							type: "error",
 							payload: {
@@ -327,7 +381,6 @@ export function registerChatRoutes(app: FastifyInstance): void {
 					}
 
 					if (cmd.data.type === "ping") {
-						console.log(tag, "cmd ping");
 						wsSend(socket, { type: "ack", payload: { ok: true } });
 						return;
 					}
@@ -339,23 +392,29 @@ export function registerChatRoutes(app: FastifyInstance): void {
 							cmd.data.payload
 						);
 
-						// 1) broadcast user message
 						realtimeHub.broadcast(threadId, {
 							type: "message.created",
-							payload: { message: result.userMessage },
+							payload: {
+								message: sanitizeMessageToPublic(
+									result.userMessage as unknown as UnknownRecord
+								),
+							},
 						});
 
-						// 2) broadcast assistant JSON message
 						realtimeHub.broadcast(threadId, {
 							type: "message.created",
-							payload: { message: result.assistantMessage },
+							payload: {
+								message: sanitizeMessageToPublic(
+									result.assistantMessage as unknown as UnknownRecord
+								),
+							},
 						});
 
 						wsSend(socket, {
 							type: "ack",
 							payload: {
 								ok: true,
-								clientMessageId: cmd.data.payload.clientMessageId,
+								clientMessageId: cmd.data.payload.clientMessageId ?? undefined,
 							},
 						});
 						return;
@@ -368,23 +427,29 @@ export function registerChatRoutes(app: FastifyInstance): void {
 							cmd.data.payload
 						);
 
-						// 1) broadcast USER JSON audit message
 						realtimeHub.broadcast(threadId, {
 							type: "message.created",
-							payload: { message: result.userJsonMessage },
+							payload: {
+								message: sanitizeMessageToPublic(
+									result.userJsonMessage as unknown as UnknownRecord
+								),
+							},
 						});
 
-						// 2) broadcast ASSISTANT EVENT "We started searching..."
 						realtimeHub.broadcast(threadId, {
 							type: "message.created",
-							payload: { message: result.eventMessage },
+							payload: {
+								message: sanitizeMessageToPublic(
+									result.eventMessage as unknown as UnknownRecord
+								),
+							},
 						});
 
 						wsSend(socket, {
 							type: "ack",
 							payload: {
 								ok: true,
-								clientMessageId: cmd.data.payload.clientMessageId,
+								clientMessageId: cmd.data.payload.clientMessageId ?? null,
 							},
 						});
 
@@ -401,9 +466,7 @@ export function registerChatRoutes(app: FastifyInstance): void {
 			});
 		})().catch((err) => {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.warn(tag, "handshake failed", { message: msg });
 
-			// Best-effort error frame
 			wsSend(socket, {
 				type: "error",
 				payload: { code: "UNAUTHORIZED", message: msg },
