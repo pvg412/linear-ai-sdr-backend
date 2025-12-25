@@ -8,7 +8,7 @@ import {
 	CompanySizeSchema,
 	LeadDbCanonicalFiltersSchema,
 } from "@/capabilities/lead-db/lead-db.dto";
-import { ChatPromptParser } from "./chat.dto";
+import { ChatPromptParser } from "../schemas/chat.dto";
 
 const LimitSchema = z.number().int().min(1).max(50_000);
 

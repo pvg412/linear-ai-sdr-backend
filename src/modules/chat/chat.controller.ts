@@ -3,8 +3,8 @@ import type { FastifyInstance } from "fastify";
 import { container } from "@/container";
 
 import { CHAT_TYPES } from "./chat.types";
-import { ChatCommandService } from "./chat.command.service";
-import { ChatQueryService } from "./chat.queryService";
+import { ChatCommandService } from "./services/chat.command.service";
+import { ChatQueryService } from "./services/chat.query.service";
 import { registerChatHttpRoutes } from "./controller/chat.controller.http";
 import { registerChatWsRoutes } from "./controller/chat.controller.ws";
 import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";

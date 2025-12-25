@@ -42,7 +42,7 @@ import { LeadSearchRepository } from "./lead-search.repository";
 import {
 	resolveParserIdFromProvider,
 	resolveParserLabelFromProvider,
-} from "../chat/chat.parsers";
+} from "../chat/parsers/chat.parsers";
 
 @injectable()
 export class LeadSearchRunnerService {

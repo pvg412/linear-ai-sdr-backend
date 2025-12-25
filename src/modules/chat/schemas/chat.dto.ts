@@ -14,7 +14,7 @@ import type {
 	ChatThreadPatchSchema,
 	ChatSendMessageSchema,
 	ChatApplyJsonSchema,
-} from "./chat.schemas";
+} from "../schemas/chat.schemas";
 
 export type ChatFolderCreateDto = z.infer<typeof ChatFolderCreateSchema>;
 export type ChatFolderRenameDto = z.infer<typeof ChatFolderRenameSchema>;

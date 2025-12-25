@@ -1,7 +1,7 @@
 import { inject, injectable } from "inversify";
 
-import { CHAT_TYPES } from "./chat.types";
-import { ChatRepository } from "./chat.repository";
+import { CHAT_TYPES } from "../chat.types";
+import { ChatRepository } from "../persistence/chat.repository";
 
 @injectable()
 export class ChatQueryService {

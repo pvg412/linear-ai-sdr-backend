@@ -1,8 +1,9 @@
 import { injectable } from "inversify";
-import { Prisma, PrismaClient, UserRole } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "@/infra/prisma";
 import { UserFacingError } from "@/infra/userFacingError";
+import { LeadPaginationFilters } from "../schemas/lead.schemas";
 
 function toIso(d: Date): string {
 	return d.toISOString();
@@ -13,10 +14,8 @@ export class LeadRepository {
 	private readonly prisma: PrismaClient = getPrisma();
 
 	async listLeads(
-		userId: string,
-		role: UserRole,
 		opts: {
-			leadSearchId?: string;
+			filters?: LeadPaginationFilters;
 			page?: number;
 			perPage?: number;
 		}
@@ -30,18 +29,19 @@ export class LeadRepository {
 			});
 		}
 
-		if (role !== UserRole.ADMIN) {
+		if (opts.filters?.createdById) {
+			filters.push({ createdById: opts.filters.createdById });
+		}
+
+		if (opts.filters?.email) {
 			filters.push({
-				OR: [
-					{ createdById: userId },
-					{ searches: { some: { leadSearch: { createdById: userId } } } },
-				],
+				email: { equals: opts.filters.email, mode: "insensitive" },
 			});
 		}
 
-		if (opts.leadSearchId) {
+		if (opts.filters?.leadSearchId) {
 			filters.push({
-				searches: { some: { leadSearchId: opts.leadSearchId } },
+				searches: { some: { leadSearchId: opts.filters.leadSearchId } },
 			});
 		}
 

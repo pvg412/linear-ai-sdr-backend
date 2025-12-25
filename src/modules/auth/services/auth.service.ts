@@ -2,8 +2,8 @@ import { UserRole } from "@prisma/client";
 
 import { getPrisma } from "@/infra/prisma";
 import type { Env } from "@/config/env";
-import { hashPassword, verifyPassword } from "./auth.password";
-import { signJwt, type JwtPayload } from "./auth.jwt";
+import { hashPassword, verifyPassword } from "../auth.password";
+import { signJwt, type JwtPayload } from "../auth.jwt";
 
 export type AuthUser = {
   id: string;

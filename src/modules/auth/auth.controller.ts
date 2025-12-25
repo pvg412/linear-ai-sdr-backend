@@ -2,12 +2,12 @@ import type { FastifyInstance } from "fastify";
 
 import type { Env } from "@/config/env";
 import { loadEnv } from "@/config/env";
-import { AuthService } from "./auth.service";
+import { AuthService } from "./services/auth.service";
 import {
   createSaleManagerBodySchema,
   devRegisterBodySchema,
   loginBodySchema,
-} from "./auth.schemas";
+} from "./schemas/auth.schemas";
 import { UserRole } from "@prisma/client";
 
 export function registerAuthRoutes(app: FastifyInstance, envArg?: Env) {

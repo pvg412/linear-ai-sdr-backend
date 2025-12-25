@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { LeadSearchKind } from "@prisma/client";
 
-import { ChatParserIdSchema } from "./chat.parsers";
+import { ChatParserIdSchema } from "../parsers/chat.parsers";
 
 const ClientMessageIdSchema = z.string().min(1).max(64).optional();
 

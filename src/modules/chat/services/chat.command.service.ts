@@ -8,23 +8,23 @@ import {
 } from "@prisma/client";
 
 import { UserFacingError } from "@/infra/userFacingError";
-import { ChatRepository } from "./chat.repository";
-import { CHAT_TYPES } from "./chat.types";
+import { ChatRepository } from "../persistence/chat.repository";
+import { CHAT_TYPES } from "../chat.types";
 import type {
 	ChatApplyJsonDto,
 	ChatSendMessageDto,
 	SendMessageResultDto,
 	ApplyJsonResultDto,
 	ChatPromptParser,
-} from "./chat.dto";
-import { LEAD_SEARCH_TYPES } from "../lead-search/lead-search.types";
-import { LeadSearchRunnerService } from "../lead-search/lead-search.runner.service";
+} from "../schemas/chat.dto";
+import { LEAD_SEARCH_TYPES } from "@/modules/lead-search/lead-search.types";
+import { LeadSearchRunnerService } from "@/modules/lead-search/lead-search.runner.service";
 import {
 	resolveInternalFromParserId,
 	resolveParserIdFromProvider,
 	resolveParserLabelFromProvider,
 	type ChatParserId,
-} from "./chat.parsers";
+} from "../parsers/chat.parsers";
 
 type Json = Prisma.InputJsonValue;
 

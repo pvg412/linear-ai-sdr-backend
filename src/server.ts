@@ -7,7 +7,7 @@ import { websocketPlugin } from './plugins/websocket';
 import { loadEnv } from './config/env';
 import { registerAuthRoutes } from './modules/auth/auth.controller';
 import { createAuthGuard } from './modules/auth/auth.guard';
-import { AuthService } from './modules/auth/auth.service';
+import { AuthService } from './modules/auth/services/auth.service';
 import { registerChatRoutes } from './modules/chat/chat.controller';
 import { registerLeadRoutes } from './modules/lead/lead.controller';
 

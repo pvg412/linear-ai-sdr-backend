@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { LeadSearchKind } from "@prisma/client";
 
-import { ChatParserIdSchema } from "./chat.parsers";
+import { ChatParserIdSchema } from "../parsers/chat.parsers";
 
 export const CursorPaginationSchema = z.object({
 	limit: z.coerce.number().int().min(1).max(200).default(50),
