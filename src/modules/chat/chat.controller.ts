@@ -5,11 +5,11 @@ import { container } from "@/container";
 import { CHAT_TYPES } from "./chat.types";
 import { ChatCommandService } from "./chat.command.service";
 import { ChatQueryService } from "./chat.queryService";
-import { registerChatHttpRoutes } from "./chat.controller.http";
-import { registerChatWsRoutes } from "./chat.controller.ws";
+import { registerChatHttpRoutes } from "./controller/chat.controller.http";
+import { registerChatWsRoutes } from "./controller/chat.controller.ws";
 import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";
 import { RealtimeHub } from "@/infra/realtime/realtimeHub";
-import type { ChatControllerDeps } from "./chat.controller.types";
+import type { ChatControllerDeps } from "./controller/chat.controller.types";
 
 const deps: ChatControllerDeps = {
 	queryService: container.get<ChatQueryService>(CHAT_TYPES.ChatQueryService),

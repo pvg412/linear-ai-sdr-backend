@@ -1,7 +1,7 @@
 import type { FastifyRequest } from "fastify";
 
-import { sanitizeMessageToPublic, sanitizeThreadToPublic } from "./chat.parsers";
-import type { ChatWsServerEvent } from "./chat.ws.schemas";
+import { sanitizeMessageToPublic, sanitizeThreadToPublic } from "../chat.parsers";
+import type { ChatWsServerEvent } from "../chat.ws.schemas";
 import { requireRequestUserId } from "@/infra/auth/requestUser";
 
 /**

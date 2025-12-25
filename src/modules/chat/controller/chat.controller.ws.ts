@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import { safePreview } from "@/infra/observability";
 
-import { ChatWsClientCommandSchema } from "./chat.ws.schemas";
+import { ChatWsClientCommandSchema } from "../chat.ws.schemas";
 import type { ChatControllerDeps } from "./chat.controller.types";
 import {
 	ensureUserId,
@@ -11,7 +11,7 @@ import {
 	type ChatWsSocket,
 	type UnknownRecord,
 } from "./chat.controller.helpers";
-import { sanitizeMessageToPublic } from "./chat.parsers";
+import { sanitizeMessageToPublic } from "../chat.parsers";
 
 type WsContext = {
 	socket: ChatWsSocket;

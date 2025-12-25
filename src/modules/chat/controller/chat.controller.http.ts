@@ -8,13 +8,13 @@ import {
 	ChatThreadCreateSchema,
 	ChatThreadPatchSchema,
 	CursorPaginationSchema,
-} from "./chat.schemas";
+} from "../chat.schemas";
 import type { ChatControllerDeps } from "./chat.controller.types";
 import {
 	sanitizeAny,
 	type UnknownRecord,
 } from "./chat.controller.helpers";
-import { sanitizeMessageToPublic } from "./chat.parsers";
+import { sanitizeMessageToPublic } from "../chat.parsers";
 import { requireRequestUserId } from "@/infra/auth/requestUser";
 
 export function registerChatHttpRoutes(
