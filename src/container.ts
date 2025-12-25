@@ -21,6 +21,9 @@ import { CHAT_TYPES } from "./modules/chat/chat.types";
 import { ChatQueryService } from "./modules/chat/chat.queryService";
 import { ChatRepository } from "./modules/chat/chat.repository";
 import { ChatAiPromptParser } from "./modules/chat/chat.promptParser.ai";
+import { LEAD_TYPES } from "./modules/lead/lead.types";
+import { LeadRepository } from "./modules/lead/lead.repository";
+import { LeadQueryService } from "./modules/lead/lead.query.service";
 import { LeadSearchRunnerService } from "./modules/lead-search/lead-search.runner.service";
 import { LEAD_SEARCH_TYPES } from "./modules/lead-search/lead-search.types";
 import { LeadSearchRepository } from "./modules/lead-search/lead-search.repository";
@@ -64,6 +67,16 @@ container
 container
 	.bind<ChatAiPromptParser>(CHAT_TYPES.ChatPromptParser)
 	.to(ChatAiPromptParser)
+	.inSingletonScope();
+
+container
+	.bind<LeadRepository>(LEAD_TYPES.LeadRepository)
+	.to(LeadRepository)
+	.inSingletonScope();
+
+container
+	.bind<LeadQueryService>(LEAD_TYPES.LeadQueryService)
+	.to(LeadQueryService)
 	.inSingletonScope();
 
 container

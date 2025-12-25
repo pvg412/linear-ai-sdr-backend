@@ -9,6 +9,7 @@ import { registerAuthRoutes } from './modules/auth/auth.controller';
 import { createAuthGuard } from './modules/auth/auth.guard';
 import { AuthService } from './modules/auth/auth.service';
 import { registerChatRoutes } from './modules/chat/chat.controller';
+import { registerLeadRoutes } from './modules/lead/lead.controller';
 
 export async function buildServer() {
   const env = loadEnv();
@@ -48,6 +49,7 @@ export async function buildServer() {
   app.addHook("onRequest", createAuthGuard(env));
 
   registerChatRoutes(app);
+  registerLeadRoutes(app);
 
   return { app, env };
 }
