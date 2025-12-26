@@ -15,12 +15,21 @@ const EnvSchema = z.object({
 		.default("development"),
 	PORT: z.coerce.number().default(3001),
 	DATABASE_URL: z.url(),
+	REDIS_URL: z.url(),
+
+	LEAD_SEARCH_QUEUE_CONCURRENCY: z.coerce.number().default(4),
+	LEAD_SEARCH_QUEUE_ATTEMPTS: z.coerce.number().default(3),
+	LEAD_SEARCH_QUEUE_BACKOFF_MS: z.coerce.number().default(5000),
 
 	AUTH_JWT_SECRET: z
 		.string()
 		.min(16)
 		.default("dev-insecure-secret-change-me-please-123456"),
-	AUTH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 12),
+	AUTH_TOKEN_TTL_SECONDS: z.coerce
+		.number()
+		.int()
+		.positive()
+		.default(60 * 60 * 12),
 	AUTH_ALLOW_DEV_REGISTER: z
 		.string()
 		.optional()

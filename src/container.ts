@@ -1,7 +1,16 @@
 import "reflect-metadata";
 import { Container } from "inversify";
+import Redis from "ioredis";
+import type { Queue } from "bullmq";
 
 import { loadEnv } from "./config/env";
+import {
+	createLeadSearchQueue,
+	LeadSearchJobData,
+	LeadSearchJobName,
+} from "./infra/queue/lead-search.queue";
+import { tryCreateRedisClient } from "./infra/queue/redis.client";
+import { QUEUE_TYPES } from "./infra/queue/queue.types";
 import { REALTIME_TYPES } from "./infra/realtime/realtime.types";
 import { RealtimeHub } from "./infra/realtime/realtimeHub";
 import { SCRAPER_TYPES } from "./capabilities/scraper/scraper.types";
@@ -28,6 +37,8 @@ import { LeadSearchRunnerService } from "./modules/lead-search/lead-search.runne
 import { LEAD_SEARCH_TYPES } from "./modules/lead-search/lead-search.types";
 import { LeadSearchRepository } from "./modules/lead-search/lead-search.repository";
 
+const redis = tryCreateRedisClient();
+
 const container = new Container();
 
 const env = loadEnv();
@@ -43,6 +54,20 @@ const isScruppEnabled = Boolean(
 const isSearchLeadsEnabled = Boolean(
 	env.SEARCH_LEADS_API_KEY && env.SEARCH_LEADS_API_URL
 );
+
+if (redis) {
+	container.bind<Redis>(QUEUE_TYPES.Redis).toConstantValue(redis);
+
+	const leadSearchQueue = createLeadSearchQueue(redis);
+
+	container
+		.bind<Queue<LeadSearchJobData, void, LeadSearchJobName>>(
+			QUEUE_TYPES.LeadSearchQueue
+		)
+		.toConstantValue(leadSearchQueue);
+} else {
+	console.warn("[queue] REDIS_URL not set; LeadSearch will run inline");
+}
 
 container
 	.bind<RealtimeHub>(REALTIME_TYPES.RealtimeHub)

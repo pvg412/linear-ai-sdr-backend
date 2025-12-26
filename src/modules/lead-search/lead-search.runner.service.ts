@@ -1,4 +1,5 @@
 import { inject, injectable } from "inversify";
+import { Queue } from "bullmq";
 import {
 	ChatMessageRole,
 	ChatMessageType,
@@ -43,6 +44,12 @@ import {
 	resolveParserIdFromProvider,
 	resolveParserLabelFromProvider,
 } from "../chat/parsers/chat.parsers";
+import { QUEUE_TYPES } from "@/infra/queue/queue.types";
+import {
+	LeadSearchJobData,
+	LeadSearchJobName,
+	leadSearchJobOptions,
+} from "@/infra/queue/lead-search.queue";
 
 @injectable()
 export class LeadSearchRunnerService {
@@ -59,13 +66,15 @@ export class LeadSearchRunnerService {
 		private readonly scraperOrchestrator: ScraperOrchestrator,
 
 		@inject(REALTIME_TYPES.RealtimeHub)
-		private readonly realtimeHub: RealtimeHub
+		private readonly realtimeHub: RealtimeHub,
+		@inject(QUEUE_TYPES.LeadSearchQueue)
+		private readonly leadSearchQueue: Queue<
+			LeadSearchJobData,
+			void,
+			LeadSearchJobName
+		>
 	) {}
 
-	/**
-	 * Fire-and-forget launch.
-	 * good enough for single-process dev; for production use a queue/worker.
-	 */
 	dispatch(
 		leadSearchId: string,
 		triggeredById?: string,
@@ -73,15 +82,56 @@ export class LeadSearchRunnerService {
 	): void {
 		const lg = ensureLogger(log);
 
-		setImmediate(() => {
-			void this.run(leadSearchId, triggeredById, lg).catch((err) => {
-				// IMPORTANT: do not swallow silently when log is missing
+		const runInline = () => {
+			setImmediate(() => {
+				void this.run(leadSearchId, triggeredById, lg).catch((err) => {
+					lg.error(
+						{ err: err as Error, leadSearchId },
+						"LeadSearchRunner inline dispatch failed"
+					);
+				});
+			});
+		};
+
+		const q = this.leadSearchQueue;
+		if (!q) {
+			runInline();
+			return;
+		}
+
+		void (async () => {
+			try {
+				await q.add(
+					"leadSearch.run",
+					{ leadSearchId, triggeredById: triggeredById ?? null },
+					{
+						jobId: leadSearchId,
+						...leadSearchJobOptions(),
+					}
+				);
+
+				lg.info({ leadSearchId }, "LeadSearch job enqueued");
+			} catch (err) {
+				try {
+					const existing = await q.getJob(leadSearchId);
+					if (existing) {
+						lg.info(
+							{ leadSearchId },
+							"LeadSearch job already exists; skipping enqueue"
+						);
+						return;
+					}
+				} catch {
+					// ignore: Redis might be down right now
+				}
+
 				lg.error(
 					{ err: err as Error, leadSearchId },
-					"LeadSearchRunner dispatch failed"
+					"Failed to enqueue LeadSearch job; fallback to inline"
 				);
-			});
-		});
+				runInline();
+			}
+		})();
 	}
 
 	async run(
