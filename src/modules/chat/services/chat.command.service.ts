@@ -41,22 +41,9 @@ export class ChatCommandService {
 		private readonly leadSearchRunnerService: LeadSearchRunnerService
 	) {}
 
-	async createFolder(userId: string, name: string) {
-		return this.chatRepository.createFolder(userId, name);
-	}
-
-	async renameFolder(userId: string, folderId: string, name: string) {
-		return this.chatRepository.renameFolder(userId, folderId, name);
-	}
-
-	async deleteFolder(userId: string, folderId: string) {
-		return this.chatRepository.deleteFolder(userId, folderId);
-	}
-
 	async createThread(
 		userId: string,
 		input: {
-			folderId?: string;
 			title?: string;
 			defaultParser?: ChatParserId | null;
 			defaultKind?: LeadSearchKind | null;
@@ -76,7 +63,6 @@ export class ChatCommandService {
 			// allow thread without defaults (UI can set later)
 			return this.chatRepository.createThread({
 				ownerId: userId,
-				folderId: input.folderId,
 				title: input.title,
 				defaultProvider: undefined,
 				defaultKind: undefined,
@@ -106,7 +92,6 @@ export class ChatCommandService {
 
 		return this.chatRepository.createThread({
 			ownerId: userId,
-			folderId: input.folderId,
 			title: input.title,
 			defaultProvider: r.provider,
 			defaultKind: kind,
@@ -117,7 +102,6 @@ export class ChatCommandService {
 		userId: string,
 		threadId: string,
 		patch: {
-			folderId?: string | null;
 			title?: string | null;
 			defaultParser?: ChatParserId | null;
 			defaultKind?: LeadSearchKind | null;
@@ -172,7 +156,6 @@ export class ChatCommandService {
 		}
 
 		return this.chatRepository.patchThread(userId, threadId, {
-			folderId: patch.folderId,
 			title: patch.title,
 
 			// internal persisted

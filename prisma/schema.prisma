@@ -79,7 +79,6 @@ model User {
 
   leadsCreated    Lead[]           @relation("LeadCreatedBy")
   leadSearchLeads LeadSearchLead[]
-  chatFolders     ChatFolder[]     @relation("ChatFolderOwner")
   chatThreads     ChatThread[]     @relation("ChatThreadOwner")
   chatMessages    ChatMessage[]    @relation("ChatMessageAuthor")
 
@@ -255,22 +254,6 @@ model LeadProviderCapability {
   @@id([provider, kind])
 }
 
-model ChatFolder {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  ownerId String
-  owner   User   @relation("ChatFolderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-
-  name String
-
-  threads ChatThread[]
-
-  @@unique([ownerId, name])
-  @@index([ownerId])
-}
-
 model ChatThread {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -278,9 +261,6 @@ model ChatThread {
 
   ownerId String
   owner   User   @relation("ChatThreadOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-
-  folderId String?
-  folder   ChatFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
 
   title String?
 
@@ -294,7 +274,6 @@ model ChatThread {
   leadSearches LeadSearch[]
 
   @@index([ownerId, updatedAt])
-  @@index([folderId])
 }
 
 model ChatMessage {

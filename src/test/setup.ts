@@ -55,7 +55,6 @@ beforeEach(async () => {
 	await prisma.$transaction([
 		prisma.chatMessage.deleteMany(),
 		prisma.chatThread.deleteMany(),
-		prisma.chatFolder.deleteMany(),
 
 		prisma.leadSearchRunResult.deleteMany(),
 		prisma.leadSearchRun.deleteMany(),

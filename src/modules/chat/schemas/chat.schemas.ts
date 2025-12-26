@@ -8,16 +8,7 @@ export const CursorPaginationSchema = z.object({
 	cursor: z.cuid().optional(),
 });
 
-export const ChatFolderCreateSchema = z.object({
-	name: z.string().trim().min(1).max(80),
-});
-
-export const ChatFolderRenameSchema = z.object({
-	name: z.string().trim().min(1).max(80),
-});
-
 export const ChatThreadCreateSchema = z.object({
-	folderId: z.cuid().optional(),
 	title: z.string().trim().min(1).max(120).optional(),
 
 	defaultParser: ChatParserIdSchema.nullable().optional(),
@@ -25,7 +16,6 @@ export const ChatThreadCreateSchema = z.object({
 });
 
 export const ChatThreadPatchSchema = z.object({
-	folderId: z.cuid().nullable().optional(),
 	title: z.string().trim().min(1).max(120).nullable().optional(),
 
 	defaultParser: ChatParserIdSchema.nullable().optional(),

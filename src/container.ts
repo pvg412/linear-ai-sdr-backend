@@ -9,7 +9,7 @@ import { ScraperOrchestrator } from "./capabilities/scraper/scraper.orchestrator
 import { ScraperAdapter } from "./capabilities/scraper/scraper.dto";
 import { AiPromptParserService } from "./modules/ai/ai-prompt-parser.service";
 import { AI_TYPES } from "./modules/ai/ai.types";
-import { ScraperCityApolloAdapter } from "./capabilities/scraper/providers/scraperCity/scraperCity.adapter";
+import { ScraperCityScraperAdapter } from "./capabilities/scraper/providers/scrapercity/scrapercity.adapter";
 import { ScruppApolloAdapter } from "./capabilities/scraper/providers/scrupp/scrupp.adapter";
 import { LeadDbOrchestrator } from "./capabilities/lead-db/lead-db.orchestrator";
 import { LEAD_DB_TYPES } from "./capabilities/lead-db/lead-db.types";
@@ -97,7 +97,7 @@ container
 container
 	.bind<ScraperAdapter>(SCRAPER_TYPES.ScraperAdapter)
 	.toDynamicValue(() => {
-		return new ScraperCityApolloAdapter(
+		return new ScraperCityScraperAdapter(
 			env.SCRAPERCITY_API_KEY ?? "",
 			isScraperCityEnabled
 		);

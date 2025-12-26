@@ -100,8 +100,7 @@ export class LeadSearchRunnerService {
 		}
 
 		if (leadSearch.kind === LeadSearchKind.SCRAPER) {
-			// TODO: enable when ready
-			// await this.runScraper(leadSearchId, triggeredById, lg);
+			await this.runScraper(leadSearchId, triggeredById, lg);
 			return;
 		}
 
@@ -310,7 +309,7 @@ export class LeadSearchRunnerService {
 	}
 
 	// -------------------------
-	// SCRAPER (new)
+	// SCRAPER
 	// -------------------------
 	private async runScraper(
 		leadSearchId: string,

@@ -1,124 +1,60 @@
-import axios, { AxiosError } from "axios";
 import { injectable } from "inversify";
 import { LeadProvider } from "@prisma/client";
 
-import { loadEnv } from "@/config/env";
-import {
+import type {
 	ScrapeQuery,
 	ScraperAdapter,
 	ScraperAdapterResult,
 } from "@/capabilities/scraper/scraper.dto";
-import { ScraperCityApolloRow } from "./scraperCity.dto";
-import { NormalizedLead } from "@/capabilities/shared/leadValidate";
+import { validateNormalizedLeads } from "@/capabilities/shared/leadValidate";
 
-const env = loadEnv();
+import { ScraperCityClient } from "./scrapercity.client";
+import { mapScraperCityRowsToLeads } from "./scrapercity.leadMapper";
+import { wrapScraperCityAxiosError } from "./scrapercity.errors";
+
+const SCRAPER_CITY_POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
 @injectable()
-export class ScraperCityApolloAdapter implements ScraperAdapter {
+export class ScraperCityScraperAdapter implements ScraperAdapter {
 	public readonly provider = LeadProvider.SCRAPER_CITY;
+	private readonly client: ScraperCityClient;
 
 	constructor(
 		private readonly apiKey: string,
 		private readonly enabled: boolean
-	) {}
+	) {
+		this.client = new ScraperCityClient(apiKey);
+	}
 
 	isEnabled(): boolean {
 		return this.enabled && !!this.apiKey;
 	}
 
 	async scrape(query: ScrapeQuery): Promise<ScraperAdapterResult> {
-		if (!this.isEnabled()) {
-			throw new Error("ScraperCityApolloAdapter is disabled or misconfigured");
-		}
-		if (!env.SCRAPERCITY_API_URL) {
-			throw new Error("SCRAPERCITY_API_URL is not set");
-		}
-
 		try {
-			const startRes = await axios.post<{ runId: string }>(
-				`${env.SCRAPERCITY_API_URL}/v1/scrape/apollo`,
-				{
-					url: query.apolloUrl,
-					count: query.limit,
-				},
-				{
-					headers: {
-						Authorization: `Bearer ${this.apiKey}`,
-						"Content-Type": "application/json",
-					},
-					timeout: 5 * 60 * 1000, // 5 min
-				}
-			);
+			const count = normalizeCount(query.limit);
 
-			const runId = startRes.data.runId;
-			console.info("[ScraperCityApollo] run started", { runId });
-
-			let status: string | undefined;
-			let lastStatus: string | undefined;
-
-			for (let i = 0; i < 60; i++) {
-				const statusRes = await axios.get<{ status: string }>(
-					`${env.SCRAPERCITY_API_URL}/v1/scrape/status/${runId}`,
-					{
-						headers: { Authorization: `Bearer ${this.apiKey}` },
-						timeout: 30_000,
-					}
-				);
-
-				status = String(statusRes.data.status ?? "").toUpperCase();
-				if (i === 0 || status !== lastStatus) {
-					console.info("[ScraperCityApollo] run status", {
-						runId,
-						status,
-						attempt: i + 1,
-					});
-				}
-				lastStatus = status;
-
-				if (status === "SUCCEEDED" || status === "SUCCESS") break;
-				if (status === "FAILED") {
-					throw new Error(`ScraperCity run failed: ${runId}`);
-				}
-
-				await new Promise((r) => setTimeout(r, 5_000));
-			}
-
-			if (status !== "SUCCEEDED" && status !== "SUCCESS") {
-				throw new Error(`ScraperCity run timed out: ${runId}`);
-			}
-
-			const downloadRes = await axios.get<ScraperCityApolloRow[]>(
-				`${env.SCRAPERCITY_API_URL}/downloads/${runId}?format=json`,
-				{
-					headers: { Authorization: `Bearer ${this.apiKey}` },
-					timeout: 120_000,
-				}
-			);
-
-			const rows = downloadRes.data;
-			console.info("[ScraperCityApollo] download complete", {
-				runId,
-				rows: Array.isArray(rows) ? rows.length : 0,
+			const runId = await this.client.startApolloUrl({
+				url: query.apolloUrl,
+				count,
 			});
 
-			const leads: NormalizedLead[] = rows.map((row) => ({
-				source: LeadProvider.SCRAPER_CITY,
+			const status = await this.client.waitForSucceeded(runId, {
+				intervalMs: SCRAPER_CITY_POLL_INTERVAL_MS,
+				maxAttempts: 180,
+			});
 
-				externalId: row.id ?? undefined,
+			const rows = await this.client.downloadJsonRows(runId, status);
+			const leadsRaw = mapScraperCityRowsToLeads(rows);
 
-				fullName: row.name ?? undefined,
-				firstName: row.first_name ?? undefined,
-				lastName: row.last_name ?? undefined,
-				title: row.title ?? undefined,
-				company: row.company_name ?? undefined,
-				companyDomain: row.company_domain ?? undefined,
-				companyUrl: row.company_website ?? undefined,
-				linkedinUrl: row.linkedin_url ?? undefined,
-				location: row.location ?? undefined,
+			const leadsValidated = validateNormalizedLeads(leadsRaw, {
+				mode: "drop",
+				provider: LeadProvider.SCRAPER_CITY,
+				minValid: 0,
+			});
 
-				email: row.work_email ?? row.email ?? undefined,
-				raw: row,
-			}));
+			// Important: if count was increased to min (500), return strictly query.limit
+			const leads = leadsValidated.slice(0, query.limit);
 
 			return {
 				provider: this.provider,
@@ -127,19 +63,18 @@ export class ScraperCityApolloAdapter implements ScraperAdapter {
 				leads,
 			};
 		} catch (e) {
-			if (e instanceof AxiosError) {
-				console.error("[ScraperCityApollo] error response", {
-					status: e.response?.status,
-					data: e.response?.data as unknown,
-					request: {
-						method: e.config?.method,
-						url: e.config?.url,
-					},
-				});
-			} else {
-				console.error("[ScraperCityApollo] error", (e as Error).message);
-			}
+			wrapScraperCityAxiosError(e);
 			throw e;
 		}
 	}
+}
+
+function normalizeCount(limit: number): number {
+	// keep compatible with lead-db (ScraperCity often doesn't like small values)
+	const min = 500;
+	const max = 50_000;
+	const n = Number.isFinite(limit) ? Math.floor(limit) : min;
+	if (n < min) return min;
+	if (n > max) return max;
+	return n;
 }

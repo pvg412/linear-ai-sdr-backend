@@ -2,8 +2,6 @@ import type { FastifyInstance } from "fastify";
 
 import {
 	ChatApplyJsonSchema,
-	ChatFolderCreateSchema,
-	ChatFolderRenameSchema,
 	ChatSendMessageSchema,
 	ChatThreadCreateSchema,
 	ChatThreadPatchSchema,
@@ -21,38 +19,8 @@ export function registerChatHttpRoutes(
 	app: FastifyInstance,
 	deps: ChatControllerDeps
 ): void {
-	registerFolderRoutes(app, deps);
 	registerThreadRoutes(app, deps);
 	registerMessageRoutes(app, deps);
-}
-
-function registerFolderRoutes(
-	app: FastifyInstance,
-	deps: ChatControllerDeps
-): void {
-	app.get("/chat/folders", async (req) => {
-		const userId = requireRequestUserId(req);
-		return deps.queryService.listFolders(userId);
-	});
-
-	app.post("/chat/folders", async (req) => {
-		const userId = requireRequestUserId(req);
-		const dto = ChatFolderCreateSchema.parse(req.body);
-		return deps.commandService.createFolder(userId, dto.name);
-	});
-
-	app.patch("/chat/folders/:folderId", async (req) => {
-		const userId = requireRequestUserId(req);
-		const params = req.params as { folderId: string };
-		const dto = ChatFolderRenameSchema.parse(req.body);
-		return deps.commandService.renameFolder(userId, params.folderId, dto.name);
-	});
-
-	app.delete("/chat/folders/:folderId", async (req) => {
-		const userId = requireRequestUserId(req);
-		const params = req.params as { folderId: string };
-		return deps.commandService.deleteFolder(userId, params.folderId);
-	});
 }
 
 function registerThreadRoutes(
@@ -61,13 +29,8 @@ function registerThreadRoutes(
 ): void {
 	app.get("/chat/threads", async (req) => {
 		const userId = requireRequestUserId(req);
-		const folderId = (req.query as { folderId?: string } | undefined)?.folderId;
-		const folder =
-			typeof folderId === "string" && folderId.length > 0
-				? folderId
-				: undefined;
 
-		const res = await deps.queryService.listThreads(userId, folder);
+		const res = await deps.queryService.listThreads(userId);
 		return sanitizeAny(res);
 	});
 
@@ -76,7 +39,6 @@ function registerThreadRoutes(
 		const dto = ChatThreadCreateSchema.parse(req.body);
 
 		const res = await deps.commandService.createThread(userId, {
-			folderId: dto.folderId,
 			title: dto.title,
 			defaultParser: dto.defaultParser ?? undefined,
 			defaultKind: dto.defaultKind ?? undefined,
@@ -99,7 +61,6 @@ function registerThreadRoutes(
 		const dto = ChatThreadPatchSchema.parse(req.body);
 
 		const res = await deps.commandService.patchThread(userId, params.threadId, {
-			folderId: dto.folderId,
 			title: dto.title,
 			defaultParser: dto.defaultParser ?? undefined,
 			defaultKind: dto.defaultKind ?? undefined,

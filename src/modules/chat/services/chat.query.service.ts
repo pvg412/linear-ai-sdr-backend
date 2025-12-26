@@ -10,12 +10,8 @@ export class ChatQueryService {
 		private readonly chatRepository: ChatRepository
 	) {}
 
-	listFolders(userId: string) {
-		return this.chatRepository.listFolders(userId);
-	}
-
-	listThreads(userId: string, folderId?: string) {
-		return this.chatRepository.listThreads(userId, folderId);
+	listThreads(userId: string) {
+		return this.chatRepository.listThreads(userId);
 	}
 
 	getThread(userId: string, threadId: string) {
