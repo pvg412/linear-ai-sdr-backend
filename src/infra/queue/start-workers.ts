@@ -5,14 +5,13 @@ import { ensureLogger, type LoggerLike } from "@/infra/observability";
 import { QUEUE_TYPES } from "./queue.types";
 import { startLeadSearchWorker } from "./lead-search.worker";
 
-/**
- * Start workers inside current process (convenient for dev and simple deployment).
- * In production you can run it in a separate process - see below worker entrypoint.
- */
-export function startWorkers(log?: LoggerLike): void {
+export type WorkersHandle = {
+  close: () => Promise<void>;
+};
+
+export function startWorkers(log?: LoggerLike): WorkersHandle | null {
   const lg = ensureLogger(log);
 
-  // If Redis is not bound - then REDIS_URL is not set.
   let redis: Redis | null = null;
   try {
     redis = container.get<Redis>(QUEUE_TYPES.Redis);
@@ -22,24 +21,30 @@ export function startWorkers(log?: LoggerLike): void {
 
   if (!redis) {
     lg.warn({}, "Redis is not configured; workers not started");
-    return;
+    return null;
   }
 
   const worker = startLeadSearchWorker({ redis, log: lg });
 
-  const shutdown = async () => {
-    try {
-      lg.info({}, "Shutting down workers...");
-      await worker.close();
-      await redis.quit();
-      lg.info({}, "Workers stopped");
-    } catch (err) {
-      lg.error({ err }, "Worker shutdown error");
-    }
-  };
-
-  process.on("SIGINT", () => void shutdown());
-  process.on("SIGTERM", () => void shutdown());
-
   lg.info({}, "Workers started");
+
+  return {
+    async close() {
+      lg.info({}, "Shutting down workers...");
+
+      try {
+        await worker.close();
+      } catch (err) {
+        lg.error({ err }, "Worker close error");
+      }
+
+      try {
+        await redis.quit();
+      } catch (err) {
+        lg.error({ err }, "Redis quit error");
+      }
+
+      lg.info({}, "Workers stopped");
+    },
+  };
 }
