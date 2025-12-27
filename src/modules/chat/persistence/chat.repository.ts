@@ -22,34 +22,55 @@ function toIso(d: Date): string {
 export class ChatRepository {
 	private readonly prisma: PrismaClient = getPrisma();
 
-	async listThreads(ownerId: string) {
-		const rows = await this.prisma.chatThread.findMany({
-			where: {
-				ownerId,
-			},
-			orderBy: [{ lastMessageAt: "desc" }, { updatedAt: "desc" }],
-			select: {
-				id: true,
-				title: true,
-				defaultProvider: true,
-				defaultKind: true,
-				lastMessageAt: true,
-				createdAt: true,
-				updatedAt: true,
-			},
-		});
+	async listThreads(ownerId: string, opts: { limit: number; cursor?: string }) {
+		const take = opts.limit + 1;
 
-		return rows.map((x) => ({
-			id: x.id,
-			title: x.title,
+		const [rows, total] = await this.prisma.$transaction([
+			this.prisma.chatThread.findMany({
+				where: { ownerId },
+				take,
+				...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+				orderBy: [
+					{ lastMessageAt: "desc" },
+					{ updatedAt: "desc" },
+					{ id: "desc" },
+				],
+				select: {
+					id: true,
+					title: true,
+					defaultProvider: true,
+					defaultKind: true,
+					lastMessageAt: true,
+					createdAt: true,
+					updatedAt: true,
+					_count: { select: { messages: true } },
+				},
+			}),
+			this.prisma.chatThread.count({ where: { ownerId } }),
+		]);
 
-			defaultProvider: x.defaultProvider ?? null,
-			defaultKind: x.defaultKind ?? null,
+		const hasMore = rows.length > opts.limit;
+		const pageRows = hasMore ? rows.slice(0, opts.limit) : rows;
 
-			lastMessageAt: x.lastMessageAt ? toIso(x.lastMessageAt) : null,
-			createdAt: toIso(x.createdAt),
-			updatedAt: toIso(x.updatedAt),
+		const nextCursor = hasMore
+			? pageRows[pageRows.length - 1]?.id ?? null
+			: null;
+
+		const threads = pageRows.map((t) => ({
+			id: t.id,
+			title: t.title,
+
+			defaultProvider: t.defaultProvider ?? null,
+			defaultKind: t.defaultKind ?? null,
+
+			totalMessages: t._count.messages,
+
+			lastMessageAt: t.lastMessageAt ? toIso(t.lastMessageAt) : null,
+			createdAt: toIso(t.createdAt),
+			updatedAt: toIso(t.updatedAt),
 		}));
+
+		return { threads, total, nextCursor };
 	}
 
 	async createThread(input: {
@@ -155,10 +176,13 @@ export class ChatRepository {
 	) {
 		await this.assertThreadOwner(ownerId, threadId);
 
+		// Fetch one extra item to know if there is a next page
+		const take = opts.limit + 1;
+
 		const rows = await this.prisma.chatMessage.findMany({
 			where: { threadId },
-			orderBy: { createdAt: "asc" },
-			take: opts.limit,
+			orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+			take,
 			...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
 			select: {
 				id: true,
@@ -173,17 +197,25 @@ export class ChatRepository {
 			},
 		});
 
-		return rows.map((x) => ({
-			id: x.id,
-			threadId: x.threadId,
-			role: x.role,
-			type: x.type,
-			text: x.text ?? null,
-			payload: (x.payload ?? null) as Json | null,
-			leadSearchId: x.leadSearchId ?? null,
-			createdAt: toIso(x.createdAt),
-			updatedAt: toIso(x.updatedAt),
-		}));
+		const hasMore = rows.length > opts.limit;
+		const pageRows = hasMore ? rows.slice(0, opts.limit) : rows;
+
+		const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.id : null;
+
+		return {
+			messages: pageRows.map((m) => ({
+				id: m.id,
+				threadId: m.threadId,
+				role: m.role,
+				type: m.type,
+				text: m.text ?? null,
+				payload: (m.payload ?? null) as Json | null,
+				leadSearchId: m.leadSearchId ?? null,
+				createdAt: toIso(m.createdAt),
+				updatedAt: toIso(m.updatedAt),
+			})),
+			nextCursor,
+		};
 	}
 
 	async createMessage(input: {

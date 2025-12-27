@@ -8,10 +8,7 @@ import {
 	CursorPaginationSchema,
 } from "../schemas/chat.schemas";
 import type { ChatControllerDeps } from "./chat.controller.types";
-import {
-	sanitizeAny,
-	type UnknownRecord,
-} from "./chat.controller.helpers";
+import { sanitizeAny, type UnknownRecord } from "./chat.controller.helpers";
 import { sanitizeMessageToPublic } from "../parsers/chat.parsers";
 import { requireRequestUserId } from "@/infra/auth/requestUser";
 
@@ -29,8 +26,11 @@ function registerThreadRoutes(
 ): void {
 	app.get("/chat/threads", async (req) => {
 		const userId = requireRequestUserId(req);
+		const q = CursorPaginationSchema.parse(req.query);
 
-		const res = await deps.queryService.listThreads(userId);
+		const res = await deps.queryService.listThreads(userId, {
+			...q,
+		});
 		return sanitizeAny(res);
 	});
 
