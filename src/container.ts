@@ -48,9 +48,10 @@ const isOpenAiEnabled = Boolean(env.OPENAI_API_KEY && env.OPENAI_MODEL);
 const isScraperCityEnabled = Boolean(
 	env.SCRAPERCITY_API_KEY && env.SCRAPERCITY_API_URL
 );
-const isScruppEnabled = Boolean(
-	env.SCRUPP_SCRAPER_API_KEY && env.SCRUPP_SCRAPER_API_URL
-);
+// const isScruppEnabled = Boolean(
+// 	env.SCRUPP_SCRAPER_API_KEY && env.SCRUPP_SCRAPER_API_URL
+// );
+const isScruppEnabled = false;
 const isSearchLeadsEnabled = Boolean(
 	env.SEARCH_LEADS_API_KEY && env.SEARCH_LEADS_API_URL
 );

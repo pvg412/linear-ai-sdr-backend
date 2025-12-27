@@ -51,6 +51,13 @@ export class LeadSearchRepository {
     });
   }
 
+  async updateQuery(id: string, query: Prisma.InputJsonValue): Promise<void> {
+    await this.prisma.leadSearch.update({
+      where: { id },
+      data: { query },
+    });
+  }
+
   async getNextAttempt(leadSearchId: string, provider: LeadProvider): Promise<number> {
     const last = await this.prisma.leadSearchRun.findFirst({
       where: { leadSearchId, provider },

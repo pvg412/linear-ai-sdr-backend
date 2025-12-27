@@ -35,6 +35,7 @@ import {
 	ScrapeQuerySchema,
 	type ScrapeQuery,
 } from "@/capabilities/scraper/scraper.dto";
+import { canonicalizeScraperStoredQuery } from "./scraperQueryCanonicalizer";
 import { RealtimeHub } from "@/infra/realtime/realtimeHub";
 import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";
 
@@ -382,8 +383,22 @@ export class LeadSearchRunnerService {
 				? (leadSearch.query as Record<string, unknown>)
 				: {};
 
+		const { canonicalQuery, didAddApolloUrl } = canonicalizeScraperStoredQuery({
+			storedQuery: queryObj,
+			limit: leadSearch.limit,
+			leadSearchId,
+		});
+
+		if (didAddApolloUrl) {
+			// Persist canonical query to avoid future job failures on retries.
+			await this.leadSearchRepository.updateQuery(
+				leadSearchId,
+				canonicalQuery as Prisma.InputJsonValue
+			);
+		}
+
 		const parsedQuery = ScrapeQuerySchema.safeParse({
-			...queryObj,
+			...canonicalQuery,
 			limit: leadSearch.limit,
 		});
 

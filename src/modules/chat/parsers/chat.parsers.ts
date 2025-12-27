@@ -48,7 +48,7 @@ export const CHAT_PARSERS: ChatParserConfig[] = [
 		id: "PARSER_A",
 		label: "Parser A",
 		provider: mustLeadProvider("SCRAPER_CITY"),
-		allowedKinds: mustAllowedKinds([LeadSearchKind.LEAD_DB]),
+		allowedKinds: mustAllowedKinds([LeadSearchKind.LEAD_DB, LeadSearchKind.SCRAPER]),
 	},
 	{
 		id: "PARSER_B",
