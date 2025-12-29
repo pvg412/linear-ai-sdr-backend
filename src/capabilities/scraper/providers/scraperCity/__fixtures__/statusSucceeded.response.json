@@ -1,7 +1,0 @@
-{
-  "status": "SUCCEEDED",
-  "statusMessage": null,
-  "handled": 2,
-  "runTimeSecs": 3,
-  "outputUrl": "/api/downloads/run_test_123"
-}
