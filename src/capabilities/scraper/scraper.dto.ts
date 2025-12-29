@@ -5,72 +5,60 @@ import { NormalizedLead } from "../shared/leadValidate";
 
 export const ScrapeQuerySchema = z.object({
 	apolloUrl: z.string().min(1),
-	// `limit` usually comes from LeadSearch.limit, but we allow query to carry it too.
 	limit: z.number().int().positive(),
 });
 export type ScrapeQuery = z.infer<typeof ScrapeQuerySchema>;
 
-export interface ScraperAdapterResult {
-	provider: LeadProvider;
-	providerRunId?: string | null;
+export type ScraperRunStatus = "STARTING" | "RUNNING" | "SUCCEEDED" | "FAILED";
+
+export interface ScraperStartResult {
+	providerRunId: string;
 	fileNameHint?: string | null;
-	leads: NormalizedLead[];
+}
+
+export interface ScraperStatusResult {
+	status: ScraperRunStatus;
+	/**
+	 * Provider raw status payload (for debugging / responseMeta).
+	 * Keep it small; do NOT store huge blobs here.
+	 */
+	raw?: unknown;
 }
 
 export interface ScraperAdapter {
 	provider: LeadProvider;
+
 	isEnabled(): boolean;
-	scrape(query: ScrapeQuery): Promise<ScraperAdapterResult>;
-}
 
-export interface ScraperOrchestratorOptions {
-  providersOrder: LeadProvider[];
-  minLeads?: number;
-  allowUnderDeliveryFallback?: boolean;
-}
+	/**
+	 * How often we should poll provider status (ms).
+	 * Example: 30 minutes.
+	 */
+	pollIntervalMs: number;
 
-export type ScraperAttemptStatus =
-  | "SUCCESS"
-  | "FAILED"
-  | "DISABLED"
-  | "NOT_REGISTERED"
-  | "UNDER_DELIVERED";
+	/**
+	 * Max poll attempts before timing out the run.
+	 * Example: 180 * 30min = 90h.
+	 */
+	maxPollAttempts: number;
 
-export interface ScraperAttempt {
-  provider: LeadProvider;
-  status: ScraperAttemptStatus;
-  leadsCount?: number;
-  providerRunId?: string | null;
-  fileNameHint?: string | null;
-  errorMessage?: string;
-}
+	/**
+	 * Start external scraping run and return providerRunId.
+	 */
+	start(query: ScrapeQuery): Promise<ScraperStartResult>;
 
-/**
- * Hooks allow the orchestrator to stay pure (no Prisma),
- * while the caller (LeadSearchRunnerService) can log LeadSearchRun rows.
- */
-export interface ScraperOrchestratorHooks<Ctx = void> {
-  onProviderStart?: (provider: LeadProvider) => Promise<Ctx> | Ctx;
-  onProviderSuccess?: (
-    ctx: Ctx,
-    provider: LeadProvider,
-    result: ScraperAdapterResult,
-    attempt: ScraperAttempt,
-  ) => Promise<void> | void;
-  onProviderError?: (
-    ctx: Ctx | undefined,
-    provider: LeadProvider,
-    error: unknown,
-    attempt: ScraperAttempt,
-  ) => Promise<void> | void;
-  onProviderSkip?: (
-    provider: LeadProvider,
-    attempt: ScraperAttempt,
-  ) => Promise<void> | void;
-}
+	/**
+	 * Check provider run status once.
+	 */
+	checkStatus(providerRunId: string): Promise<ScraperStatusResult>;
 
-export interface ScraperOrchestratorResult {
-  result: ScraperAdapterResult;
-  attempts: ScraperAttempt[];
-  errors: Partial<Record<LeadProvider, string>>;
+	/**
+	 * Fetch & normalize leads when status is SUCCEEDED.
+	 * Must be idempotent (safe to call twice).
+	 */
+	fetchLeads(input: {
+		providerRunId: string;
+		query: ScrapeQuery;
+		status?: ScraperStatusResult;
+	}): Promise<NormalizedLead[]>;
 }

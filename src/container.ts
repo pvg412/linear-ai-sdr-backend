@@ -19,7 +19,6 @@ import { ScraperAdapter } from "./capabilities/scraper/scraper.dto";
 import { AiPromptParserService } from "./modules/ai/ai-prompt-parser.service";
 import { AI_TYPES } from "./modules/ai/ai.types";
 import { ScraperCityScraperAdapter } from "./capabilities/scraper/providers/scrapercity/scrapercity.adapter";
-import { ScruppApolloAdapter } from "./capabilities/scraper/providers/scrupp/scrupp.adapter";
 import { LeadDbOrchestrator } from "./capabilities/lead-db/lead-db.orchestrator";
 import { LEAD_DB_TYPES } from "./capabilities/lead-db/lead-db.types";
 import type { LeadDbAdapter } from "./capabilities/lead-db/lead-db.dto";
@@ -35,7 +34,13 @@ import { LeadRepository } from "./modules/lead/persistence/lead.repository";
 import { LeadQueryService } from "./modules/lead/services/lead.query.service";
 import { LeadSearchRunnerService } from "./modules/lead-search/lead-search.runner.service";
 import { LEAD_SEARCH_TYPES } from "./modules/lead-search/lead-search.types";
-import { LeadSearchRepository } from "./modules/lead-search/lead-search.repository";
+import { LeadSearchRepository } from "./modules/lead-search/persistence/lead-search.repository";
+import { LeadSearchRunRepository } from "./modules/lead-search/persistence/lead-search-run.repository";
+import { LeadSearchNotifierService } from "./modules/lead-search/services/lead-search.notifier.service";
+import { LeadSearchLeadPersisterService } from "./modules/lead-search/services/lead-search.lead-persister.service";
+import { LeadDbLeadSearchHandler } from "./modules/lead-search/services/lead-db.lead-search.handler";
+import { ScraperInlineLeadSearchHandler } from "./modules/lead-search/services/scraper-inline.lead-search.handler";
+import { ScraperStepLeadSearchHandler } from "./modules/lead-search/services/scraper-step.lead-search.handler";
 
 const redis = tryCreateRedisClient();
 
@@ -48,10 +53,6 @@ const isOpenAiEnabled = Boolean(env.OPENAI_API_KEY && env.OPENAI_MODEL);
 const isScraperCityEnabled = Boolean(
 	env.SCRAPERCITY_API_KEY && env.SCRAPERCITY_API_URL
 );
-// const isScruppEnabled = Boolean(
-// 	env.SCRUPP_SCRAPER_API_KEY && env.SCRUPP_SCRAPER_API_URL
-// );
-const isScruppEnabled = false;
 const isSearchLeadsEnabled = Boolean(
 	env.SEARCH_LEADS_API_KEY && env.SEARCH_LEADS_API_URL
 );
@@ -111,6 +112,42 @@ container
 	.inSingletonScope();
 
 container
+	.bind<LeadSearchRunRepository>(LEAD_SEARCH_TYPES.LeadSearchRunRepository)
+	.to(LeadSearchRunRepository)
+	.inSingletonScope();
+
+container
+	.bind<LeadSearchNotifierService>(LEAD_SEARCH_TYPES.LeadSearchNotifierService)
+	.to(LeadSearchNotifierService)
+	.inSingletonScope();
+
+container
+	.bind<LeadSearchLeadPersisterService>(
+		LEAD_SEARCH_TYPES.LeadSearchLeadPersisterService
+	)
+	.to(LeadSearchLeadPersisterService)
+	.inSingletonScope();
+
+container
+	.bind<LeadDbLeadSearchHandler>(LEAD_SEARCH_TYPES.LeadDbLeadSearchHandler)
+	.to(LeadDbLeadSearchHandler)
+	.inSingletonScope();
+
+container
+	.bind<ScraperInlineLeadSearchHandler>(
+		LEAD_SEARCH_TYPES.ScraperInlineLeadSearchHandler
+	)
+	.to(ScraperInlineLeadSearchHandler)
+	.inSingletonScope();
+
+container
+	.bind<ScraperStepLeadSearchHandler>(
+		LEAD_SEARCH_TYPES.ScraperStepLeadSearchHandler
+	)
+	.to(ScraperStepLeadSearchHandler)
+	.inSingletonScope();
+
+container
 	.bind<LeadSearchRepository>(LEAD_SEARCH_TYPES.LeadSearchRepository)
 	.to(LeadSearchRepository)
 	.inSingletonScope();
@@ -126,16 +163,6 @@ container
 		return new ScraperCityScraperAdapter(
 			env.SCRAPERCITY_API_KEY ?? "",
 			isScraperCityEnabled
-		);
-	})
-	.inSingletonScope();
-
-container
-	.bind<ScraperAdapter>(SCRAPER_TYPES.ScraperAdapter)
-	.toDynamicValue(() => {
-		return new ScruppApolloAdapter(
-			env.SCRUPP_SCRAPER_API_KEY ?? "",
-			isScruppEnabled
 		);
 	})
 	.inSingletonScope();

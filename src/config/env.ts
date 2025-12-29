@@ -46,17 +46,6 @@ const EnvSchema = z.object({
 
 	SEARCH_LEADS_API_KEY: z.string().optional(),
 	SEARCH_LEADS_API_URL: z.url().optional(),
-
-	SCRUPP_SCRAPER_API_KEY: z.string().optional(),
-	SCRUPP_SCRAPER_API_URL: z.url().optional(),
-	SCRUPP_ACCOUNT_EMAIL: z.string().optional(),
-	SCRUPP_ACCOUNT_TYPE: z.enum(["linkedin", "apollo"]).optional(),
-	SCRUPP_ACCOUNT_COOKIE: z.string().optional(),
-	SCRUPP_ACCOUNT_AGENT: z.string().optional(),
-	SCRUPP_ACCOUNT_PREMIUM: z
-		.string()
-		.optional()
-		.transform((v) => v === "true"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

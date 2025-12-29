@@ -1,0 +1,6 @@
+{
+  "error": {
+    "type": "invalid-input",
+    "message": "Input is not valid: Field input.companyIndustryIncludes.0 must be equal to one of the allowed values: \"Accounting\", \"Internet\""
+  }
+}

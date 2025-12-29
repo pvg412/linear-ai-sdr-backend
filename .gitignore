@@ -7,3 +7,8 @@ dist
 
 /src/generated/prisma
 /src/generated
+
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+**/.DS_Store
+.DS_Store

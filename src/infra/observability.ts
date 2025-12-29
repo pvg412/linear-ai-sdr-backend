@@ -8,11 +8,26 @@ export type LoggerLike = {
   child?: (bindings: Record<string, unknown>) => LoggerLike;
 };
 
+function two(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function formatTimestamp(d: Date): string {
+  // Local time, human readable: YYYY-MM-DD HH:mm:ss
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(
+    d.getHours(),
+  )}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+}
+
 const consoleLogger: LoggerLike = {
-	info: (obj: unknown, msg?: string) => console.log(msg ?? "", obj),
-	debug: (obj: unknown, msg?: string) => console.debug(msg ?? "", obj),
-	warn: (obj: unknown, msg?: string) => console.warn(msg ?? "", obj),
-	error: (obj: unknown, msg?: string) => console.error(msg ?? "", obj),
+	info: (obj: unknown, msg?: string) =>
+		console.log(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
+	debug: (obj: unknown, msg?: string) =>
+		console.debug(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
+	warn: (obj: unknown, msg?: string) =>
+		console.warn(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
+	error: (obj: unknown, msg?: string) =>
+		console.error(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
 	child: () => consoleLogger,
 };
 export function nowNs(): bigint {
