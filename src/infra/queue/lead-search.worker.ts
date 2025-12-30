@@ -1,4 +1,4 @@
-import { Worker, type Job } from "bullmq";
+import { DelayedError, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 
 import { container } from "@/container";
@@ -12,15 +12,8 @@ import {
 import { LEAD_SEARCH_TYPES } from "@/modules/lead-search/lead-search.types";
 import { LeadSearchRunnerService } from "@/modules/lead-search/lead-search.runner.service";
 
-function isSpecialBullMqControlError(err: unknown): boolean {
-	// We don't want to treat these as "job failed" in logs.
-	const name = (err as { name?: string } | null)?.name;
-	return (
-		name === "DelayedError" ||
-		name === "WaitingChildrenError" ||
-		name === "WaitingError" ||
-		name === "RateLimitError"
-	);
+function isBullMqControlError(err: unknown): boolean {
+	return err instanceof DelayedError;
 }
 
 export function startLeadSearchWorker(args: {
@@ -62,31 +55,16 @@ export function startLeadSearchWorker(args: {
 	});
 
 	worker.on("failed", (job, err) => {
-		// BullMQ step-jobs intentionally throw DelayedError after moveToDelayed.
-		// Do not treat that as a real failure.
-		if (isSpecialBullMqControlError(err)) return;
-
-		const jobId = job?.id ?? null;
-		const data = job?.data;
-		const leadSearchId = data?.leadSearchId ?? null;
-
-		const attemptsMade = job?.attemptsMade ?? null;
-		const maxAttempts = job?.opts?.attempts ?? null;
-
-		// NOTE: attemptsMade semantics: it increments on "regular" completion/failure,
-		const willRetry =
-			typeof attemptsMade === "number" &&
-			typeof maxAttempts === "number" &&
-			attemptsMade < maxAttempts;
+		if (isBullMqControlError(err)) return;
 
 		lg.error(
 			{
 				err,
-				jobId,
-				leadSearchId,
-				attemptsMade,
-				maxAttempts,
-				willRetry,
+				jobId: job?.id ?? null,
+				leadSearchId: job?.data?.leadSearchId ?? null,
+				step: job?.data?.scraper?.step ?? null,
+				attemptsMade: job?.attemptsMade ?? null,
+				maxAttempts: job?.opts?.attempts ?? null,
 			},
 			"LeadSearch job failed"
 		);

@@ -130,6 +130,16 @@ export class ScraperStepLeadSearchHandler {
 		if (state.step === "INIT") {
 			// If Redis state already has runId+providerRunId => reuse, never start again
 			if (state.runId && state.providerRunId) {
+				lg.debug(
+					{
+						leadSearchId,
+						provider,
+						runId: state.runId,
+						providerRunId: state.providerRunId,
+					},
+					"SCRAPER INIT: reuse Redis state (runId+providerRunId already in job.data)"
+				);
+
 				await this.leadSearchRunRepository.ensureExternalRunId(
 					state.runId,
 					state.providerRunId
@@ -140,7 +150,7 @@ export class ScraperStepLeadSearchHandler {
 					scraper: { ...state, step: "POLL", lastStatus: "RUNNING" },
 				};
 
-				await this.delayJob(job, token, adapter.pollIntervalMs, nextData);
+				await this.delayJob(job, token, adapter.pollIntervalMs, nextData, lg);
 				return;
 			}
 
@@ -151,6 +161,16 @@ export class ScraperStepLeadSearchHandler {
 			);
 
 			if (existing?.externalRunId) {
+				lg.debug(
+					{
+						leadSearchId,
+						provider,
+						runId: existing.id,
+						providerRunId: existing.externalRunId,
+					},
+					"SCRAPER INIT: reuse DB RUNNING LeadSearchRun.externalRunId"
+				);
+
 				const nextData: LeadSearchJobData = {
 					...job.data,
 					scraper: {
@@ -162,7 +182,7 @@ export class ScraperStepLeadSearchHandler {
 						lastStatus: "RUNNING",
 					},
 				};
-				await this.delayJob(job, token, adapter.pollIntervalMs, nextData);
+				await this.delayJob(job, token, adapter.pollIntervalMs, nextData, lg);
 				return;
 			}
 
@@ -171,6 +191,17 @@ export class ScraperStepLeadSearchHandler {
 				const ageMs = Date.now() - existing.updatedAt.getTime();
 
 				if (ageMs <= EXTERNAL_RUN_ID_GRACE_MS) {
+					lg.debug(
+						{
+							leadSearchId,
+							provider,
+							runId: existing.id,
+							ageMs,
+							graceMs: EXTERNAL_RUN_ID_GRACE_MS,
+						},
+						"SCRAPER INIT: waiting for externalRunId (grace period)"
+					);
+
 					const nextData: LeadSearchJobData = {
 						...job.data,
 						scraper: {
@@ -186,10 +217,21 @@ export class ScraperStepLeadSearchHandler {
 						job,
 						token,
 						EXTERNAL_RUN_ID_RETRY_DELAY_MS,
-						nextData
+						nextData,
+						lg
 					);
 					return;
 				}
+
+				lg.warn(
+					{
+						leadSearchId,
+						provider,
+						runId: existing.id,
+						ageMs,
+					},
+					"SCRAPER INIT: stale RUNNING LeadSearchRun without externalRunId; marking failed and starting new attempt"
+				);
 
 				await this.leadSearchRunRepository.markRunFailed(
 					existing.id,
@@ -250,7 +292,7 @@ export class ScraperStepLeadSearchHandler {
 			);
 
 			// Delay next poll tick
-			await this.delayAfterUpdate(job, token, adapter.pollIntervalMs);
+			await this.delayAfterUpdate(job, token, adapter.pollIntervalMs, lg);
 			return;
 		}
 
@@ -274,6 +316,11 @@ export class ScraperStepLeadSearchHandler {
 			}
 
 			if (!runId || !providerRunId) {
+				lg.warn(
+					{ leadSearchId, provider, runId, providerRunId, state },
+					"SCRAPER POLL: missing runId/providerRunId; resetting to INIT"
+				);
+			
 				const nextData: LeadSearchJobData = {
 					...job.data,
 					scraper: {
@@ -283,11 +330,13 @@ export class ScraperStepLeadSearchHandler {
 						providerRunId: null,
 						pollAttempt: 0,
 						lastStatus: null,
+						initAtMs: state.initAtMs ?? Date.now(),
 					},
 				};
-				await job.updateData(nextData);
-				return;
+			
+				return this.delayJob(job, token, 1_000, nextData, lg);
 			}
+			
 
 			await this.leadSearchRunRepository.ensureExternalRunId(
 				runId,
@@ -345,7 +394,7 @@ export class ScraperStepLeadSearchHandler {
 						lastStatus: "RUNNING",
 					},
 				};
-				await this.delayJob(job, token, adapter.pollIntervalMs, nextData);
+				await this.delayJob(job, token, adapter.pollIntervalMs, nextData, lg);
 				return;
 			}
 
@@ -403,14 +452,31 @@ export class ScraperStepLeadSearchHandler {
 
 			const statusRes = await adapter.checkStatus(providerRunId);
 			if (statusRes.status !== "SUCCEEDED") {
-				await this.delayJob(job, token, adapter.pollIntervalMs, {
-					...job.data,
-					scraper: {
-						...fetchState,
-						step: "POLL",
-						lastStatus: statusRes.status,
+				lg.debug(
+					{
+						leadSearchId,
+						provider,
+						runId,
+						providerRunId,
+						status: statusRes.status,
 					},
-				});
+					"SCRAPER FETCH: status is not SUCCEEDED, going back to POLL"
+				);
+
+				await this.delayJob(
+					job,
+					token,
+					adapter.pollIntervalMs,
+					{
+						...job.data,
+						scraper: {
+							...fetchState,
+							step: "POLL",
+							lastStatus: statusRes.status,
+						},
+					},
+					lg
+				);
 				return;
 			}
 
@@ -480,19 +546,48 @@ export class ScraperStepLeadSearchHandler {
 		job: Job<LeadSearchJobData, void, LeadSearchJobName>,
 		token: string,
 		delayMs: number,
-		nextData: LeadSearchJobData
+		nextData: LeadSearchJobData,
+		lg: ReturnType<typeof ensureLogger>
 	): Promise<never> {
+		const nextRunAt = Date.now() + delayMs;
+
+		lg.debug(
+			{
+				leadSearchId: job.data.leadSearchId,
+				jobId: job.id,
+				fromStep: job.data.scraper?.step ?? null,
+				toStep: nextData.scraper?.step ?? null,
+				delayMs,
+				nextRunAt: new Date(nextRunAt).toISOString(),
+			},
+			"SCRAPER scheduled next tick (moveToDelayed)"
+		);
+
 		await job.updateData(nextData);
-		await job.moveToDelayed(Date.now() + delayMs, token);
+		await job.moveToDelayed(nextRunAt, token);
 		throw new DelayedError();
 	}
 
 	private async delayAfterUpdate(
 		job: Job<LeadSearchJobData, void, LeadSearchJobName>,
 		token: string,
-		delayMs: number
+		delayMs: number,
+		lg: ReturnType<typeof ensureLogger>
 	): Promise<never> {
-		await job.moveToDelayed(Date.now() + delayMs, token);
+		const nextRunAt = Date.now() + delayMs;
+
+		lg.debug(
+			{
+				leadSearchId: job.data.leadSearchId,
+				jobId: job.id,
+				step: job.data.scraper?.step ?? null,
+				delayMs,
+				nextRunAt: new Date(nextRunAt).toISOString(),
+			},
+			"SCRAPER scheduled next tick after update (moveToDelayed)"
+		);
+
+		await job.moveToDelayed(nextRunAt, token);
 		throw new DelayedError();
 	}
 }

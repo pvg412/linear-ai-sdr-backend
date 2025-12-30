@@ -206,6 +206,11 @@ export class LeadDbLeadSearchHandler {
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 
+			lg.warn(
+				{ leadSearchId, provider, runId: run.id, err: message },
+				"LeadSearch (LEAD_DB) run failed"
+			);
+
 			await this.leadSearchRunRepository.markRunFailed(run.id, message);
 			await this.leadSearchRepository.markFailed(leadSearchId, message);
 
