@@ -16,6 +16,7 @@ const EnvSchema = z.object({
 	PORT: z.coerce.number().default(3001),
 	DATABASE_URL: z.url(),
 	REDIS_URL: z.url(),
+	FRONTEND_URL: z.url(),
 
 	LEAD_SEARCH_QUEUE_CONCURRENCY: z.coerce.number().default(4),
 	LEAD_SEARCH_QUEUE_ATTEMPTS: z.coerce.number().default(3),

@@ -81,6 +81,7 @@ model User {
   leadSearchLeads LeadSearchLead[]
   chatThreads     ChatThread[]     @relation("ChatThreadOwner")
   chatMessages    ChatMessage[]    @relation("ChatMessageAuthor")
+  leadDirectories LeadDirectory[]
 
   @@index([role])
   @@index([isActive])
@@ -174,9 +175,10 @@ model Lead {
 
   meta Json?
 
-  providerRefs LeadProviderRef[]
-  searches     LeadSearchLead[]
-  runResults   LeadSearchRunResult[]
+  providerRefs       LeadProviderRef[]
+  searches           LeadSearchLead[]
+  runResults         LeadSearchRunResult[]
+  leadDirectoryLeads LeadDirectoryLead[]
 
   @@unique([email])
   @@unique([linkedinUrl])
@@ -299,4 +301,42 @@ model ChatMessage {
   @@index([threadId, createdAt])
   @@index([authorUserId])
   @@index([leadSearchId])
+}
+
+model LeadDirectory {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  parentId String?
+  parent   LeadDirectory?  @relation("LeadDirectoryTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children LeadDirectory[] @relation("LeadDirectoryTree")
+
+  name        String
+  description String?
+  position    Int     @default(0)
+
+  leads LeadDirectoryLead[]
+
+  @@index([ownerId, parentId])
+  @@index([ownerId, updatedAt])
+  @@index([parentId, position])
+}
+
+model LeadDirectoryLead {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  directoryId String
+  directory   LeadDirectory @relation(fields: [directoryId], references: [id], onDelete: Cascade)
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([directoryId, leadId])
+  @@index([directoryId, createdAt])
+  @@index([leadId])
 }
