@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "@/infra/prisma";
 import { UserFacingError } from "@/infra/userFacingError";
+import { UNASSIGNED_DIRECTORY_ID } from "@/modules/lead-directory/lead-directory.unassigned";
 import { LeadPaginationFilters } from "../schemas/lead.schemas";
 
 function toIso(d: Date): string {
@@ -13,13 +14,11 @@ function toIso(d: Date): string {
 export class LeadRepository {
 	private readonly prisma: PrismaClient = getPrisma();
 
-	async listLeads(
-		opts: {
-			filters?: LeadPaginationFilters;
-			page?: number;
-			perPage?: number;
-		}
-	) {
+	async listLeads(opts: {
+		filters?: LeadPaginationFilters;
+		page?: number;
+		perPage?: number;
+	}) {
 		const filters: Prisma.LeadWhereInput[] = [];
 
 		if (!opts.page || !opts.perPage) {
@@ -43,6 +42,19 @@ export class LeadRepository {
 			filters.push({
 				searches: { some: { leadSearchId: opts.filters.leadSearchId } },
 			});
+		}
+
+		if (opts.filters?.directoryId) {
+			if (opts.filters.directoryId === UNASSIGNED_DIRECTORY_ID) {
+				// Unassigned = lead is not linked to any directory.
+				filters.push({ leadDirectoryLeads: { none: {} } });
+			} else {
+				filters.push({
+					leadDirectoryLeads: {
+						some: { directoryId: opts.filters.directoryId },
+					},
+				});
+			}
 		}
 
 		const where: Prisma.LeadWhereInput =

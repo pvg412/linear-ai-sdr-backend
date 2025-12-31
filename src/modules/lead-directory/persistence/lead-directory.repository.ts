@@ -210,6 +210,40 @@ export class LeadDirectoryRepository {
 		return { total, items: rows.map((r) => r.lead) };
 	}
 
+	async countUnassignedLeads(input: { ownerId: string }): Promise<number> {
+		// Unassigned = a lead not linked to any directory owned by this user.
+		// We also scope to leads created by this user to avoid leaking data across users.
+		return this.prisma.lead.count({
+			where: {
+				createdById: input.ownerId,
+				leadDirectoryLeads: { none: { directory: { ownerId: input.ownerId } } },
+			},
+		});
+	}
+
+	async listUnassignedLeads(input: {
+		ownerId: string;
+		limit: number;
+		offset: number;
+	}): Promise<{ total: number; items: Prisma.LeadGetPayload<object>[] }> {
+		const where = {
+			createdById: input.ownerId,
+			leadDirectoryLeads: { none: { directory: { ownerId: input.ownerId } } },
+		} satisfies Prisma.LeadWhereInput;
+
+		const [total, items] = await this.prisma.$transaction([
+			this.prisma.lead.count({ where }),
+			this.prisma.lead.findMany({
+				where,
+				orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+				skip: input.offset,
+				take: input.limit,
+			}),
+		]);
+
+		return { total, items };
+	}
+
 	async listLeadDirectories(input: {
 		ownerId: string;
 		leadId: string;

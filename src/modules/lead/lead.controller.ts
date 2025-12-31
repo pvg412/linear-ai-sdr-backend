@@ -5,17 +5,17 @@ import { requireRequestUser } from "@/infra/auth/requestUser";
 
 import { LEAD_TYPES } from "./lead.types";
 import { LeadQueryService } from "./services/lead.query.service";
-import { LeadPaginationSchema, type LeadPaginationQuery } from "./schemas/lead.schemas";
+import { LeadPaginationSchema } from "./schemas/lead.schemas";
 
 const leadQueryService = container.get<LeadQueryService>(
 	LEAD_TYPES.LeadQueryService
 );
 
 export function registerLeadRoutes(app: FastifyInstance): void {
-	app.get("/leads", async (req) => {
+	app.post("/leads/search", async (req) => {
 		const user = requireRequestUser(req);
 
-		const q: LeadPaginationQuery = LeadPaginationSchema.parse(req.query);
+		const q = LeadPaginationSchema.parse(req.body);
 
 		return await leadQueryService.listLeads(user.id, {
 			filters: q.filters,

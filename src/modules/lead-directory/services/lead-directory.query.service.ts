@@ -4,6 +4,11 @@ import { ensureLogger, type LoggerLike } from "@/infra/observability";
 import { LEAD_DIRECTORY_TYPES } from "../lead-directory.types";
 import { LeadDirectoryNotFoundError } from "../lead-directory.errors";
 import {
+	isUnassignedDirectoryId,
+	makeUnassignedDirectory,
+	makeUnassignedTreeNode,
+} from "../lead-directory.unassigned";
+import {
 	LeadDirectoryRepository,
 	type LeadDirectoryDto,
 	type LeadDirectoryTreeNodeDto,
@@ -20,6 +25,11 @@ export class LeadDirectoryQueryService {
 		ownerId: string,
 		directoryId: string
 	): Promise<LeadDirectoryDto> {
+		if (isUnassignedDirectoryId(directoryId)) {
+			const leadsCount = await this.repo.countUnassignedLeads({ ownerId });
+			return makeUnassignedDirectory(ownerId, leadsCount);
+		}
+
 		const dir = await this.repo.findOwnedById({ ownerId, directoryId });
 		if (!dir) throw new LeadDirectoryNotFoundError("Directory not found");
 		return dir;
@@ -32,6 +42,13 @@ export class LeadDirectoryQueryService {
 	): Promise<LeadDirectoryDto[]> {
 		const lg = ensureLogger(log);
 		const res = await this.repo.listByParent({ ownerId, parentId });
+
+		// Inject synthetic root directory for unassigned leads.
+		if (parentId === null) {
+			const leadsCount = await this.repo.countUnassignedLeads({ ownerId });
+			res.unshift(makeUnassignedDirectory(ownerId, leadsCount));
+		}
+
 		lg.debug(
 			{ ownerId, parentId, count: res.length },
 			"LeadDirectory listChildren"
@@ -60,6 +77,9 @@ export class LeadDirectoryQueryService {
 			}
 		}
 
+		const unassignedCount = await this.repo.countUnassignedLeads({ ownerId });
+		roots.unshift(makeUnassignedTreeNode(ownerId, unassignedCount));
+
 		return roots;
 	}
 
@@ -68,6 +88,14 @@ export class LeadDirectoryQueryService {
 		directoryId: string,
 		input: { limit: number; offset: number }
 	) {
+		if (isUnassignedDirectoryId(directoryId)) {
+			return this.repo.listUnassignedLeads({
+				ownerId,
+				limit: input.limit,
+				offset: input.offset,
+			});
+		}
+
 		const dir = await this.repo.findOwnedById({ ownerId, directoryId });
 		if (!dir) throw new LeadDirectoryNotFoundError("Directory not found");
 
@@ -83,6 +111,15 @@ export class LeadDirectoryQueryService {
 		ownerId: string,
 		leadId: string
 	): Promise<LeadDirectoryDto[]> {
-		return this.repo.listLeadDirectories({ ownerId, leadId });
+		const items = await this.repo.listLeadDirectories({ ownerId, leadId });
+		if (items.length > 0) return items;
+
+		// Keep backward compatibility: only expose synthetic directory
+		// if the lead actually exists.
+		const exists = await this.repo.leadExists(leadId);
+		if (!exists) return [];
+
+		const leadsCount = await this.repo.countUnassignedLeads({ ownerId });
+		return [makeUnassignedDirectory(ownerId, leadsCount)];
 	}
 }

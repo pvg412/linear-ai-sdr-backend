@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const LeadPaginationFiltersSchema = z.object({
 	leadSearchId: z.cuid().optional(),
+	directoryId: z.string().optional(),
 	createdById: z.cuid().optional(),
 	email: z.email().optional(),
 });
