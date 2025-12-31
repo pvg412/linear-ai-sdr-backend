@@ -144,12 +144,15 @@ export class LeadDirectoryRepository {
 		return res.count > 0;
 	}
 
-	async leadExists(leadId: string): Promise<boolean> {
+	async getLeadStatus(
+		leadId: string
+	): Promise<{ exists: boolean; isVerified: boolean }> {
 		const row = await this.prisma.lead.findUnique({
 			where: { id: leadId },
-			select: { id: true },
+			select: { id: true, isVerified: true },
 		});
-		return Boolean(row);
+		if (!row) return { exists: false, isVerified: false };
+		return { exists: true, isVerified: row.isVerified };
 	}
 
 	async addLeadToDirectory(input: {
@@ -194,6 +197,7 @@ export class LeadDirectoryRepository {
 		const where = {
 			directoryId: input.directoryId,
 			directory: { ownerId: input.ownerId },
+			lead: { isVerified: true },
 		} satisfies Prisma.LeadDirectoryLeadWhereInput;
 
 		const [total, rows] = await this.prisma.$transaction([
@@ -216,6 +220,7 @@ export class LeadDirectoryRepository {
 		return this.prisma.lead.count({
 			where: {
 				createdById: input.ownerId,
+				isVerified: true,
 				leadDirectoryLeads: { none: { directory: { ownerId: input.ownerId } } },
 			},
 		});
@@ -228,6 +233,7 @@ export class LeadDirectoryRepository {
 	}): Promise<{ total: number; items: Prisma.LeadGetPayload<object>[] }> {
 		const where = {
 			createdById: input.ownerId,
+			isVerified: true,
 			leadDirectoryLeads: { none: { directory: { ownerId: input.ownerId } } },
 		} satisfies Prisma.LeadWhereInput;
 

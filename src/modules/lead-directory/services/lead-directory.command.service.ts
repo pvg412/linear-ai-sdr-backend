@@ -5,6 +5,7 @@ import { LEAD_DIRECTORY_TYPES } from "../lead-directory.types";
 import {
 	LeadDirectoryConflictError,
 	LeadDirectoryNotFoundError,
+	LeadDirectoryForbiddenError,
 	LeadDirectoryValidationError,
 } from "../lead-directory.errors";
 import {
@@ -158,8 +159,11 @@ export class LeadDirectoryCommandService {
 		const dir = await this.repo.findOwnedById({ ownerId, directoryId });
 		if (!dir) throw new LeadDirectoryNotFoundError("Directory not found");
 
-		const leadExists = await this.repo.leadExists(leadId);
-		if (!leadExists) throw new LeadDirectoryNotFoundError("Lead not found");
+		const lead = await this.repo.getLeadStatus(leadId);
+		if (!lead.exists) throw new LeadDirectoryNotFoundError("Lead not found");
+		if (!lead.isVerified) {
+			throw new LeadDirectoryForbiddenError("Lead is not verified");
+		}
 
 		await this.repo.addLeadToDirectory({ directoryId, leadId });
 

@@ -21,6 +21,30 @@ export class LeadDirectoryQueryService {
 		private readonly repo: LeadDirectoryRepository
 	) {}
 
+	async listAllFlat(
+		ownerId: string,
+		log?: LoggerLike
+	): Promise<LeadDirectoryDto[]> {
+		const lg = ensureLogger(log);
+		const all = await this.repo.listAllForOwner(ownerId);
+		const unassignedCount = await this.repo.countUnassignedLeads({ ownerId });
+
+		// Useful for Multiselect dropdowns: stable, human-friendly ordering.
+		const sorted = [...all].sort((a, b) => {
+			const byName = a.name.localeCompare(b.name, undefined, {
+				sensitivity: "base",
+			});
+			if (byName !== 0) return byName;
+			if (a.position !== b.position) return a.position - b.position;
+			return a.createdAt.getTime() - b.createdAt.getTime();
+		});
+
+		const items = [makeUnassignedDirectory(ownerId, unassignedCount), ...sorted];
+
+		lg.debug({ ownerId, count: items.length }, "LeadDirectory listAllFlat");
+		return items;
+	}
+
 	async getDirectory(
 		ownerId: string,
 		directoryId: string
@@ -111,13 +135,16 @@ export class LeadDirectoryQueryService {
 		ownerId: string,
 		leadId: string
 	): Promise<LeadDirectoryDto[]> {
+		const lead = await this.repo.getLeadStatus(leadId);
+		// Unverified leads are system-internal and should not be exposed.
+		if (!lead.exists || !lead.isVerified) return [];
+
 		const items = await this.repo.listLeadDirectories({ ownerId, leadId });
 		if (items.length > 0) return items;
 
 		// Keep backward compatibility: only expose synthetic directory
 		// if the lead actually exists.
-		const exists = await this.repo.leadExists(leadId);
-		if (!exists) return [];
+		// (Lead existence already checked above.)
 
 		const leadsCount = await this.repo.countUnassignedLeads({ ownerId });
 		return [makeUnassignedDirectory(ownerId, leadsCount)];

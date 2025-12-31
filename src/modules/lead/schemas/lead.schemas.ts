@@ -27,3 +27,30 @@ export const LeadPaginationSchema = z
 	);
 
 export type LeadPaginationQuery = z.infer<typeof LeadPaginationSchema>;
+
+export const LeadSearchIdParamsSchema = z.object({
+	leadSearchId: z.cuid(),
+});
+
+export const LeadSearchLeadsPaginationSchema = z
+	.object({
+		page: z.coerce.number().int().min(1),
+		perPage: z.coerce.number().int().min(1).max(200),
+	})
+	.strict();
+
+export const LeadSearchLeadsVerifySchema = z
+	.object({
+		items: z
+			.array(
+				z
+					.object({
+						id: z.cuid(),
+						isVerified: z.boolean(),
+					})
+					.strict()
+			)
+			.min(1)
+			.max(500),
+	})
+	.strict();

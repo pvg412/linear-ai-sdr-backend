@@ -105,6 +105,18 @@ export function registerLeadDirectoryRoutes(app: FastifyInstance) {
 		}
 	});
 
+	// Flat list (no hierarchy, no pagination). Useful for Multiselects.
+	// Important: must be registered before `/lead-directories/:directoryId`.
+	app.get("/lead-directories/flat", async (req, reply) => {
+		try {
+			const userId = requireRequestUserId(req);
+			const items = await qry.listAllFlat(userId, lg);
+			return reply.send({ items });
+		} catch (err) {
+			return handleError(reply, err);
+		}
+	});
+
 	app.get("/lead-directories/:directoryId", async (req, reply) => {
 		try {
 			const userId = requireRequestUserId(req);

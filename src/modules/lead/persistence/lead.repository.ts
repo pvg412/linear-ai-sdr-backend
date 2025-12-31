@@ -15,11 +15,19 @@ export class LeadRepository {
 	private readonly prisma: PrismaClient = getPrisma();
 
 	async listLeads(opts: {
+		ownerId: string;
 		filters?: LeadPaginationFilters;
 		page?: number;
 		perPage?: number;
+		includeUnverified?: boolean;
 	}) {
 		const filters: Prisma.LeadWhereInput[] = [];
+
+		// Unverified leads are system-internal and must not be displayed anywhere,
+		// unless explicitly requested for leadSearch-scoped moderation flows.
+		if (!opts.includeUnverified) {
+			filters.push({ isVerified: true });
+		}
 
 		if (!opts.page || !opts.perPage) {
 			throw new UserFacingError({
@@ -47,11 +55,18 @@ export class LeadRepository {
 		if (opts.filters?.directoryId) {
 			if (opts.filters.directoryId === UNASSIGNED_DIRECTORY_ID) {
 				// Unassigned = lead is not linked to any directory.
-				filters.push({ leadDirectoryLeads: { none: {} } });
+				filters.push({
+					leadDirectoryLeads: {
+						none: { directory: { ownerId: opts.ownerId } },
+					},
+				});
 			} else {
 				filters.push({
 					leadDirectoryLeads: {
-						some: { directoryId: opts.filters.directoryId },
+						some: {
+							directoryId: opts.filters.directoryId,
+							directory: { ownerId: opts.ownerId },
+						},
 					},
 				});
 			}
@@ -78,6 +93,12 @@ export class LeadRepository {
 							updatedAt: true,
 						},
 					},
+					leadDirectoryLeads: {
+						where: { directory: { ownerId: opts.ownerId } },
+						select: {
+							directory: { select: { id: true, name: true, parentId: true } },
+						},
+					},
 				},
 			}),
 			this.prisma.lead.count({ where }),
@@ -86,6 +107,7 @@ export class LeadRepository {
 		const result = {
 			items: rows.map((item) => ({
 				id: item.id,
+				isVerified: item.isVerified,
 				createdById: item.createdById ?? null,
 				fullName: item.fullName ?? null,
 				firstName: item.firstName ?? null,
@@ -99,6 +121,11 @@ export class LeadRepository {
 				email: item.email ?? null,
 				createdAt: toIso(item.createdAt),
 				updatedAt: toIso(item.updatedAt),
+				directories: item.leadDirectoryLeads.map((rel) => ({
+					id: rel.directory.id,
+					name: rel.directory.name,
+					parentId: rel.directory.parentId ?? null,
+				})),
 				leadSearches: item.searches.map((search) => ({
 					id: search.id,
 					leadSearchId: search.leadSearchId,
