@@ -3,6 +3,7 @@
 	"version": "1.0.0",
 	"description": "",
 	"main": "index.js",
+	"type": "module",
 	"scripts": {
 		"dev": "ts-node-dev --respawn --transpile-only -r tsconfig-paths/register src/main.ts",
 		"build": "tsc && tsc-alias",
@@ -12,7 +13,8 @@
 		"lint": "eslint .",
 		"lint:fix": "eslint . --fix",
 		"test": "vitest",
-		"test:watch": "vitest --watch"
+		"test:watch": "vitest --watch",
+		"proto:gen": "grpc_tools_node_protoc --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./src/generated --ts_proto_opt=env=node,esModuleInterop=true,outputServices=grpc-js,forceLong=string,useOptionals=true --proto_path=contracts/proto --proto_path=node_modules/google-proto-files contracts/proto/aisdr/v1/ai_sdr.proto"
 	},
 	"repository": {
 		"type": "git",
@@ -26,11 +28,13 @@
 	},
 	"homepage": "https://github.com/pvg412/linear-ai-sdr-backend#readme",
 	"dependencies": {
+		"@bufbuild/protobuf": "^2.10.2",
 		"@fastify/cors": "^11.1.0",
 		"@fastify/jwt": "^10.0.0",
 		"@fastify/swagger": "^9.6.1",
 		"@fastify/swagger-ui": "^5.2.3",
 		"@fastify/websocket": "^11.2.0",
+		"@grpc/grpc-js": "^1.14.3",
 		"@prisma/adapter-pg": "^7.0.1",
 		"@prisma/client": "^7.0.1",
 		"axios": "^1.13.2",
@@ -42,7 +46,9 @@
 		"inversify": "^7.10.4",
 		"ioredis": "^5.8.2",
 		"openai": "^6.10.0",
+		"protobufjs": "^8.0.0",
 		"reflect-metadata": "^0.2.2",
+		"ts-proto": "^2.10.1",
 		"ws": "^8.18.3",
 		"zod": "^4.1.13"
 	},
@@ -52,6 +58,8 @@
 		"@types/ws": "^8.18.1",
 		"@vitest/coverage-v8": "^4.0.14",
 		"eslint": "^9.39.1",
+		"google-proto-files": "^5.0.1",
+		"grpc-tools": "^1.13.1",
 		"prisma": "^7.0.1",
 		"ts-node-dev": "^2.0.0",
 		"tsc-alias": "^1.8.16",

@@ -1,14 +1,19 @@
 node_modules
 # Keep environment variables out of version control
-.env
-.env.test
-*.env
 dist
 
 /src/generated/prisma
 /src/generated
+generated
 
 tsconfig.tsbuildinfo
 *.tsbuildinfo
-**/.DS_Store
+
+# env files
+.env*
+!.env.example
+!.env.sample
+
+# macOS
 .DS_Store
+**/.DS_Store

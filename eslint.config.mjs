@@ -8,7 +8,6 @@ export default defineConfig(
 			"node_modules/**",
 			"dist/**",
 			"prisma/migrations/**",
-			"src/generated/**",
 			"src/generated/prisma/**",
 			"eslint.config.mjs",
 			"prisma.config.ts",
@@ -24,7 +23,7 @@ export default defineConfig(
 	{
 		languageOptions: {
 			parserOptions: {
-				projectService: true,
+				project: ["./tsconfig.json"],
 				tsconfigRootDir: import.meta.dirname,
 			},
 		},

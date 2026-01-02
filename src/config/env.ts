@@ -18,6 +18,12 @@ const EnvSchema = z.object({
 	REDIS_URL: z.url(),
 	FRONTEND_URL: z.url(),
 
+	AI_GRPC_ADDRESS: z.string(),
+	AI_GRPC_INSECURE: z
+		.string()
+		.optional()
+		.transform((v) => v === "true"),
+
 	LEAD_SEARCH_QUEUE_CONCURRENCY: z.coerce.number().default(4),
 	LEAD_SEARCH_QUEUE_ATTEMPTS: z.coerce.number().default(3),
 	LEAD_SEARCH_QUEUE_BACKOFF_MS: z.coerce.number().default(5000),
