@@ -1,6 +1,9 @@
 import type { FastifyRequest } from "fastify";
 
-import { sanitizeMessageToPublic, sanitizeThreadToPublic } from "../parsers/chat.parsers";
+import {
+	sanitizeMessageToPublic,
+	sanitizeThreadToPublic,
+} from "../parsers/chat.parsers";
 import type { ChatWsServerEvent } from "../schemas/chat.ws.schemas";
 import { requireRequestUserId } from "@/infra/auth/requestUser";
 
@@ -50,17 +53,33 @@ export function extractWsSocket(conn: unknown): ChatWsSocket {
 	return candidate as unknown as ChatWsSocket;
 }
 
+function extractWsToken(req: FastifyRequest): string | null {
+  // query token: ws://.../ws/chat/threads/:id?token=...
+  const q = (req.query ?? {}) as Record<string, unknown>;
+  const token = q["token"];
+  if (typeof token === "string" && token.trim().length > 0) return token.trim();
+  return null;
+}
+
 export async function ensureUserId(req: FastifyRequest): Promise<string> {
-	const existing = req.user?.id;
-	if (typeof existing === "string" && existing.length > 0) return existing;
+  const existing = req.user?.id;
+  if (typeof existing === "string" && existing.length > 0) return existing;
 
-	const jwtVerify = (req as unknown as { jwtVerify?: () => Promise<void> })
-		.jwtVerify;
-	if (typeof jwtVerify === "function") {
-		await jwtVerify();
-	}
+  const token = extractWsToken(req);
+  if (token) {
+    // Fastify types treat headers as readonly-ish; at runtime it's mutable
+    const headers = (req as unknown as { headers: Record<string, unknown> }).headers;
+    if (typeof headers["authorization"] !== "string") {
+      headers["authorization"] = `Bearer ${token}`;
+    }
+  }
 
-	return requireRequestUserId(req);
+  const jwtVerify = (req as unknown as { jwtVerify?: () => Promise<void> }).jwtVerify;
+  if (typeof jwtVerify === "function") {
+    await jwtVerify();
+  }
+
+  return requireRequestUserId(req);
 }
 
 export function wsSend(socket: ChatWsSocket, event: ChatWsServerEvent): void {
@@ -79,7 +98,29 @@ export function sanitizeAny(v: unknown): unknown {
 	}
 	if (!isRecord(v)) return v;
 
-	// threads list
+	// NEW: threads list
+	if (Array.isArray(v.threads)) {
+		return {
+			...v,
+			threads: v.threads.map((x) =>
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+				isRecord(x) ? sanitizeThreadToPublic(x) : x
+			),
+		};
+	}
+
+	// NEW: messages list
+	if (Array.isArray(v.messages)) {
+		return {
+			...v,
+			messages: v.messages.map((x) =>
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+				isRecord(x) ? sanitizeMessageToPublic(x) : x
+			),
+		};
+	}
+
+	// old "items" branches keep as-is (if you use it somewhere else)
 	if (
 		Array.isArray(v.items) &&
 		v.items.length &&
@@ -93,7 +134,6 @@ export function sanitizeAny(v: unknown): unknown {
 		};
 	}
 
-	// messages list
 	if (
 		Array.isArray(v.items) &&
 		v.items.length &&
@@ -107,7 +147,6 @@ export function sanitizeAny(v: unknown): unknown {
 		};
 	}
 
-	// single thread
 	if ("defaultProvider" in v) return sanitizeThreadToPublic(v);
 
 	return v;

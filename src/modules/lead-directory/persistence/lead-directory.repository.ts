@@ -44,6 +44,81 @@ function toDirectoryDto(
 export class LeadDirectoryRepository {
 	private readonly prisma: PrismaClient = getPrisma();
 
+
+	async deleteOwnedAndListLeadIds(input: {
+		ownerId: string;
+		directoryId: string;
+	}): Promise<string[] | null> {
+		return this.prisma.$transaction<string[] | null>(async (tx) => {
+			// Acquire row-level lock for the directory.
+			// Any concurrent FK checks (inserts into LeadDirectoryLead) will block on this row.
+			const locked = await tx.$queryRaw<Array<{ id: string }>>(
+				Prisma.sql`SELECT id FROM "LeadDirectory" WHERE id = ${input.directoryId} AND "ownerId" = ${input.ownerId} FOR UPDATE`
+			);
+
+			if (locked.length === 0) return null;
+
+			const rows = await tx.leadDirectoryLead.findMany({
+				where: {
+					directoryId: input.directoryId,
+					directory: { ownerId: input.ownerId },
+				},
+				select: { leadId: true },
+			});
+			const leadIds = rows.map((r) => r.leadId);
+
+			await tx.leadDirectory.delete({
+				where: { id: input.directoryId },
+			});
+
+			return leadIds;
+		});
+	}
+
+	async findOwnedByName(input: {
+		ownerId: string;
+		name: string;
+	}): Promise<{ id: string } | null> {
+		return this.prisma.leadDirectory.findUnique({
+			where: { ownerId_name: { ownerId: input.ownerId, name: input.name } },
+			select: { id: true },
+		});
+	}
+
+	async findOwnedByNamesInsensitive(input: {
+		ownerId: string;
+		names: string[];
+	}): Promise<Array<{ id: string; name: string }>> {
+		const uniq: string[] = [];
+		const seen = new Set<string>();
+
+		for (const raw of input.names) {
+			const n = raw.trim();
+			if (!n) continue;
+			const key = n.toLowerCase();
+			if (seen.has(key)) continue;
+			seen.add(key);
+			uniq.push(n);
+		}
+
+		if (uniq.length === 0) return [];
+
+		// OR over equals+insensitive (Postgres supports it)
+		const or = uniq.map((n) => ({
+			name: { equals: n, mode: Prisma.QueryMode.insensitive },
+		})) satisfies Prisma.LeadDirectoryWhereInput[];
+
+		const rows = await this.prisma.leadDirectory.findMany({
+			where: {
+				ownerId: input.ownerId,
+				OR: or,
+			},
+			select: { id: true, name: true },
+		});
+
+		return rows;
+	}
+
 	async findOwnedById(input: {
 		directoryId: string;
 		ownerId: string;
@@ -212,6 +287,20 @@ export class LeadDirectoryRepository {
 		]);
 
 		return { total, items: rows.map((r) => r.lead) };
+	}
+
+	async listLeadIdsInDirectory(input: {
+		ownerId: string;
+		directoryId: string;
+	}): Promise<string[]> {
+		const rows = await this.prisma.leadDirectoryLead.findMany({
+			where: {
+				directoryId: input.directoryId,
+				directory: { ownerId: input.ownerId },
+			},
+			select: { leadId: true },
+		});
+		return rows.map((r) => r.leadId);
 	}
 
 	async countUnassignedLeads(input: { ownerId: string }): Promise<number> {

@@ -14,10 +14,10 @@ import type {
   PingResponse,
   UpsertLeadDocumentsRequest,
   UpsertLeadDocumentsResponse,
-} from "../generated/aisdr/v1/ai_sdr";
-import { AiSdrServiceClient as AiSdrServiceClientConstructor } from "../generated/aisdr/v1/ai_sdr";
-import type { AiSdrServiceClient } from "../generated/aisdr/v1/ai_sdr";
-import { Empty } from "../generated/google/protobuf/empty";
+} from "../../generated/aisdr/v1/ai_sdr";
+import { AiSdrServiceClient as AiSdrServiceClientConstructor } from "../../generated/aisdr/v1/ai_sdr";
+import type { AiSdrServiceClient } from "../../generated/aisdr/v1/ai_sdr";
+import { Empty } from "../../generated/google/protobuf/empty";
 
 const env = loadEnv();
 

@@ -1,14 +1,5 @@
 import { z } from "zod";
 
-const optionalTrimmedString = z
-	.string()
-	.optional()
-	.transform((v) => {
-		if (typeof v !== "string") return undefined;
-		const trimmed = v.trim();
-		return trimmed ? trimmed : undefined;
-	});
-
 const EnvSchema = z.object({
 	NODE_ENV: z
 		.enum(["development", "production", "test"])
@@ -28,6 +19,10 @@ const EnvSchema = z.object({
 	LEAD_SEARCH_QUEUE_ATTEMPTS: z.coerce.number().default(3),
 	LEAD_SEARCH_QUEUE_BACKOFF_MS: z.coerce.number().default(5000),
 
+	LEAD_RAG_INDEX_QUEUE_CONCURRENCY: z.coerce.number().default(4),
+	LEAD_RAG_INDEX_QUEUE_ATTEMPTS: z.coerce.number().default(3),
+	LEAD_RAG_INDEX_QUEUE_BACKOFF_MS: z.coerce.number().default(5000),
+
 	AUTH_JWT_SECRET: z
 		.string()
 		.min(16)
@@ -45,9 +40,6 @@ const EnvSchema = z.object({
 	AUTH_INITIAL_ADMIN_EMAIL: z.email().optional(),
 	AUTH_INITIAL_ADMIN_PASSWORD: z.string().min(8).optional(),
 
-	OPENAI_API_KEY: optionalTrimmedString,
-	OPENAI_MODEL: optionalTrimmedString,
-
 	SCRAPERCITY_API_KEY: z.string().optional(),
 	SCRAPERCITY_API_URL: z.url().optional(),
 
@@ -62,12 +54,6 @@ export const loadEnv = (): Env => {
 	if (!parsed.success) {
 		console.error(z.treeifyError(parsed.error));
 		throw new Error("Invalid environment variables");
-	}
-
-	const hasOpenAiKey = typeof parsed.data.OPENAI_API_KEY === "string";
-	const hasOpenAiModel = typeof parsed.data.OPENAI_MODEL === "string";
-	if (hasOpenAiKey !== hasOpenAiModel) {
-		throw new Error("OPENAI_API_KEY and OPENAI_MODEL must be set together");
 	}
 
 	if (

@@ -5,19 +5,21 @@ import { registerLeadDirectoryModule } from "./modules/lead-directory/lead-direc
 import { registerLeadSearchModule } from "./modules/lead-search/lead-directory.module";
 import { registerChatModule } from "./modules/chat/chat.module";
 import { registerLeadModule } from "./modules/lead/lead.module";
-import { registerAiModule } from "./modules/ai/ai.module";
 import { registerScraperModule } from "./capabilities/scraper/scraper.module";
 import { registerLeadDbModule } from "./capabilities/lead-db/lead-db.module";
 import { registerQueueModule } from "./infra/queue/queue.module";
 import { registerRealtimeModule } from "./infra/realtime/realtime.module";
+import { registerAiGrpcClientModule } from "./infra/ai-grpc-client/ai-grpc-client.module";
+import { registerLeadRagModule } from "./modules/lead-rag/lead-rag.module";
 
 const container = new Container();
 
+registerAiGrpcClientModule(container);
 registerRealtimeModule(container);
 registerQueueModule(container);
+registerLeadRagModule(container);
 registerScraperModule(container);
 registerLeadDbModule(container);
-registerAiModule(container);
 registerLeadModule(container);
 registerChatModule(container);
 registerLeadSearchModule(container);

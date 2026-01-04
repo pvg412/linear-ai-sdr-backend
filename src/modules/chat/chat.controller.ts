@@ -7,9 +7,10 @@ import { ChatCommandService } from "./services/chat.command.service";
 import { ChatQueryService } from "./services/chat.query.service";
 import { registerChatHttpRoutes } from "./controller/chat.controller.http";
 import { registerChatWsRoutes } from "./controller/chat.controller.ws";
+import type { ChatControllerDeps } from "./controller/chat.controller.types";
 import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";
 import { RealtimeHub } from "@/infra/realtime/realtimeHub";
-import type { ChatControllerDeps } from "./controller/chat.controller.types";
+import { ChatAiStreamService } from "./services/chat-ai-stream.service";
 
 const deps: ChatControllerDeps = {
 	queryService: container.get<ChatQueryService>(CHAT_TYPES.ChatQueryService),
@@ -17,6 +18,9 @@ const deps: ChatControllerDeps = {
 		CHAT_TYPES.ChatCommandService
 	),
 	realtimeHub: container.get<RealtimeHub>(REALTIME_TYPES.RealtimeHub),
+	aiStreamService: container.get<ChatAiStreamService>(
+		CHAT_TYPES.ChatAiStreamService
+	),
 };
 
 export function registerChatRoutes(app: FastifyInstance): void {

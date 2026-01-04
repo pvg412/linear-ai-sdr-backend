@@ -5,4 +5,7 @@ export const LEAD_DIRECTORY_TYPES = {
   // CQRS
   LeadDirectoryCommandService: Symbol.for("LeadDirectoryCommandService"),
   LeadDirectoryQueryService: Symbol.for("LeadDirectoryQueryService"),
+
+  // services
+  LeadDirectoryMentionResolver: Symbol.for("LeadDirectoryMentionResolver"),
 } as const;

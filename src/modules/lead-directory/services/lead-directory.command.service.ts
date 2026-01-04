@@ -1,4 +1,5 @@
 import { inject, injectable } from "inversify";
+import { Prisma } from "@prisma/client";
 import { ensureLogger, type LoggerLike } from "@/infra/observability";
 
 import { LEAD_DIRECTORY_TYPES } from "../lead-directory.types";
@@ -12,12 +13,52 @@ import {
 	LeadDirectoryRepository,
 	type LeadDirectoryDto,
 } from "../persistence/lead-directory.repository";
+import { LEAD_RAG_TYPES } from "@/modules/lead-rag/lead-rag.types";
+import { LeadRagIndexSyncService } from "@/modules/lead-rag/services/lead-rag-index-sync.service";
+
+const DIRECTORY_NAME_REGEX = /^[A-Za-z0-9]+$/;
+
+function normalizeDirectoryName(raw: string): string {
+	return raw.trim();
+}
+
+function assertValidDirectoryName(raw: string): string {
+	const name = normalizeDirectoryName(raw);
+
+	if (name.length === 0) {
+		throw new LeadDirectoryValidationError("Directory name must not be empty");
+	}
+	if (name.length > 200) {
+		throw new LeadDirectoryValidationError(
+			"Directory name must be at most 200 characters"
+		);
+	}
+	if (!DIRECTORY_NAME_REGEX.test(name)) {
+		throw new LeadDirectoryValidationError(
+			"Directory name must contain only English letters and digits (A-Z, a-z, 0-9)"
+		);
+	}
+
+	return name;
+}
+
+function isPrismaUniqueConstraintError(e: unknown): boolean {
+	return (
+		e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002"
+	);
+}
+
+function isPrismaForeignKeyConstraintError(e: unknown): boolean {
+	return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003";
+}
 
 @injectable()
 export class LeadDirectoryCommandService {
 	constructor(
 		@inject(LEAD_DIRECTORY_TYPES.LeadDirectoryRepository)
-		private readonly repo: LeadDirectoryRepository
+		private readonly leadDirectoryRepository: LeadDirectoryRepository,
+		@inject(LEAD_RAG_TYPES.LeadRagIndexSyncService)
+		private readonly ragSync: LeadRagIndexSyncService
 	) {}
 
 	async createDirectory(
@@ -32,8 +73,17 @@ export class LeadDirectoryCommandService {
 	): Promise<LeadDirectoryDto> {
 		const lg = ensureLogger(log);
 
+		const name = assertValidDirectoryName(input.name);
+		const existing = await this.leadDirectoryRepository.findOwnedByName({
+			ownerId,
+			name,
+		});
+		if (existing) {
+			throw new LeadDirectoryConflictError("Directory name already exists");
+		}
+
 		if (input.parentId) {
-			const parent = await this.repo.findOwnedById({
+			const parent = await this.leadDirectoryRepository.findOwnedById({
 				ownerId,
 				directoryId: input.parentId,
 			});
@@ -41,13 +91,21 @@ export class LeadDirectoryCommandService {
 				throw new LeadDirectoryNotFoundError("Parent directory not found");
 		}
 
-		const created = await this.repo.create({
-			ownerId,
-			name: input.name,
-			parentId: input.parentId,
-			description: input.description ?? null,
-			position: input.position,
-		});
+		let created: LeadDirectoryDto;
+		try {
+			created = await this.leadDirectoryRepository.create({
+				ownerId,
+				name,
+				parentId: input.parentId,
+				description: input.description ?? null,
+				position: input.position,
+			});
+		} catch (e) {
+			if (isPrismaUniqueConstraintError(e)) {
+				throw new LeadDirectoryConflictError("Directory name already exists");
+			}
+			throw e;
+		}
 
 		lg.info(
 			{ ownerId, directoryId: created.id, parentId: created.parentId },
@@ -64,17 +122,45 @@ export class LeadDirectoryCommandService {
 	): Promise<LeadDirectoryDto> {
 		const lg = ensureLogger(log);
 
-		const updated = await this.repo.updateOwned({
+		const current = await this.leadDirectoryRepository.findOwnedById({
 			ownerId,
 			directoryId,
-			data: {
-				...(patch.name !== undefined ? { name: patch.name } : {}),
-				...(patch.description !== undefined
-					? { description: patch.description }
-					: {}),
-				...(patch.position !== undefined ? { position: patch.position } : {}),
-			},
 		});
+		if (!current) throw new LeadDirectoryNotFoundError("Directory not found");
+
+		const nextName =
+			patch.name !== undefined
+				? assertValidDirectoryName(patch.name)
+				: undefined;
+		if (nextName !== undefined) {
+			const existing = await this.leadDirectoryRepository.findOwnedByName({
+				ownerId,
+				name: nextName,
+			});
+			if (existing && existing.id !== directoryId) {
+				throw new LeadDirectoryConflictError("Directory name already exists");
+			}
+		}
+
+		let updated: LeadDirectoryDto | null;
+		try {
+			updated = await this.leadDirectoryRepository.updateOwned({
+				ownerId,
+				directoryId,
+				data: {
+					...(nextName !== undefined ? { name: nextName } : {}),
+					...(patch.description !== undefined
+						? { description: patch.description }
+						: {}),
+					...(patch.position !== undefined ? { position: patch.position } : {}),
+				},
+			});
+		} catch (e) {
+			if (isPrismaUniqueConstraintError(e)) {
+				throw new LeadDirectoryConflictError("Directory name already exists");
+			}
+			throw e;
+		}
 
 		if (!updated) throw new LeadDirectoryNotFoundError("Directory not found");
 
@@ -90,7 +176,10 @@ export class LeadDirectoryCommandService {
 	): Promise<LeadDirectoryDto> {
 		const lg = ensureLogger(log);
 
-		const dir = await this.repo.findOwnedById({ ownerId, directoryId });
+		const dir = await this.leadDirectoryRepository.findOwnedById({
+			ownerId,
+			directoryId,
+		});
 		if (!dir) throw new LeadDirectoryNotFoundError("Directory not found");
 
 		if (parentId === directoryId) {
@@ -100,7 +189,7 @@ export class LeadDirectoryCommandService {
 		}
 
 		if (parentId) {
-			const parent = await this.repo.findOwnedById({
+			const parent = await this.leadDirectoryRepository.findOwnedById({
 				ownerId,
 				directoryId: parentId,
 			});
@@ -116,14 +205,14 @@ export class LeadDirectoryCommandService {
 						"Cannot move directory into its own subtree"
 					);
 				}
-				cursor = await this.repo.findOwnedParentId({
+				cursor = await this.leadDirectoryRepository.findOwnedParentId({
 					ownerId,
 					directoryId: cursor,
 				});
 			}
 		}
 
-		const updated = await this.repo.updateOwned({
+		const updated = await this.leadDirectoryRepository.updateOwned({
 			ownerId,
 			directoryId,
 			data: { parentId },
@@ -142,8 +231,16 @@ export class LeadDirectoryCommandService {
 	): Promise<void> {
 		const lg = ensureLogger(log);
 
-		const ok = await this.repo.deleteOwned({ ownerId, directoryId });
-		if (!ok) throw new LeadDirectoryNotFoundError("Directory not found");
+		const leadIds = await this.leadDirectoryRepository.deleteOwnedAndListLeadIds({
+			ownerId,
+			directoryId,
+		});
+		if (leadIds === null) throw new LeadDirectoryNotFoundError("Directory not found");
+
+		await this.ragSync.enqueueUpsertLeads(ownerId, leadIds, {
+			reason: "directory.delete",
+			log: lg,
+		});
 
 		lg.info({ ownerId, directoryId }, "LeadDirectory deleted");
 	}
@@ -156,16 +253,35 @@ export class LeadDirectoryCommandService {
 	): Promise<void> {
 		const lg = ensureLogger(log);
 
-		const dir = await this.repo.findOwnedById({ ownerId, directoryId });
+		const dir = await this.leadDirectoryRepository.findOwnedById({
+			ownerId,
+			directoryId,
+		});
 		if (!dir) throw new LeadDirectoryNotFoundError("Directory not found");
 
-		const lead = await this.repo.getLeadStatus(leadId);
+		const lead = await this.leadDirectoryRepository.getLeadStatus(leadId);
 		if (!lead.exists) throw new LeadDirectoryNotFoundError("Lead not found");
 		if (!lead.isVerified) {
 			throw new LeadDirectoryForbiddenError("Lead is not verified");
 		}
 
-		await this.repo.addLeadToDirectory({ directoryId, leadId });
+		try {
+			await this.leadDirectoryRepository.addLeadToDirectory({
+				directoryId,
+				leadId,
+			});
+		} catch (e) {
+			// Directory might have been deleted after we checked it exists.
+			if (isPrismaForeignKeyConstraintError(e)) {
+				throw new LeadDirectoryNotFoundError("Directory not found");
+			}
+			throw e;
+		}
+
+		await this.ragSync.enqueueUpsertLead(ownerId, leadId, {
+			reason: "directory.addLead",
+			log: lg,
+		});
 
 		lg.info({ ownerId, directoryId, leadId }, "Lead added to directory");
 	}
@@ -178,10 +294,22 @@ export class LeadDirectoryCommandService {
 	): Promise<void> {
 		const lg = ensureLogger(log);
 
-		const dir = await this.repo.findOwnedById({ ownerId, directoryId });
+		const dir = await this.leadDirectoryRepository.findOwnedById({
+			ownerId,
+			directoryId,
+		});
 		if (!dir) throw new LeadDirectoryNotFoundError("Directory not found");
 
-		await this.repo.removeLeadFromDirectory({ ownerId, directoryId, leadId });
+		await this.leadDirectoryRepository.removeLeadFromDirectory({
+			ownerId,
+			directoryId,
+			leadId,
+		});
+
+		await this.ragSync.enqueueUpsertLead(ownerId, leadId, {
+			reason: "directory.removeLead",
+			log: lg,
+		});
 
 		lg.info({ ownerId, directoryId, leadId }, "Lead removed from directory");
 	}

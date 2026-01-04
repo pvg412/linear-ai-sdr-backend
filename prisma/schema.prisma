@@ -317,12 +317,13 @@ model LeadDirectory {
   parent   LeadDirectory?  @relation("LeadDirectoryTree", fields: [parentId], references: [id], onDelete: Cascade)
   children LeadDirectory[] @relation("LeadDirectoryTree")
 
-  name        String
+  name        String  @db.Citext
   description String?
   position    Int     @default(0)
 
   leads LeadDirectoryLead[]
 
+  @@unique([ownerId, name])
   @@index([ownerId, parentId])
   @@index([ownerId, updatedAt])
   @@index([parentId, position])

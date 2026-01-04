@@ -13,12 +13,17 @@ import {
 } from "./chat.controller.helpers";
 import { sanitizeMessageToPublic } from "../parsers/chat.parsers";
 
+type StreamState = {
+	abortController: AbortController | null;
+};
+
 type WsContext = {
 	socket: ChatWsSocket;
 	threadId: string;
 	userId: string;
 	tag: string;
 	deps: ChatControllerDeps;
+	stream: StreamState;
 };
 
 export function registerChatWsRoutes(
@@ -87,11 +92,31 @@ async function initializeWsConnection(input: {
 		payload: { threadId, serverTime: new Date().toISOString() },
 	});
 
+	// ✅ important: mutable stream state, so we always abort the current controller
+	const stream: StreamState = { abortController: null };
+
+	const abortCurrent = (reason: string) => {
+		const ac = stream.abortController;
+		if (!ac) return;
+		stream.abortController = null;
+		try {
+			ac.abort();
+		} catch (e) {
+			console.error(tag, "failed to abort current AI stream", {
+				reason,
+				message: e instanceof Error ? e.message : String(e),
+			});
+		}
+	};
+
+	socket.on("close", () => abortCurrent("socket_close"));
+	socket.on("error", () => abortCurrent("socket_error"));
+
 	socket.on("message", (buf: unknown) => {
 		void handleIncomingWsMessage({
 			socket,
 			buf,
-			context: { socket, userId, threadId, tag, deps },
+			context: { socket, userId, threadId, tag, deps, stream },
 		}).catch((err) => {
 			const msg = err instanceof Error ? err.message : String(err);
 			console.error(tag, "handler error", { message: msg });
@@ -152,7 +177,8 @@ async function dispatchWsCommand(input: {
 	context: WsContext;
 }): Promise<void> {
 	const { socket, cmd, context } = input;
-	const { deps, threadId, userId } = context;
+	const { deps, threadId, userId, tag, stream } = context;
+
 	const parsed = ChatWsClientCommandSchema.parse(cmd);
 
 	if (parsed.type === "ping") {
@@ -160,7 +186,10 @@ async function dispatchWsCommand(input: {
 		return;
 	}
 
-	if (parsed.type === "message.send") {
+	// -------------------------
+	// Existing: parse-only flow
+	// -------------------------
+	if (parsed.type === "leadSearch.prompt.parse") {
 		const result = await deps.commandService.sendMessage(
 			userId,
 			threadId,
@@ -195,7 +224,10 @@ async function dispatchWsCommand(input: {
 		return;
 	}
 
-	if (parsed.type === "json.apply") {
+	// -------------------------
+	// Existing: apply json -> lead search
+	// -------------------------
+	if (parsed.type === "leadSearch.prompt.apply") {
 		const result = await deps.commandService.applyJson(
 			userId,
 			threadId,
@@ -227,6 +259,65 @@ async function dispatchWsCommand(input: {
 				clientMessageId: parsed.payload.clientMessageId ?? null,
 			},
 		});
+
+		return;
+	}
+
+	if (parsed.type === "assistant.stream") {
+		// ack immediately so UI gets confirmation
+		wsSend(socket, {
+			type: "ack",
+			payload: {
+				ok: true,
+				clientMessageId: parsed.payload.clientMessageId ?? null,
+			},
+		});
+
+		// abort previous stream on this socket
+		if (stream.abortController) {
+			try {
+				stream.abortController.abort();
+			} catch (e) {
+				console.warn(tag, "failed to abort previous AI stream", {
+					message: e instanceof Error ? e.message : String(e),
+				});
+			}
+		}
+
+		const ac = new AbortController();
+		stream.abortController = ac;
+
+		const defaultDirectoryIds = parsed.payload.defaultDirectoryIds ?? [];
+
+		// fire-and-forget; service itself should broadcast message.created + deltas
+		void deps.aiStreamService
+			.streamAssistantReply({
+				userId,
+				threadId,
+				text: parsed.payload.text,
+				clientMessageId: parsed.payload.clientMessageId ?? undefined,
+				defaultDirectoryIds,
+				signal: ac.signal,
+			})
+			.catch((err) => {
+				// If aborted (client sent another stream or socket closed) — silence.
+				if (ac.signal.aborted) return;
+
+				const msg = err instanceof Error ? err.message : String(err);
+				console.error(tag, "ai stream failed", { message: msg });
+
+				// Send structured error to this socket (not broadcast to whole thread)
+				wsSend(socket, {
+					type: "error",
+					payload: { code: "AI_STREAM_FAILED", message: msg },
+				});
+			})
+			.finally(() => {
+				// Clear only if this is still the active controller
+				if (stream.abortController === ac) {
+					stream.abortController = null;
+				}
+			});
 
 		return;
 	}

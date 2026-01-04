@@ -22,6 +22,39 @@ function toIso(d: Date): string {
 export class ChatRepository {
 	private readonly prisma: PrismaClient = getPrisma();
 
+	async listRecentMessagesForAi(
+		ownerId: string,
+		threadId: string,
+		limit: number
+	) {
+		await this.assertThreadOwner(ownerId, threadId);
+
+		const take = Math.max(1, Math.min(limit, 50)); // safety
+
+		const rows = await this.prisma.chatMessage.findMany({
+			where: { threadId },
+			orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+			take,
+			select: {
+				id: true,
+				role: true,
+				type: true,
+				text: true,
+				createdAt: true,
+			},
+		});
+
+		const ordered = rows.reverse();
+
+		return ordered.map((m) => ({
+			id: m.id,
+			role: m.role,
+			type: m.type,
+			text: m.text ?? null,
+			createdAt: toIso(m.createdAt),
+		}));
+	}
+
 	async listThreads(ownerId: string, opts: { limit: number; cursor?: string }) {
 		const take = opts.limit + 1;
 

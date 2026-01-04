@@ -21,7 +21,7 @@ import { resolveScrapeQuery } from "@/modules/lead-search/services/scraper-query
 import type {
 	LeadSearchJobData,
 	LeadSearchJobName,
-} from "@/infra/queue/lead-search.queue";
+} from "@/infra/queue/lead-search/lead-search.queue";
 
 // Protects from crash window start() -> persist externalRunId
 const EXTERNAL_RUN_ID_GRACE_MS = 2 * 60 * 1000;

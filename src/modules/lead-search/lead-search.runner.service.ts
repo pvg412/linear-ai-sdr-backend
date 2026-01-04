@@ -12,7 +12,7 @@ import {
 	type LeadSearchJobData,
 	type LeadSearchJobName,
 	leadSearchJobOptions,
-} from "@/infra/queue/lead-search.queue";
+} from "@/infra/queue/lead-search/lead-search.queue";
 
 import { LeadDbLeadSearchHandler } from "@/modules/lead-search/services/lead-db.lead-search.handler";
 import { ScraperInlineLeadSearchHandler } from "@/modules/lead-search/services/scraper-inline.lead-search.handler";

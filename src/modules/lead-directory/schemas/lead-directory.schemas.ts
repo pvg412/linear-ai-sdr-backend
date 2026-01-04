@@ -1,9 +1,15 @@
 import { z } from "zod";
 
 const IdSchema = z.string().min(1);
+const DirectoryNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^[A-Za-z0-9]+$/, "Name must contain only English letters and digits");
 
 export const CreateLeadDirectoryBodySchema = z.object({
-  name: z.string().min(1).max(200),
+  name: DirectoryNameSchema,
   parentId: IdSchema.nullable().optional(),
   description: z.string().max(2000).nullable().optional(),
   position: z.number().int().min(0).max(1_000_000).optional(),
@@ -13,7 +19,7 @@ export type CreateLeadDirectoryBody = z.infer<typeof CreateLeadDirectoryBodySche
 
 export const UpdateLeadDirectoryBodySchema = z
   .object({
-    name: z.string().min(1).max(200).optional(),
+    name: DirectoryNameSchema.optional(),
     description: z.string().max(2000).nullable().optional(),
     position: z.number().int().min(0).max(1_000_000).optional(),
   })

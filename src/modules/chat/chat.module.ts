@@ -4,14 +4,11 @@ import { CHAT_TYPES } from "./chat.types";
 import { ChatRepository } from "./persistence/chat.repository";
 import { ChatCommandService } from "./services/chat.command.service";
 import { ChatQueryService } from "./services/chat.query.service";
-import { ChatAiPromptParser } from "./parsers/chat.promptParser.ai";
+import { ChatPromptParser } from "./schemas/chat.dto";
+import { ChatAiPromptParserService } from "./services/chat-ai-prompt-parser.service";
+import { ChatAiStreamService } from "./services/chat-ai-stream.service";
 
 export function registerChatModule(container: Container) {
-	container
-		.bind<ChatAiPromptParser>(CHAT_TYPES.ChatPromptParser)
-		.to(ChatAiPromptParser)
-		.inSingletonScope();
-
 	container
 		.bind<ChatRepository>(CHAT_TYPES.ChatRepository)
 		.to(ChatRepository)
@@ -25,5 +22,15 @@ export function registerChatModule(container: Container) {
 	container
 		.bind<ChatQueryService>(CHAT_TYPES.ChatQueryService)
 		.to(ChatQueryService)
+		.inSingletonScope();
+
+	container
+		.bind<ChatPromptParser>(CHAT_TYPES.ChatPromptParser)
+		.to(ChatAiPromptParserService)
+		.inSingletonScope();
+
+	container
+		.bind<ChatAiStreamService>(CHAT_TYPES.ChatAiStreamService)
+		.to(ChatAiStreamService)
 		.inSingletonScope();
 }

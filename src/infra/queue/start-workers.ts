@@ -1,10 +1,11 @@
 import type { Redis } from "ioredis";
 
 import { container } from "@/container";
-import { ensureLogger, type LoggerLike } from "@/infra/observability";
-import { QUEUE_TYPES } from "./queue.types";
-import { startLeadSearchWorker } from "./lead-search.worker";
 import { loadEnv } from "@/config/env";
+import { QUEUE_TYPES } from "./queue.types";
+import { ensureLogger, type LoggerLike } from "@/infra/observability";
+import { startLeadSearchWorker } from "./lead-search/lead-search.worker";
+import { startLeadRagIndexWorker } from "./lead-rag/lead-rag-index.worker";
 
 const env = loadEnv();
 
@@ -27,9 +28,14 @@ export function startWorkers(log?: LoggerLike): WorkersHandle | null {
 		return null;
 	}
 
-	const worker = startLeadSearchWorker({
+	const leadSearchWorker = startLeadSearchWorker({
 		redis,
 		concurrency: env.LEAD_SEARCH_QUEUE_CONCURRENCY,
+	});
+
+	const leadRagIndexWorker = startLeadRagIndexWorker({
+		redis,
+		concurrency: env.LEAD_RAG_INDEX_QUEUE_CONCURRENCY,
 	});
 
 	lg.info({}, "Workers started");
@@ -39,9 +45,15 @@ export function startWorkers(log?: LoggerLike): WorkersHandle | null {
 			lg.info({}, "Shutting down workers...");
 
 			try {
-				await worker.close();
+				await leadSearchWorker.close();
 			} catch (err) {
-				lg.error({ err }, "Worker close error");
+				lg.error({ err }, "LeadSearch worker close error");
+			}
+
+			try {
+				await leadRagIndexWorker.close();
+			} catch (err) {
+				lg.error({ err }, "LeadRagIndex worker close error");
 			}
 
 			try {
