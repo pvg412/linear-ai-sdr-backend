@@ -1,10 +1,17 @@
 import { z } from "zod";
 
+const SearchStringSchema = z.preprocess(
+	(v) => (typeof v === "string" ? v.trim() : v),
+	z.string().min(1).max(200)
+);
+
 export const LeadPaginationFiltersSchema = z.object({
 	leadSearchId: z.cuid().optional(),
 	directoryId: z.string().optional(),
+	directoryIds: z.array(z.string().min(1)).min(1).max(50).optional(),
 	createdById: z.cuid().optional(),
 	email: z.email().optional(),
+	search: SearchStringSchema.optional(),
 });
 
 export type LeadPaginationFilters = z.infer<typeof LeadPaginationFiltersSchema>;

@@ -5,6 +5,7 @@ export const LEAD_SEARCH_TYPES = {
 
   // services
   LeadSearchRunnerService: Symbol.for("LeadSearchRunnerService"),
+  LeadSearchQueryService: Symbol.for("LeadSearchQueryService"),
   LeadSearchNotifierService: Symbol.for("LeadSearchNotifierService"),
   LeadSearchLeadPersisterService: Symbol.for("LeadSearchLeadPersisterService"),
 

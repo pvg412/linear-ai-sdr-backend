@@ -10,6 +10,96 @@ function toIso(d: Date): string {
 	return d.toISOString();
 }
 
+export function buildLeadWhere(opts: {
+	ownerId: string;
+	filters?: LeadPaginationFilters;
+	includeUnverified?: boolean;
+}): Prisma.LeadWhereInput {
+	const andFilters: Prisma.LeadWhereInput[] = [];
+
+	// Unverified leads are system-internal and must not be displayed anywhere,
+	// unless explicitly requested for leadSearch-scoped moderation flows.
+	if (!opts.includeUnverified) {
+		andFilters.push({ isVerified: true });
+	}
+
+	if (opts.filters?.createdById) {
+		andFilters.push({ createdById: opts.filters.createdById });
+	}
+
+	if (opts.filters?.email) {
+		andFilters.push({
+			email: { equals: opts.filters.email, mode: "insensitive" },
+		});
+	}
+
+	if (opts.filters?.leadSearchId) {
+		andFilters.push({
+			searches: { some: { leadSearchId: opts.filters.leadSearchId } },
+		});
+	}
+
+	const rawDirectoryIds =
+		opts.filters?.directoryIds ??
+		(opts.filters?.directoryId ? [opts.filters.directoryId] : undefined);
+
+	if (rawDirectoryIds?.length) {
+		const uniqueDirectoryIds = Array.from(new Set(rawDirectoryIds));
+		const includeUnassigned = uniqueDirectoryIds.includes(UNASSIGNED_DIRECTORY_ID);
+		const directoryIds = uniqueDirectoryIds.filter(
+			(id) => id !== UNASSIGNED_DIRECTORY_ID
+		);
+
+		const orFilters: Prisma.LeadWhereInput[] = [];
+
+		if (directoryIds.length > 0) {
+			orFilters.push({
+				leadDirectoryLeads: {
+					some: {
+						directoryId: { in: directoryIds },
+						directory: { ownerId: opts.ownerId },
+					},
+				},
+			});
+		}
+
+		if (includeUnassigned) {
+			// Unassigned = lead is not linked to any directory (for this owner).
+			orFilters.push({
+				leadDirectoryLeads: {
+					none: { directory: { ownerId: opts.ownerId } },
+				},
+			});
+		}
+
+		if (orFilters.length === 1) {
+			andFilters.push(orFilters[0]);
+		} else if (orFilters.length > 1) {
+			andFilters.push({ OR: orFilters });
+		}
+	}
+
+	const search = opts.filters?.search?.trim();
+	if (search) {
+		andFilters.push({
+			OR: [
+				{ fullName: { contains: search, mode: "insensitive" } },
+				{ firstName: { contains: search, mode: "insensitive" } },
+				{ lastName: { contains: search, mode: "insensitive" } },
+				{ email: { contains: search, mode: "insensitive" } },
+				{ title: { contains: search, mode: "insensitive" } },
+				{ company: { contains: search, mode: "insensitive" } },
+				{ companyDomain: { contains: search, mode: "insensitive" } },
+				{ companyUrl: { contains: search, mode: "insensitive" } },
+				{ linkedinUrl: { contains: search, mode: "insensitive" } },
+				{ location: { contains: search, mode: "insensitive" } },
+			],
+		});
+	}
+
+	return andFilters.length > 0 ? { AND: andFilters } : {};
+}
+
 @injectable()
 export class LeadRepository {
 	private readonly prisma: PrismaClient = getPrisma();
@@ -21,14 +111,6 @@ export class LeadRepository {
 		perPage?: number;
 		includeUnverified?: boolean;
 	}) {
-		const filters: Prisma.LeadWhereInput[] = [];
-
-		// Unverified leads are system-internal and must not be displayed anywhere,
-		// unless explicitly requested for leadSearch-scoped moderation flows.
-		if (!opts.includeUnverified) {
-			filters.push({ isVerified: true });
-		}
-
 		if (!opts.page || !opts.perPage) {
 			throw new UserFacingError({
 				code: "BAD_REQUEST",
@@ -36,44 +118,11 @@ export class LeadRepository {
 			});
 		}
 
-		if (opts.filters?.createdById) {
-			filters.push({ createdById: opts.filters.createdById });
-		}
-
-		if (opts.filters?.email) {
-			filters.push({
-				email: { equals: opts.filters.email, mode: "insensitive" },
-			});
-		}
-
-		if (opts.filters?.leadSearchId) {
-			filters.push({
-				searches: { some: { leadSearchId: opts.filters.leadSearchId } },
-			});
-		}
-
-		if (opts.filters?.directoryId) {
-			if (opts.filters.directoryId === UNASSIGNED_DIRECTORY_ID) {
-				// Unassigned = lead is not linked to any directory.
-				filters.push({
-					leadDirectoryLeads: {
-						none: { directory: { ownerId: opts.ownerId } },
-					},
-				});
-			} else {
-				filters.push({
-					leadDirectoryLeads: {
-						some: {
-							directoryId: opts.filters.directoryId,
-							directory: { ownerId: opts.ownerId },
-						},
-					},
-				});
-			}
-		}
-
-		const where: Prisma.LeadWhereInput =
-			filters.length > 0 ? { AND: filters } : {};
+		const where = buildLeadWhere({
+			ownerId: opts.ownerId,
+			filters: opts.filters,
+			includeUnverified: opts.includeUnverified,
+		});
 
 		const [rows, total] = await this.prisma.$transaction([
 			this.prisma.lead.findMany({

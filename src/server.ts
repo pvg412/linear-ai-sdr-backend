@@ -11,6 +11,7 @@ import { AuthService } from "./modules/auth/services/auth.service";
 import { registerChatRoutes } from "./modules/chat/chat.controller";
 import { registerLeadRoutes } from "./modules/lead/lead.controller";
 import { registerLeadDirectoryRoutes } from "./modules/lead-directory/lead-directory.controller";
+import { registerLeadSearchRoutes } from "./modules/lead-search/lead-search.controller";
 
 export async function buildServer() {
 	const env = loadEnv();
@@ -62,6 +63,7 @@ export async function buildServer() {
 	registerChatRoutes(app);
 	registerLeadRoutes(app);
 	registerLeadDirectoryRoutes(app);
+	registerLeadSearchRoutes(app);
 
 	return { app, env };
 }

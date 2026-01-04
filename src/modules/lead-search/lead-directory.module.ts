@@ -6,6 +6,7 @@ import { LeadSearchRepository } from "./persistence/lead-search.repository";
 import { LeadDbLeadSearchHandler } from "./services/lead-db.lead-search.handler";
 import { LeadSearchLeadPersisterService } from "./services/lead-search.lead-persister.service";
 import { LeadSearchNotifierService } from "./services/lead-search.notifier.service";
+import { LeadSearchQueryService } from "./services/lead-search.query.service";
 import { ScraperInlineLeadSearchHandler } from "./services/scraper-inline.lead-search.handler";
 import { ScraperStepLeadSearchHandler } from "./services/scraper-step.lead-search.handler";
 
@@ -13,6 +14,11 @@ export function registerLeadSearchModule(container: Container) {
 	container
 		.bind<LeadSearchRunnerService>(LEAD_SEARCH_TYPES.LeadSearchRunnerService)
 		.to(LeadSearchRunnerService)
+		.inSingletonScope();
+
+	container
+		.bind<LeadSearchQueryService>(LEAD_SEARCH_TYPES.LeadSearchQueryService)
+		.to(LeadSearchQueryService)
 		.inSingletonScope();
 
 	container
