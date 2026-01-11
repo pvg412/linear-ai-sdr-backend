@@ -24,7 +24,7 @@ export class SearchLeadsClient {
   }
 
   async createExport(payload: SearchLeadsCreateExportRequest): Promise<string> {
-    const url = `${this.baseUrl}/api/export`;
+    const url = `${this.baseUrl}/export`;
 
     const res = await axios.post(url, payload, {
       headers: {
@@ -39,7 +39,7 @@ export class SearchLeadsClient {
   }
 
   async statusCheck(logId: string): Promise<SearchLeadsStatus> {
-    const url = `${this.baseUrl}/api/logs/statusCheck/${logId}`;
+    const url = `${this.baseUrl}/logs/statusCheck/${logId}`;
 
     const res = await axios.get(url, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
@@ -75,7 +75,7 @@ export class SearchLeadsClient {
   }
 
   async getResult(logId: string): Promise<SearchLeadsResultResponse> {
-    const url = `${this.baseUrl}/api/logs/${logId}?outputFileFormat=json`;
+    const url = `${this.baseUrl}/logs/${logId}?outputFileFormat=json`;
 
     const res = await axios.get(url, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
