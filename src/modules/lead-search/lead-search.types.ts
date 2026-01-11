@@ -13,4 +13,5 @@ export const LEAD_SEARCH_TYPES = {
   LeadDbLeadSearchHandler: Symbol.for("LeadDbLeadSearchHandler"),
   ScraperInlineLeadSearchHandler: Symbol.for("ScraperInlineLeadSearchHandler"),
   ScraperStepLeadSearchHandler: Symbol.for("ScraperStepLeadSearchHandler"),
+  LeadSearchRecoveryService: Symbol.for("LeadSearchRecoveryService"),
 } as const;

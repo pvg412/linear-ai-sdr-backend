@@ -11,6 +11,7 @@ import { LeadDirectoryError } from "./lead-directory.errors";
 import {
 	AddLeadToDirectoryBodySchema,
 	CreateLeadDirectoryBodySchema,
+	ListDirectoriesFlatQuerySchema,
 	ListDirectoriesQuerySchema,
 	ListDirectoryLeadsQuerySchema,
 	MoveLeadDirectoryBodySchema,
@@ -110,7 +111,8 @@ export function registerLeadDirectoryRoutes(app: FastifyInstance) {
 	app.get("/lead-directories/flat", async (req, reply) => {
 		try {
 			const userId = requireRequestUserId(req);
-			const items = await qry.listAllFlat(userId, lg);
+			const q = parseOrThrow(ListDirectoriesFlatQuerySchema, req.query);
+			const items = await qry.listAllFlat(userId, q.withUnassigned ?? true, lg);
 			return reply.send({ items });
 		} catch (err) {
 			return handleError(reply, err);

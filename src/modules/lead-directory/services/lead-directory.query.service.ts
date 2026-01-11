@@ -23,11 +23,12 @@ export class LeadDirectoryQueryService {
 
 	async listAllFlat(
 		ownerId: string,
+		withUnassigned: boolean = true,
 		log?: LoggerLike
 	): Promise<LeadDirectoryDto[]> {
 		const lg = ensureLogger(log);
 		const all = await this.repo.listAllForOwner(ownerId);
-		const unassignedCount = await this.repo.countUnassignedLeads({ ownerId });
+		const unassignedCount = withUnassigned ? await this.repo.countUnassignedLeads({ ownerId }) : 0;
 
 		// Useful for Multiselect dropdowns: stable, human-friendly ordering.
 		const sorted = [...all].sort((a, b) => {
@@ -39,7 +40,7 @@ export class LeadDirectoryQueryService {
 			return a.createdAt.getTime() - b.createdAt.getTime();
 		});
 
-		const items = [makeUnassignedDirectory(ownerId, unassignedCount), ...sorted];
+		const items = withUnassigned ? [makeUnassignedDirectory(ownerId, unassignedCount), ...sorted] : sorted;
 
 		lg.debug({ ownerId, count: items.length }, "LeadDirectory listAllFlat");
 		return items;

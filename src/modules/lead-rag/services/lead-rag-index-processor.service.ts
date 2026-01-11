@@ -102,8 +102,8 @@ export class LeadRagIndexProcessorService {
 		private readonly ai: AiGrpcClient
 	) {}
 
-	private docId(leadId: string): string {
-		return `lead:${leadId}`;
+	private docId(leadId: string, directoryId: string): string {
+		return `lead:${leadId}:${directoryId}`;
 	}
 
 	/**
@@ -135,7 +135,7 @@ export class LeadRagIndexProcessorService {
 		}
 
 		// If your lead model has ownership / verification flags, enforce them.
-		if (lead.id !== args.ownerId) {
+		if (lead.createdById !== args.ownerId) {
 			lg.warn(
 				{ ownerId: args.ownerId, leadId: args.leadId },
 				"RAG: lead owner mismatch -> delete doc"
@@ -174,7 +174,7 @@ export class LeadRagIndexProcessorService {
 					.filter((x): x is string => typeof x === "string" && x.length > 0)
 			: [];
 
-		const directoryIds =
+		const uniqueDirectoryIds =
 			directoryIdsRaw.length > 0
 				? Array.from(new Set(directoryIdsRaw))
 				: [UNASSIGNED_DIRECTORY_ID];
@@ -184,32 +184,35 @@ export class LeadRagIndexProcessorService {
 			lead.updatedAt instanceof Date
 				? String(lead.updatedAt.getTime())
 				: String(Date.now());
-		const contentHash = createHash("sha256")
-			.update(text)
-			.update("\n")
-			.update(directoryIds.join(","))
-			.digest("hex");
+
+		const documents = uniqueDirectoryIds.map((dirId) => {
+			const contentHash = createHash("sha256")
+				.update(text)
+				.update("\n")
+				.update(dirId)
+				.digest("hex");
+
+			return {
+				documentId: this.docId(args.leadId, dirId),
+				leadId: args.leadId,
+				directoryIds: [dirId],
+				kind: LeadDocumentKind.LEAD_DOCUMENT_KIND_PROFILE,
+				text,
+				metadata: {
+					ownerId: args.ownerId,
+					leadId: args.leadId,
+					directoryId: dirId,
+				},
+				updatedAtMs,
+				contentHash,
+			};
+		});
 
 		const req: UpsertLeadDocumentsRequest = {
 			requestId: "", // AiGrpcClient will set UUID if empty
 			workspaceId: args.ownerId,
 			allowPartial: false,
-			documents: [
-				{
-					documentId: this.docId(args.leadId),
-					leadId: args.leadId,
-					directoryIds,
-					kind: LeadDocumentKind.LEAD_DOCUMENT_KIND_PROFILE,
-					text,
-					metadata: {
-						ownerId: args.ownerId,
-						leadId: args.leadId,
-						directoryIds,
-					},
-					updatedAtMs,
-					contentHash,
-				},
-			],
+			documents,
 		};
 
 		await this.ai.upsertLeadDocuments(req);
@@ -218,7 +221,7 @@ export class LeadRagIndexProcessorService {
 			{
 				ownerId: args.ownerId,
 				leadId: args.leadId,
-				directoryIdsCount: directoryIds.length,
+				directoryIdsCount: uniqueDirectoryIds.length,
 			},
 			"RAG: upserted lead doc"
 		);
@@ -231,9 +234,10 @@ export class LeadRagIndexProcessorService {
 	}): Promise<void> {
 		const lg = ensureLogger(args.log);
 
+		// Use leadIds selector to delete all documents for this lead, regardless of directory
 		const req = {
 			workspaceId: args.ownerId,
-			documentIds: [this.docId(args.leadId)],
+			leadIds: { values: [args.leadId] },
 		} as unknown as DeleteLeadDocumentsRequest;
 
 		await this.ai.deleteLeadDocuments(req);

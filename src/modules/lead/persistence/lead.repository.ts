@@ -45,7 +45,9 @@ export function buildLeadWhere(opts: {
 
 	if (rawDirectoryIds?.length) {
 		const uniqueDirectoryIds = Array.from(new Set(rawDirectoryIds));
-		const includeUnassigned = uniqueDirectoryIds.includes(UNASSIGNED_DIRECTORY_ID);
+		const includeUnassigned = uniqueDirectoryIds.includes(
+			UNASSIGNED_DIRECTORY_ID
+		);
 		const directoryIds = uniqueDirectoryIds.filter(
 			(id) => id !== UNASSIGNED_DIRECTORY_ID
 		);
@@ -145,7 +147,14 @@ export class LeadRepository {
 					leadDirectoryLeads: {
 						where: { directory: { ownerId: opts.ownerId } },
 						select: {
-							directory: { select: { id: true, name: true, parentId: true } },
+							directory: {
+								select: {
+									id: true,
+									name: true,
+									parentId: true,
+									parent: { select: { name: true } },
+								},
+							},
 						},
 					},
 				},
@@ -173,6 +182,7 @@ export class LeadRepository {
 				directories: item.leadDirectoryLeads.map((rel) => ({
 					id: rel.directory.id,
 					name: rel.directory.name,
+					parentName: rel.directory.parent?.name ?? null,
 					parentId: rel.directory.parentId ?? null,
 				})),
 				leadSearches: item.searches.map((search) => ({

@@ -9,6 +9,7 @@ import { LeadSearchNotifierService } from "./services/lead-search.notifier.servi
 import { LeadSearchQueryService } from "./services/lead-search.query.service";
 import { ScraperInlineLeadSearchHandler } from "./services/scraper-inline.lead-search.handler";
 import { ScraperStepLeadSearchHandler } from "./services/scraper-step.lead-search.handler";
+import { LeadSearchRecoveryService } from "./services/lead-search.recovery.service";
 
 export function registerLeadSearchModule(container: Container) {
 	container
@@ -62,5 +63,9 @@ export function registerLeadSearchModule(container: Container) {
 	container
 		.bind<LeadSearchRepository>(LEAD_SEARCH_TYPES.LeadSearchRepository)
 		.to(LeadSearchRepository)
+		.inSingletonScope();
+	container
+		.bind<LeadSearchRecoveryService>(LEAD_SEARCH_TYPES.LeadSearchRecoveryService)
+		.to(LeadSearchRecoveryService)
 		.inSingletonScope();
 }

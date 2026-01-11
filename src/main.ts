@@ -4,11 +4,31 @@ dotenv.config();
 
 import { buildServer } from "./server";
 import { startWorkers } from "./infra/queue/start-workers";
+import { container } from "./container";
+import { LEAD_SEARCH_TYPES } from "./modules/lead-search/lead-search.types";
+import { LeadSearchRecoveryService } from "./modules/lead-search/services/lead-search.recovery.service";
 
 async function start() {
   const { app, env } = await buildServer();
 
   const workers = startWorkers(app.log);
+
+  // Recover any stuck RUNNING LeadSearch jobs (e.g. lost Redis state)
+  // Only run in production to avoid side effects in dev/test
+  if (env.NODE_ENV === "production") {
+    setImmediate(() => {
+      void (async () => {
+        try {
+          const recovery = container.get<LeadSearchRecoveryService>(
+            LEAD_SEARCH_TYPES.LeadSearchRecoveryService
+          );
+          await recovery.recover(app.log);
+        } catch (err) {
+          app.log.error({ err }, "LeadSearch recovery failed on startup");
+        }
+      })();
+    });
+  }
 
   let shuttingDown = false;
 

@@ -8,6 +8,7 @@ export type LeadDirectoryDto = {
 	id: string;
 	ownerId: string;
 	parentId: string | null;
+	parentName: string | null;
 	name: string;
 	description: string | null;
 	position: number;
@@ -23,13 +24,17 @@ export type LeadDirectoryTreeNodeDto = LeadDirectoryDto & {
 
 function toDirectoryDto(
 	row: Prisma.LeadDirectoryGetPayload<{
-		include: { _count: { select: { children: true; leads: true } } };
+		include: {
+			_count: { select: { children: true; leads: true } };
+			parent: { select: { name: true } };
+		};
 	}>
 ): LeadDirectoryDto {
 	return {
 		id: row.id,
 		ownerId: row.ownerId,
 		parentId: row.parentId,
+		parentName: row.parent?.name ?? null,
 		name: row.name,
 		description: row.description,
 		position: row.position,
@@ -43,7 +48,6 @@ function toDirectoryDto(
 @injectable()
 export class LeadDirectoryRepository {
 	private readonly prisma: PrismaClient = getPrisma();
-
 
 	async deleteOwnedAndListLeadIds(input: {
 		ownerId: string;
@@ -125,7 +129,10 @@ export class LeadDirectoryRepository {
 	}): Promise<LeadDirectoryDto | null> {
 		const row = await this.prisma.leadDirectory.findFirst({
 			where: { id: input.directoryId, ownerId: input.ownerId },
-			include: { _count: { select: { children: true, leads: true } } },
+			include: {
+				_count: { select: { children: true, leads: true } },
+				parent: { select: { name: true } },
+			},
 		});
 		return row ? toDirectoryDto(row) : null;
 	}
@@ -148,7 +155,10 @@ export class LeadDirectoryRepository {
 		const rows = await this.prisma.leadDirectory.findMany({
 			where: { ownerId: input.ownerId, parentId: input.parentId },
 			orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-			include: { _count: { select: { children: true, leads: true } } },
+			include: {
+				_count: { select: { children: true, leads: true } },
+				parent: { select: { name: true } },
+			},
 		});
 		return rows.map(toDirectoryDto);
 	}
@@ -157,7 +167,10 @@ export class LeadDirectoryRepository {
 		const rows = await this.prisma.leadDirectory.findMany({
 			where: { ownerId },
 			orderBy: [{ parentId: "asc" }, { position: "asc" }, { createdAt: "asc" }],
-			include: { _count: { select: { children: true, leads: true } } },
+			include: {
+				_count: { select: { children: true, leads: true } },
+				parent: { select: { name: true } },
+			},
 		});
 		return rows.map(toDirectoryDto);
 	}
@@ -177,7 +190,10 @@ export class LeadDirectoryRepository {
 				description: input.description ?? null,
 				position: input.position ?? 0,
 			},
-			include: { _count: { select: { children: true, leads: true } } },
+			include: {
+				_count: { select: { children: true, leads: true } },
+				parent: { select: { name: true } },
+			},
 		});
 		return toDirectoryDto(row);
 	}
@@ -202,7 +218,10 @@ export class LeadDirectoryRepository {
 
 			const row = await tx.leadDirectory.findFirst({
 				where: { id: input.directoryId, ownerId: input.ownerId },
-				include: { _count: { select: { children: true, leads: true } } },
+				include: {
+					_count: { select: { children: true, leads: true } },
+					parent: { select: { name: true } },
+				},
 			});
 
 			return row ? toDirectoryDto(row) : null;
@@ -349,7 +368,10 @@ export class LeadDirectoryRepository {
 				leads: { some: { leadId: input.leadId } },
 			},
 			orderBy: [{ parentId: "asc" }, { position: "asc" }, { createdAt: "asc" }],
-			include: { _count: { select: { children: true, leads: true } } },
+			include: {
+				_count: { select: { children: true, leads: true } },
+				parent: { select: { name: true } },
+			},
 		});
 
 		return rows.map(toDirectoryDto);

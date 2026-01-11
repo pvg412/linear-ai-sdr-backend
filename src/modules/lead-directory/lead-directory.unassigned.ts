@@ -21,6 +21,7 @@ export function makeUnassignedDirectory(
 		id: UNASSIGNED_DIRECTORY_ID,
 		ownerId,
 		parentId: null,
+		parentName: null,
 		name: UNASSIGNED_DIRECTORY_NAME,
 		description: null,
 		// Keep it first by default if client sorts by position.

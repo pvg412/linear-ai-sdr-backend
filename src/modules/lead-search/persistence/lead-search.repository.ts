@@ -51,6 +51,15 @@ export class LeadSearchRepository {
 		return rows as unknown as LeadSearchSelectorRow[];
 	}
 
+	async findRunningSearches() {
+		return this.prisma.leadSearch.findMany({
+			where: {
+				status: LeadSearchStatus.RUNNING,
+			},
+			orderBy: { createdAt: "asc" },
+		});
+	}
+
 	async markRunning(id: string): Promise<void> {
 		await this.prisma.leadSearch.update({
 			where: { id },

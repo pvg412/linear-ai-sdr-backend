@@ -194,6 +194,19 @@ export class ScraperInlineLeadSearchHandler {
 				const doneStatus =
 					total > 0 ? LeadSearchStatus.DONE : LeadSearchStatus.DONE_NO_RESULTS;
 
+				const shown = Math.min(total, 100);
+				const previewLimit = 100;
+				const previewLeads = leads.slice(0, shown).map((l, idx) => ({
+					leadId: insertedLeadIds[idx] ?? null,
+					fullName: l.fullName ?? null,
+					title: l.title ?? null,
+					company: l.company ?? null,
+					email: l.email ?? null,
+					linkedinUrl: l.linkedinUrl ?? null,
+					companyDomain: l.companyDomain ?? null,
+					location: l.location ?? null,
+				}));
+
 				await this.notifier.postEvent({
 					threadId: leadSearch.threadId,
 					leadSearchId,
@@ -208,6 +221,9 @@ export class ScraperInlineLeadSearchHandler {
 						...this.notifier.publicParserMeta(provider),
 						kind,
 						totalLeads: total,
+						shownLeads: shown,
+						previewLimit,
+						previewLeads,
 						durationMs: msSince(t0),
 					},
 				});

@@ -48,6 +48,19 @@ export const ListDirectoriesQuerySchema = z.object({
 
 export type ListDirectoriesQuery = z.infer<typeof ListDirectoriesQuerySchema>;
 
+export const ListDirectoriesFlatQuerySchema = z.object({
+  withUnassigned: z
+    .string()
+    .optional()
+    .transform((v) => {
+      if (v === "true") return true;
+      if (v === "false") return false;
+      return undefined;
+    }),
+});
+
+export type ListDirectoriesFlatQuery = z.infer<typeof ListDirectoriesFlatQuerySchema>;
+
 export const ListDirectoryLeadsQuerySchema = z.object({
   limit: z
     .string()
