@@ -11,11 +11,13 @@ import {
 	validateNormalizedLeads,
 	type NormalizedLead,
 } from "@/capabilities/shared/leadValidate";
+import { pollUntil } from "@/capabilities/shared/polling";
 
 import { ScraperCityClient } from "./scrapercity.client";
 import { mapScraperCityRowsToLeads } from "./scrapercity.leadMapper";
 import { wrapScraperCityAxiosError } from "./scrapercity.errors";
 import { ScraperCityStatusResponseSchema } from "./scrapercity.schemas";
+import { normalizeScraperCityEmailResult } from "./scrapercity.emailStatus";
 
 @injectable()
 export class ScraperCityScraperAdapter implements ScraperAdapter {
@@ -108,10 +110,84 @@ export class ScraperCityScraperAdapter implements ScraperAdapter {
 			});
 
 			// return strictly query.limit
-			return leadsValidated.slice(0, input.query.limit);
+			const limited = leadsValidated.slice(0, input.query.limit);
+
+			// Email validation is best-effort: do not fail whole scrape if validator is down.
+			await this.tryEnrichEmailStatuses(limited);
+
+			return limited;
 		} catch (e) {
 			wrapScraperCityAxiosError(e);
 			throw e;
+		}
+	}
+
+	private async tryEnrichEmailStatuses(leads: NormalizedLead[]): Promise<void> {
+		const emails = Array.from(
+			new Set(
+				leads
+					.map((l) =>
+						typeof l.email === "string" ? l.email.trim().toLowerCase() : ""
+					)
+					.filter((e) => e.length > 0)
+			)
+		);
+
+		if (emails.length === 0) return;
+
+		const CHUNK_SIZE = 500;
+		const TIMEOUT_PER_EMAIL_SECS = 10;
+
+		for (let i = 0; i < emails.length; i += CHUNK_SIZE) {
+			const chunk = emails.slice(i, i + CHUNK_SIZE);
+
+			try {
+				const runId = await this.client.startEmailValidator({
+					emails: chunk,
+					timeout: TIMEOUT_PER_EMAIL_SECS,
+				});
+
+				const status = await pollUntil({
+					intervalMs: 2_000,
+					maxAttempts: 300, // ~10 min
+					task: async () => this.client.getStatus(runId),
+					isDone: (s) => {
+						const v = String(s.status ?? "").toUpperCase();
+						return v === "SUCCEEDED" || v === "SUCCESS";
+					},
+					isError: (s) => {
+						const v = String(s.status ?? "").toUpperCase();
+						return v === "FAILED" ? `ScraperCity email-validator failed: ${runId}` : false;
+					},
+				});
+
+				const rows = await this.client.downloadEmailValidationRows(runId, status);
+
+				const byEmail = new Map<string, NormalizedLead["emailStatus"]>();
+				for (const r of rows) {
+					const email =
+						typeof r.email === "string" ? r.email.trim().toLowerCase() : undefined;
+					if (!email) continue;
+					byEmail.set(email, normalizeScraperCityEmailResult(r.email_result));
+				}
+
+				for (const lead of leads) {
+					const email =
+						typeof lead.email === "string"
+							? lead.email.trim().toLowerCase()
+							: undefined;
+					if (!email) continue;
+
+					const st = byEmail.get(email);
+					if (st) lead.emailStatus = st;
+				}
+			} catch (e) {
+				// best-effort
+				console.warn("[ScraperCityScraper] email validation failed; continuing", {
+					err: e instanceof Error ? e.message : String(e),
+					emails: chunk.length,
+				});
+			}
 		}
 	}
 }

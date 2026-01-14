@@ -12,6 +12,7 @@
     "location": "Berlin, Germany",
     "workEmail": "alice@example.com",
     "email": null,
+    "emailResult": "ok",
     "some_unknown_field_from_provider": "keep_me"
   },
   {
@@ -27,6 +28,7 @@
     "location": "Munich, Germany",
     "workEmail": null,
     "email": null,
+    "emailResult": "catch_all",
     "another_unknown_field": 123
   }
 ]

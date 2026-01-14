@@ -100,6 +100,7 @@ describe("SearchLeads contract", () => {
 
     expect(validated.length).toBeGreaterThan(0);
     expect(validated[0]?.email ?? validated[0]?.linkedinUrl).toBeTruthy();
+    expect(validated[0]?.emailStatus).toBe("DELIVERABLE");
   });
 
   it("parses result.csv fixture where log.data is a URL string (Guarantee A)", () => {

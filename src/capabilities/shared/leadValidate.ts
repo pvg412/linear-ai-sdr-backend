@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LeadProvider } from "@prisma/client";
+import { EmailStatus, LeadProvider } from "@prisma/client";
 
 export const NormalizedLeadSchema = z
   .object({
@@ -22,6 +22,9 @@ export const NormalizedLeadSchema = z
 
     // This is strict; if you have lots of non-RFC emails, consider relaxing to z.string().min(3)
     email: z.email().optional(),
+
+    // Normalized deliverability; optional because not all providers return it.
+    emailStatus: z.enum(EmailStatus).optional(),
 
     raw: z.unknown().optional(),
   })

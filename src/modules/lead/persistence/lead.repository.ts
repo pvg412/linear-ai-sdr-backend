@@ -177,6 +177,7 @@ export class LeadRepository {
 				linkedinUrl: item.linkedinUrl ?? null,
 				location: item.location ?? null,
 				email: item.email ?? null,
+				emailStatus: item.emailStatus ?? null,
 				createdAt: toIso(item.createdAt),
 				updatedAt: toIso(item.updatedAt),
 				directories: item.leadDirectoryLeads.map((rel) => ({

@@ -10,6 +10,7 @@ import {
 	pickFirstEmail,
 	trimOrUndefined,
 } from "@/capabilities/shared/leadNormalize";
+import { normalizeSearchLeadsEmailStatus } from "./searchleads.emailStatus";
 
 export function mapSearchLeadsRowsToLeads(
 	rows: SearchLeadsLeadRow[]
@@ -37,6 +38,7 @@ export function mapSearchLeadsRowsToLeads(
 			location: joinLocationParts([row.city, row.state, row.country]),
 
 			email: pickFirstEmail(row.email, row.personal_email),
+			emailStatus: normalizeSearchLeadsEmailStatus(row.email_status),
 
 			raw: row,
 		};

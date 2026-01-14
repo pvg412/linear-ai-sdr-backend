@@ -45,7 +45,7 @@ export const ScraperCityApolloRowSchema = z.looseObject({
 	linkedinUrl: z.string().optional().nullable(),
 	linkedin_url: z.string().optional().nullable(),
 
-	// location (download JSON часто еще дает city/country/state отдельно)
+	// location (download JSON often also gives city/country/state separately)
 	location: z.string().optional().nullable(),
 	city: z.string().optional().nullable(),
 	state: z.string().optional().nullable(),
@@ -55,6 +55,8 @@ export const ScraperCityApolloRowSchema = z.looseObject({
 	workEmail: z.string().optional().nullable(),
 	work_email: z.string().optional().nullable(),
 	email: z.string().optional().nullable(),
+	emailResult: z.string().optional().nullable(),
+	email_result: z.string().optional().nullable(),
 
 	// company fields (download JSON uses org*)
 	orgName: z.string().optional().nullable(),

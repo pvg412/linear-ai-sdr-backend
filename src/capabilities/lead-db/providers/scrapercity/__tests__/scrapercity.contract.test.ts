@@ -75,6 +75,7 @@ describe("ScraperCity contract (fixtures)", () => {
 			expect(alice.companyUrl).toBe("https://example.com");
 			expect(alice.title).toBe("Chief Technology Officer");
 			expect(alice.email).toBe("alice@example.com");
+			expect(alice.emailStatus).toBe("DELIVERABLE");
 			expect(alice.linkedinUrl).toBe(
 				"https://www.linkedin.com/in/alice-example/"
 			);
@@ -85,6 +86,7 @@ describe("ScraperCity contract (fixtures)", () => {
 			expect(bob.companyDomain).toBe("builder.io"); // www removed
 			expect(bob.companyUrl).toBe("https://builder.io");
 			expect(bob.title).toBe("CTO");
+			expect(bob.emailStatus).toBe("CATCH_ALL");
 			expect(bob.linkedinUrl).toBe("https://www.linkedin.com/in/bob-builder/");
 		});
 	}

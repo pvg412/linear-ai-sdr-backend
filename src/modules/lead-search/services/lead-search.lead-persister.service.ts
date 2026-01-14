@@ -155,6 +155,7 @@ export class LeadSearchLeadPersisterService {
 			}
 
 			await this.ensureProviderRef(existing.id, input.provider, externalId);
+			await this.ensureEmailStatus(existing.id, incoming.emailStatus);
 			return existing.id;
 		};
 
@@ -199,6 +200,7 @@ export class LeadSearchLeadPersisterService {
 			});
 
 			await this.ensureProviderRef(created.id, input.provider, externalId);
+			await this.ensureEmailStatus(created.id, incoming.emailStatus);
 			return created.id;
 		} catch (e) {
 			// 3) On unique constraint, try reuse instead of failing whole search
@@ -286,5 +288,20 @@ export class LeadSearchLeadPersisterService {
 			if (e?.code === "P2002") return;
 			throw err;
 		}
+	}
+
+	private async ensureEmailStatus(
+		leadId: string,
+		emailStatus?: NormalizedLead["emailStatus"]
+	): Promise<void> {
+		if (!emailStatus) return;
+
+		// Keep it resilient to out-of-date Prisma client typings by using SQL update.
+		// Only set status if it's not set yet (first-write-wins).
+		await this.prisma.$executeRaw`
+			UPDATE "Lead"
+			SET "emailStatus" = COALESCE("emailStatus", CAST(${emailStatus} AS "EmailStatus"))
+			WHERE "id" = ${leadId}
+		`;
 	}
 }

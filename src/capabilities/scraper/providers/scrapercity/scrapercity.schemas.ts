@@ -51,6 +51,8 @@ export const ScraperCityApolloRowSchema = z.looseObject({
   workEmail: z.string().optional().nullable(),
   work_email: z.string().optional().nullable(),
   email: z.string().optional().nullable(),
+  emailResult: z.string().optional().nullable(),
+  email_result: z.string().optional().nullable(),
 
   // company
   orgName: z.string().optional().nullable(),
@@ -64,3 +66,19 @@ export const ScraperCityApolloRowSchema = z.looseObject({
 });
 
 export type ScraperCityApolloRow = z.infer<typeof ScraperCityApolloRowSchema>;
+
+/**
+ * Email validator CSV row.
+ * Example columns: email,email_quality,email_result,free,subresult
+ */
+export const ScraperCityEmailValidationRowSchema = z.looseObject({
+  email: z.string().optional().nullable(),
+  email_quality: z.string().optional().nullable(),
+  email_result: z.string().optional().nullable(),
+  free: z.union([z.string(), z.boolean()]).optional().nullable(),
+  subresult: z.string().optional().nullable(),
+});
+
+export type ScraperCityEmailValidationRow = z.infer<
+  typeof ScraperCityEmailValidationRowSchema
+>;

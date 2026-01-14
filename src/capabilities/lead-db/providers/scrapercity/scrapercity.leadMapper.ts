@@ -9,6 +9,7 @@ import {
 	pickFirstEmail,
 	trimOrUndefined,
 } from "@/capabilities/shared/leadNormalize";
+import { normalizeScraperCityEmailResult } from "./scrapercity.emailStatus";
 
 function pickString(...vals: Array<unknown>): string | undefined {
 	for (const v of vals) {
@@ -95,6 +96,9 @@ export function mapScraperCityRowsToLeads(
 			location: location ?? undefined,
 
 			email: email ?? undefined,
+			emailStatus: normalizeScraperCityEmailResult(
+				pickString(row.emailResult, row.email_result)
+			),
 
 			// keep provider row for debugging
 			raw: row,

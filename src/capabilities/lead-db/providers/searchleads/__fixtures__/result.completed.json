@@ -12,6 +12,7 @@
         "name": "John Doe",
         "email": "john.doe@example.com",
         "personal_email": null,
+        "email_status": "deliverable",
         "linkedin_url": "https://www.linkedin.com/in/john-doe/?trk=public_profile",
         "title": "Chief Technology Officer (CTO)",
         "organization_name": "Example GmbH",

@@ -35,6 +35,14 @@ enum LeadOrigin {
   CSV_IMPORT
 }
 
+enum EmailStatus {
+  DELIVERABLE
+  UNDELIVERABLE
+  RISKY
+  CATCH_ALL
+  UNKNOWN
+}
+
 enum LeadListStatus {
   NEW
   CONTACTED
@@ -173,6 +181,7 @@ model Lead {
   linkedinUrl   String?
   location      String?
   email         String?
+  emailStatus   EmailStatus?
 
   meta Json?
 
@@ -187,6 +196,7 @@ model Lead {
   @@index([linkedinUrl])
   @@index([companyDomain])
   @@index([isVerified])
+  @@index([emailStatus])
 }
 
 model LeadProviderRef {
