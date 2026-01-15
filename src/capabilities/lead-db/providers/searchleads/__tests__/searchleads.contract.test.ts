@@ -143,6 +143,9 @@ describe("SearchLeads contract", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 
+    // Required by SearchLeadsClient.baseUrl (resolved lazily).
+    process.env.SEARCH_LEADS_API_URL = "https://apis.searchleads.co/api";
+
     const logId = "test-log-id";
     const client = new SearchLeadsClient("test-api-key");
 

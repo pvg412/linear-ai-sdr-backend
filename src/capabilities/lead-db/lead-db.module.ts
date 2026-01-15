@@ -1,4 +1,5 @@
 import type { Container } from "inversify";
+import type { Redis } from "ioredis";
 
 import { LeadDbAdapter } from "./lead-db.dto";
 import { LEAD_DB_TYPES } from "./lead-db.types";
@@ -6,6 +7,9 @@ import { loadEnv } from "@/config/env";
 import { LeadDbOrchestrator } from "./lead-db.orchestrator";
 import { SearchLeadsLeadDbAdapter } from "./providers/searchleads/searchleads.adapter";
 import { ScraperCityLeadDbAdapter } from "./providers/scrapercity/scrapercity.adapter";
+import { SearchLeadsLimiter } from "./providers/searchleads/searchleads.limiter";
+import { ScraperCityLimiter } from "./providers/scrapercity/scrapercity.limiter";
+import { QUEUE_TYPES } from "@/infra/queue/queue.types";
 
 const env = loadEnv();
 
@@ -18,13 +22,24 @@ const isScraperCityEnabled = Boolean(
 );
 
 export function registerLeadDbModule(container: Container) {
+	let redis: Redis | null = null;
+	try {
+		redis = container.get<Redis>(QUEUE_TYPES.Redis);
+	} catch {
+		redis = null;
+	}
+
+	const searchLeadsLimiter = new SearchLeadsLimiter(redis);
+	const scraperCityLimiter = new ScraperCityLimiter(redis);
+
 	container
 		.bind<LeadDbAdapter>(LEAD_DB_TYPES.LeadDbAdapter)
 		.toDynamicValue(
 			() =>
 				new SearchLeadsLeadDbAdapter(
 					env.SEARCH_LEADS_API_KEY ?? "",
-					isSearchLeadsEnabled
+					isSearchLeadsEnabled,
+					searchLeadsLimiter
 				)
 		)
 		.inSingletonScope();
@@ -34,7 +49,8 @@ export function registerLeadDbModule(container: Container) {
 		.toDynamicValue(() => {
 			return new ScraperCityLeadDbAdapter(
 				env.SCRAPERCITY_API_KEY ?? "",
-				isScraperCityEnabled
+				isScraperCityEnabled,
+				scraperCityLimiter
 			);
 		})
 		.inSingletonScope();

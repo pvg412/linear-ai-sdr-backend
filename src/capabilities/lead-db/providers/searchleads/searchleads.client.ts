@@ -1,7 +1,7 @@
 import axios from "axios";
 
-import { loadEnv } from "@/config/env";
 import { sleep } from "@/capabilities/shared/polling";
+import type { SearchLeadsLimiter } from "./searchleads.limiter";
 import {
   SearchLeadsCreateExportResponseSchema,
   SearchLeadsResultResponseSchema,
@@ -12,8 +12,6 @@ import {
 } from "./searchleads.schemas";
 import type { SearchLeadsCreateExportRequest } from "./searchleads.filterMapper";
 
-const env = loadEnv();
-
 const SEARCHLEADS_502_BACKOFF_MINUTES = [1, 3, 5, 10, 15, 20] as const; // sums to 54m
 const SEARCHLEADS_502_MAX_TOTAL_MS = 60 * 60 * 1000; // 1h
 
@@ -23,10 +21,15 @@ function getAxiosStatus(e: unknown): number | undefined {
 }
 
 export class SearchLeadsClient {
-  constructor(private readonly apiKey: string) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly limiter?: SearchLeadsLimiter,
+    private readonly apiUrlOverride?: string,
+  ) {}
 
   private get baseUrl(): string {
-    const raw = env.SEARCH_LEADS_API_URL;
+    // Resolve lazily so tests can stub env vars after imports.
+    const raw = this.apiUrlOverride ?? process.env.SEARCH_LEADS_API_URL;
     if (!raw) throw new Error("SEARCH_LEADS_API_URL is not set");
     return raw.replace(/\/+$/, "");
   }
@@ -34,6 +37,7 @@ export class SearchLeadsClient {
   async createExport(payload: SearchLeadsCreateExportRequest): Promise<string> {
     const url = `${this.baseUrl}/export`;
 
+    if (this.limiter) await this.limiter.waitForRequestSlot();
     const res = await axios.post(url, payload, {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
@@ -49,6 +53,7 @@ export class SearchLeadsClient {
   async statusCheck(logId: string): Promise<SearchLeadsStatus> {
     const url = `${this.baseUrl}/logs/statusCheck/${logId}`;
 
+    if (this.limiter) await this.limiter.waitForRequestSlot();
     const res = await axios.get(url, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
       timeout: 30_000,
@@ -136,6 +141,7 @@ export class SearchLeadsClient {
   async getResult(logId: string): Promise<SearchLeadsResultResponse> {
     const url = `${this.baseUrl}/logs/${logId}?outputFileFormat=json`;
 
+    if (this.limiter) await this.limiter.waitForRequestSlot();
     const res = await axios.get(url, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
       timeout: 120_000,

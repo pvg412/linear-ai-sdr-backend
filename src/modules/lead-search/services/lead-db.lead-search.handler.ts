@@ -18,6 +18,7 @@ import { LeadSearchRepository } from "@/modules/lead-search/persistence/lead-sea
 import { LeadSearchRunRepository } from "@/modules/lead-search/persistence/lead-search-run.repository";
 import { LeadSearchLeadPersisterService } from "@/modules/lead-search/services/lead-search.lead-persister.service";
 import { LeadSearchNotifierService } from "@/modules/lead-search/services/lead-search.notifier.service";
+import { withLeadSearchAsyncContext } from "@/infra/async-context/leadSearchAsyncContext";
 
 @injectable()
 export class LeadDbLeadSearchHandler {
@@ -113,15 +114,45 @@ export class LeadDbLeadSearchHandler {
 		);
 
 		try {
-			const { providerResults, errors } = await this.leadDbOrchestrator.scrape(
-				leadSearchId,
+			let lastThrottleAtMs = 0;
+
+			const { providerResults, errors } = await withLeadSearchAsyncContext(
 				{
-					limit: leadSearch.limit,
-					filters: parsedQuery.data,
-					fileName: `lead_search_${leadSearchId}`,
+					onThrottle: (t) => {
+						// Debounce to avoid WS spam during long waits.
+						const now = Date.now();
+						if (now - lastThrottleAtMs < 30_000) return;
+						lastThrottleAtMs = now;
+
+						void this.notifier.postEvent({
+							threadId: leadSearch.threadId,
+							leadSearchId,
+							text: t.message,
+							payload: {
+								event: "leadSearch.throttled",
+								leadSearchId,
+								status: LeadSearchStatus.RUNNING,
+								...this.notifier.publicParserMeta(provider),
+								kind,
+								attempt,
+								reason: t.reason,
+								retryAfterMs: t.retryAfterMs,
+								updatedAt: new Date().toISOString(),
+							},
+						});
+					},
 				},
-				{ providersOrder: [provider] },
-				lg.child ? lg.child({ component: "LeadDbOrchestrator" }) : lg
+				async () =>
+					this.leadDbOrchestrator.scrape(
+						leadSearchId,
+						{
+							limit: leadSearch.limit,
+							filters: parsedQuery.data,
+							fileName: `lead_search_${leadSearchId}`,
+						},
+						{ providersOrder: [provider] },
+						lg.child ? lg.child({ component: "LeadDbOrchestrator" }) : lg
+					)
 			);
 
 			const merged = mergeAndTrimLeadDbResults(

@@ -1,7 +1,6 @@
 import axios from "axios";
 import z from "zod";
 
-import { loadEnv } from "@/config/env";
 import { pollUntil } from "@/capabilities/shared/polling";
 import {
 	ScraperCityStartResponseSchema,
@@ -10,21 +9,26 @@ import {
 	type ScraperCityStatusResponse,
 	type ScraperCityApolloRow,
 } from "./scrapercity.schemas";
-
-const env = loadEnv();
+import type { ScraperCityLimiter } from "./scrapercity.limiter";
 
 export class ScraperCityClient {
-	constructor(private readonly apiKey: string) {}
+	constructor(
+		private readonly apiKey: string,
+		private readonly limiter?: ScraperCityLimiter,
+		private readonly apiUrlOverride?: string
+	) {}
 
 	private get baseUrl(): string {
-		if (!env.SCRAPERCITY_API_URL)
-			throw new Error("SCRAPERCITY_API_URL is not set");
-		return env.SCRAPERCITY_API_URL.replace(/\/+$/, "");
+		// Resolve lazily so tests can stub env vars after imports.
+		const raw = this.apiUrlOverride ?? process.env.SCRAPERCITY_API_URL;
+		if (!raw) throw new Error("SCRAPERCITY_API_URL is not set");
+		return raw.replace(/\/+$/, "");
 	}
 
 	async startApolloFilters(payload: Record<string, unknown>): Promise<string> {
 		const url = `${this.baseUrl}/v1/scrape/apollo-filters`;
 
+		if (this.limiter) await this.limiter.waitForRequestSlot();
 		const res = await axios.post(url, payload, {
 			headers: {
 				Authorization: `Bearer ${this.apiKey}`,
@@ -40,6 +44,7 @@ export class ScraperCityClient {
 	async getStatus(runId: string): Promise<ScraperCityStatusResponse> {
 		const url = `${this.baseUrl}/v1/scrape/status/${runId}`;
 
+		if (this.limiter) await this.limiter.waitForRequestSlot();
 		const res = await axios.get(url, {
 			headers: { Authorization: `Bearer ${this.apiKey}` },
 			timeout: 30_000,
@@ -83,6 +88,7 @@ export class ScraperCityClient {
 	): Promise<ScraperCityApolloRow[]> {
 		const downloadUrl = this.buildDownloadUrl(runId, status?.outputUrl);
 
+		if (this.limiter) await this.limiter.waitForRequestSlot();
 		const res = await axios.get(downloadUrl, {
 			headers: { Authorization: `Bearer ${this.apiKey}` },
 			timeout: 120_000,

@@ -11,6 +11,8 @@ import { SearchLeadsClient } from "./searchleads.client";
 import { mapSearchLeadsRowsToLeads } from "./searchleads.leadMapper";
 import { validateNormalizedLeads } from "@/capabilities/shared/leadValidate";
 import { wrapSearchLeadsAxiosError } from "./searchleads.errors";
+import type { SearchLeadsLimiter } from "./searchleads.limiter";
+import { splitSearchLeadsBulkFilter } from "./searchleads.bulk";
 
 @injectable()
 export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
@@ -21,8 +23,9 @@ export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
   constructor(
     private readonly apiKey: string,
     private readonly enabled: boolean,
+    private readonly limiter?: SearchLeadsLimiter,
   ) {
-    this.client = new SearchLeadsClient(apiKey);
+    this.client = new SearchLeadsClient(apiKey, limiter);
   }
 
   isEnabled(): boolean {
@@ -35,11 +38,38 @@ export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
     try {
       console.info("[SearchLeadsLeadDb] create export payload", { fileName, payload });
 
-      const logId = await this.client.createExport(payload);
-      await this.client.waitForCompleted(logId, { intervalMs: 5_000, maxAttempts: 240 });
+      const { filters, bulkKey } = splitSearchLeadsBulkFilter(payload.filter);
+      if (bulkKey && filters.length > 1) {
+        console.info("[SearchLeadsLeadDb] bulk filter split", {
+          fileName,
+          bulkKey,
+          chunks: filters.length,
+        });
+      }
 
-      const rows = await this.client.getCompletedRows(logId);
-      const leadsRaw = mapSearchLeadsRowsToLeads(rows);
+      const runChunk = async (filterOverride: typeof payload.filter) => {
+        const logId = await this.client.createExport({ ...payload, filter: filterOverride });
+        await this.client.waitForCompleted(logId, { intervalMs: 5_000, maxAttempts: 240 });
+        const rows = await this.client.getCompletedRows(logId);
+        return { logId, rows };
+      };
+
+      const chunks = await (this.limiter
+        ? this.limiter.withTaskSlot(async () => {
+            const out: Awaited<ReturnType<typeof runChunk>>[] = [];
+            for (const f of filters) out.push(await runChunk(f));
+            return out;
+          })
+        : (async () => {
+            const out: Awaited<ReturnType<typeof runChunk>>[] = [];
+            for (const f of filters) out.push(await runChunk(f));
+            return out;
+          })());
+
+      const allRows = chunks.flatMap((c) => c.rows);
+      const providerRunId = chunks[0]?.logId ?? null;
+
+      const leadsRaw = mapSearchLeadsRowsToLeads(allRows);
 
       const leads = validateNormalizedLeads(leadsRaw, {
         mode: "drop",
@@ -49,7 +79,7 @@ export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
 
       return {
         provider: this.provider,
-        providerRunId: logId,
+        providerRunId,
         fileNameHint: `${fileName}.json`,
         leads,
       };
