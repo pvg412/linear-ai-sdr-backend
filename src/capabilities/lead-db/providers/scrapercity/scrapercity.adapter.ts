@@ -39,9 +39,11 @@ export class ScraperCityLeadDbAdapter implements LeadDbAdapter {
 				console.info("[ScraperCityLeadDb] start payload", { payload });
 
 				const runId = await this.client.startApolloFilters(payload);
+				
+				// Wait up to 3 days (259200 seconds/5s = 51840 attempts)
 				const status = await this.client.waitForSucceeded(runId, {
 					intervalMs: 5_000,
-					maxAttempts: 180,
+					maxAttempts: 51_840,
 				});
 
 				const rows = await this.client.downloadJsonRows(runId, status);

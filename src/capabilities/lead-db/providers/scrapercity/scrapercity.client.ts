@@ -73,7 +73,10 @@ export class ScraperCityClient {
 
 				return s;
 			},
-			isDone: (s) => String(s.status ?? "").toUpperCase() === "SUCCEEDED",
+			isDone: (s) => {
+				const status = String(s.status ?? "").toUpperCase();
+				return status === "SUCCEEDED" || status === "SUCCESS";
+			},
 			isError: (s) => {
 				const status = String(s.status ?? "").toUpperCase();
 				if (status === "FAILED") return `ScraperCity run failed: ${runId}`;

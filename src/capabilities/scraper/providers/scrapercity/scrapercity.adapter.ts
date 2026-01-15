@@ -148,8 +148,9 @@ export class ScraperCityScraperAdapter implements ScraperAdapter {
 				});
 
 				const status = await pollUntil({
-					intervalMs: 2_000,
-					maxAttempts: 300, // ~10 min
+					//24 hours
+					intervalMs: 5_000,
+					maxAttempts: 57_600,
 					task: async () => this.client.getStatus(runId),
 					isDone: (s) => {
 						const v = String(s.status ?? "").toUpperCase();

@@ -65,7 +65,8 @@ export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
         // Persist as early as possible (survives restarts; idempotent in repository).
         await ctx?.onProviderRunId?.({ providerRunId: logId });
 
-        await this.client.waitForCompleted(logId, { intervalMs: 5_000, maxAttempts: 240 });
+        // Wait up to 3 days (259200 seconds/5s = 51840 attempts)
+        await this.client.waitForCompleted(logId, { intervalMs: 5_000, maxAttempts: 51840 });
         const rows = await this.client.getCompletedRows(logId);
         return { logId, rows };
       };
