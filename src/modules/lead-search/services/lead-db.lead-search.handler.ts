@@ -19,6 +19,20 @@ import { LeadSearchRunRepository } from "@/modules/lead-search/persistence/lead-
 import { LeadSearchLeadPersisterService } from "@/modules/lead-search/services/lead-search.lead-persister.service";
 import { LeadSearchNotifierService } from "@/modules/lead-search/services/lead-search.notifier.service";
 import { withLeadSearchAsyncContext } from "@/infra/async-context/leadSearchAsyncContext";
+import { getUserFacingMessage } from "@/infra/userFacingError";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readLeadDbProviderRunIds(responseMeta: unknown): string[] {
+	if (!isRecord(responseMeta)) return [];
+	const leadDb = responseMeta.leadDb;
+	if (!isRecord(leadDb)) return [];
+	const ids = leadDb.providerRunIds;
+	if (!Array.isArray(ids)) return [];
+	return ids.filter((v): v is string => typeof v === "string" && v.length > 0);
+}
 
 @injectable()
 export class LeadDbLeadSearchHandler {
@@ -46,6 +60,8 @@ export class LeadDbLeadSearchHandler {
 	): Promise<void> {
 		const lg = ensureLogger(log);
 		const t0 = nowNs();
+		const userFinalMessage =
+			"Failed to search: external service not responding. Please try again later.";
 
 		const leadSearch = await this.leadSearchRepository.getById(leadSearchId);
 		if (!leadSearch) throw new Error("LeadSearch not found");
@@ -90,22 +106,29 @@ export class LeadDbLeadSearchHandler {
 			throw new Error(msg);
 		}
 
-		const attempt = await this.leadSearchRunRepository.getNextAttempt(
+		const existingRun = await this.leadSearchRunRepository.findLatestRunningRun(
 			leadSearchId,
 			provider
 		);
 
-		const run = await this.leadSearchRunRepository.createRun({
-			leadSearchId,
-			provider,
-			attempt,
-			triggeredById,
-			requestPayload: {
-				limit: leadSearch.limit,
-				query: parsedQuery.data,
-			} as Prisma.InputJsonValue,
-		});
+		const attempt = existingRun
+			? existingRun.attempt
+			: await this.leadSearchRunRepository.getNextAttempt(leadSearchId, provider);
 
+		const run = existingRun
+			? existingRun
+			: await this.leadSearchRunRepository.createRun({
+					leadSearchId,
+					provider,
+					attempt,
+					triggeredById,
+					requestPayload: {
+						limit: leadSearch.limit,
+						query: parsedQuery.data,
+					} as Prisma.InputJsonValue,
+				});
+
+		// Ensure top-level LeadSearch is RUNNING (idempotent).
 		await this.leadSearchRepository.markRunning(leadSearchId);
 
 		lg.info(
@@ -115,6 +138,25 @@ export class LeadDbLeadSearchHandler {
 
 		try {
 			let lastThrottleAtMs = 0;
+			const metaIds = readLeadDbProviderRunIds(run.responseMeta);
+			const resumeProviderRunIds =
+				metaIds.length > 0
+					? metaIds
+					: typeof run.externalRunId === "string" && run.externalRunId.length > 0
+						? [run.externalRunId]
+						: [];
+
+			if (existingRun) {
+				lg.info(
+					{
+						leadSearchId,
+						runId: run.id,
+						externalRunId: run.externalRunId ?? null,
+						resumeProviderRunIdsCount: resumeProviderRunIds.length,
+					},
+					"LeadSearch (LEAD_DB) resuming existing RUNNING run"
+				);
+			}
 
 			const { providerResults, errors } = await withLeadSearchAsyncContext(
 				{
@@ -141,6 +183,19 @@ export class LeadDbLeadSearchHandler {
 							},
 						});
 					},
+					onProviderRunId: async ({ providerRunId }) => {
+						// Persist early to survive restarts between start() and completion polling.
+						await this.leadSearchRunRepository.ensureExternalRunId(
+							run.id,
+							providerRunId
+						);
+						await this.leadSearchRunRepository.appendLeadDbProviderRunId(
+							run.id,
+							providerRunId
+						);
+					},
+					resumeProviderRunIds:
+						resumeProviderRunIds.length > 0 ? resumeProviderRunIds : undefined,
 				},
 				async () =>
 					this.leadDbOrchestrator.scrape(
@@ -235,15 +290,17 @@ export class LeadDbLeadSearchHandler {
 				"LeadSearch (LEAD_DB) run finished"
 			);
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+			const rawMessage = err instanceof Error ? err.message : String(err);
+			const publicMessage =
+				getUserFacingMessage(err) ?? userFinalMessage;
 
 			lg.warn(
-				{ leadSearchId, provider, runId: run.id, err: message },
+				{ leadSearchId, provider, runId: run.id, err: rawMessage },
 				"LeadSearch (LEAD_DB) run failed"
 			);
 
-			await this.leadSearchRunRepository.markRunFailed(run.id, message);
-			await this.leadSearchRepository.markFailed(leadSearchId, message);
+			await this.leadSearchRunRepository.markRunFailed(run.id, publicMessage);
+			await this.leadSearchRepository.markFailed(leadSearchId, publicMessage);
 
 			await this.notifier.postEvent({
 				threadId: leadSearch.threadId,
@@ -256,7 +313,7 @@ export class LeadDbLeadSearchHandler {
 					...this.notifier.publicParserMeta(provider),
 					kind,
 					attempt,
-					errorMessage: message,
+					errorMessage: publicMessage,
 					durationMs: msSince(t0),
 				},
 			});

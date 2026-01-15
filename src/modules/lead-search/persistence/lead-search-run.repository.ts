@@ -8,6 +8,15 @@ import {
 
 import { getPrisma } from "@/infra/prisma";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toStringArray(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return value.filter((v): v is string => typeof v === "string" && v.length > 0);
+}
+
 @injectable()
 export class LeadSearchRunRepository {
 	private readonly prisma: PrismaClient = getPrisma();
@@ -99,6 +108,39 @@ export class LeadSearchRunRepository {
 		await this.prisma.leadSearchRun.update({
 			where: { id: runId },
 			data: { externalRunId },
+		});
+	}
+
+	/**
+	 * Stores providerRunIds for long-running providers (e.g. chunked exports).
+	 * We persist it in `responseMeta` even while RUNNING so we can resume after restarts.
+	 *
+	 * Shape:
+	 *   responseMeta: { leadDb?: { providerRunIds?: string[] } }
+	 */
+	async appendLeadDbProviderRunId(runId: string, providerRunId: string) {
+		const curr = await this.prisma.leadSearchRun.findUnique({
+			where: { id: runId },
+			select: { responseMeta: true },
+		});
+
+		const meta: Record<string, unknown> = isRecord(curr?.responseMeta)
+			? { ...(curr?.responseMeta as Record<string, unknown>) }
+			: {};
+
+		const leadDb = isRecord(meta.leadDb) ? { ...meta.leadDb } : {};
+		const existingIds = toStringArray(leadDb.providerRunIds);
+
+		if (!existingIds.includes(providerRunId)) {
+			existingIds.push(providerRunId);
+		}
+
+		leadDb.providerRunIds = existingIds;
+		meta.leadDb = leadDb;
+
+		await this.prisma.leadSearchRun.update({
+			where: { id: runId },
+			data: { responseMeta: meta as Prisma.InputJsonValue },
 		});
 	}
 

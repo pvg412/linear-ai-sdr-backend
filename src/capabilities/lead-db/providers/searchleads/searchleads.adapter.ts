@@ -13,6 +13,7 @@ import { validateNormalizedLeads } from "@/capabilities/shared/leadValidate";
 import { wrapSearchLeadsAxiosError } from "./searchleads.errors";
 import type { SearchLeadsLimiter } from "./searchleads.limiter";
 import { splitSearchLeadsBulkFilter } from "./searchleads.bulk";
+import { getLeadSearchAsyncContext } from "@/infra/async-context/leadSearchAsyncContext";
 
 @injectable()
 export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
@@ -47,8 +48,23 @@ export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
         });
       }
 
-      const runChunk = async (filterOverride: typeof payload.filter) => {
-        const logId = await this.client.createExport({ ...payload, filter: filterOverride });
+      const ctx = getLeadSearchAsyncContext();
+      const resumeIds = Array.isArray(ctx?.resumeProviderRunIds)
+        ? ctx?.resumeProviderRunIds.filter((v): v is string => typeof v === "string" && v.length > 0)
+        : [];
+
+      const runChunk = async (args: {
+        filterOverride: typeof payload.filter;
+        resumeLogId?: string;
+      }) => {
+        const logId =
+          typeof args.resumeLogId === "string" && args.resumeLogId.length > 0
+            ? args.resumeLogId
+            : await this.client.createExport({ ...payload, filter: args.filterOverride });
+
+        // Persist as early as possible (survives restarts; idempotent in repository).
+        await ctx?.onProviderRunId?.({ providerRunId: logId });
+
         await this.client.waitForCompleted(logId, { intervalMs: 5_000, maxAttempts: 240 });
         const rows = await this.client.getCompletedRows(logId);
         return { logId, rows };
@@ -57,12 +73,28 @@ export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
       const chunks = await (this.limiter
         ? this.limiter.withTaskSlot(async () => {
             const out: Awaited<ReturnType<typeof runChunk>>[] = [];
-            for (const f of filters) out.push(await runChunk(f));
+            for (let i = 0; i < filters.length; i += 1) {
+              const f = filters[i];
+              out.push(
+                await runChunk({
+                  filterOverride: f,
+                  resumeLogId: resumeIds[i],
+                }),
+              );
+            }
             return out;
           })
         : (async () => {
             const out: Awaited<ReturnType<typeof runChunk>>[] = [];
-            for (const f of filters) out.push(await runChunk(f));
+            for (let i = 0; i < filters.length; i += 1) {
+              const f = filters[i];
+              out.push(
+                await runChunk({
+                  filterOverride: f,
+                  resumeLogId: resumeIds[i],
+                }),
+              );
+            }
             return out;
           })());
 

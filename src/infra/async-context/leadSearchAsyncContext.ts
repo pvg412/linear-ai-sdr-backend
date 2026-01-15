@@ -10,6 +10,18 @@ export type LeadSearchAsyncContext = {
     retryAfterMs: number;
     message: string;
   }) => void;
+
+  /**
+   * Optional callback invoked when a provider run ID becomes known.
+   * Used to persist externalRunId early to survive restarts (idempotent).
+   */
+  onProviderRunId?: (args: { providerRunId: string }) => void | Promise<void>;
+
+  /**
+   * Optional list of providerRunIds to resume instead of starting a new run.
+   * Semantics are provider-specific (e.g. chunked exports).
+   */
+  resumeProviderRunIds?: string[];
 };
 
 const storage = new AsyncLocalStorage<LeadSearchAsyncContext>();

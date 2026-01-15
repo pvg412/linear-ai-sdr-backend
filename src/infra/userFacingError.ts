@@ -2,6 +2,7 @@ export class UserFacingError extends Error {
   public readonly userMessage: string;
   public readonly code: string;
   public readonly details?: Record<string, unknown>;
+  public readonly debugMessage?: string;
 
   constructor(params: {
     userMessage: string;
@@ -9,10 +10,13 @@ export class UserFacingError extends Error {
     debugMessage?: string;
     details?: Record<string, unknown>;
   }) {
-    super(params.debugMessage ?? params.userMessage);
+    // IMPORTANT: Error.message is considered unsafe to expose.
+    // Keep it user-safe to reduce accidental leaks in handlers.
+    super(params.userMessage);
     this.userMessage = params.userMessage;
     this.code = params.code ?? "USER_ERROR";
     this.details = params.details;
+    this.debugMessage = params.debugMessage;
   }
 }
 

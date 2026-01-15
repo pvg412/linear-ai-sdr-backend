@@ -10,6 +10,7 @@ import type {
 } from "./lead-db.dto";
 import { LEAD_DB_TYPES } from "./lead-db.types";
 import { msSince, nowNs, type LoggerLike } from "@/infra/observability";
+import { UserFacingError } from "@/infra/userFacingError";
 
 @injectable()
 export class LeadDbOrchestrator {
@@ -94,9 +95,19 @@ export class LeadDbOrchestrator {
 		}
 
 		if (providerResults.length === 0) {
-			throw new Error(
-				`All lead DB providers failed (sequential): ${JSON.stringify(errors)}`
+			// Keep internal diagnostics in logs; never leak provider names to clients.
+			log?.error(
+				{ leadSearchId, providersOrder, errors },
+				"All lead DB providers failed (sequential)"
 			);
+
+			throw new UserFacingError({
+				code: "LEAD_DB_ALL_PROVIDERS_FAILED",
+				// Keep user-visible message stable and provider-agnostic (frontend must not know providers).
+				userMessage:
+					"Failed to search: external service not responding. Please try again later.",
+				debugMessage: `All lead DB providers failed (sequential): ${JSON.stringify(errors)}`,
+			});
 		}
 
 		log?.info(
