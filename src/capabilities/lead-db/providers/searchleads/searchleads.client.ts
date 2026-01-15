@@ -1,7 +1,7 @@
 import axios from "axios";
 
 import { loadEnv } from "@/config/env";
-import { pollUntil } from "@/capabilities/shared/polling";
+import { sleep } from "@/capabilities/shared/polling";
 import {
   SearchLeadsCreateExportResponseSchema,
   SearchLeadsResultResponseSchema,
@@ -13,6 +13,14 @@ import {
 import type { SearchLeadsCreateExportRequest } from "./searchleads.filterMapper";
 
 const env = loadEnv();
+
+const SEARCHLEADS_502_BACKOFF_MINUTES = [1, 3, 5, 10, 15, 20] as const; // sums to 54m
+const SEARCHLEADS_502_MAX_TOTAL_MS = 60 * 60 * 1000; // 1h
+
+function getAxiosStatus(e: unknown): number | undefined {
+  if (!axios.isAxiosError(e)) return undefined;
+  return e.response?.status;
+}
 
 export class SearchLeadsClient {
   constructor(private readonly apiKey: string) {}
@@ -54,24 +62,75 @@ export class SearchLeadsClient {
     logId: string,
     opts: { intervalMs: number; maxAttempts: number },
   ): Promise<void> {
-    let last: SearchLeadsStatus | undefined;
+    const retry502DeadlineMs = Date.now() + SEARCHLEADS_502_MAX_TOTAL_MS;
 
-    await pollUntil<SearchLeadsStatus>({
-      intervalMs: opts.intervalMs,
-      maxAttempts: opts.maxAttempts,
-      task: async (attempt) => {
+    let last: SearchLeadsStatus | undefined;
+    let successfulChecks = 0;
+    let retry502Index = 0;
+
+    while (successfulChecks < opts.maxAttempts) {
+      try {
+        successfulChecks += 1;
         const status = await this.statusCheck(logId);
 
-        if (attempt === 1 || status !== last) {
-          console.debug("[SearchLeads] status", { logId, attempt, status });
+        // Reset 502 backoff on a successful call.
+        retry502Index = 0;
+
+        if (successfulChecks === 1 || status !== last) {
+          console.debug("[SearchLeads] status", {
+            logId,
+            attempt: successfulChecks,
+            status,
+          });
         }
 
         last = status;
-        return status;
-      },
-      isDone: (s) => s === "completed",
-      isError: (s) => (s === "failed" ? `SearchLeads export failed: ${logId}` : false),
-    });
+
+        if (status === "failed") {
+          throw new Error(`SearchLeads export failed: ${logId}`);
+        }
+
+        if (status === "completed") return;
+
+        await sleep(opts.intervalMs);
+      } catch (e) {
+        const status = getAxiosStatus(e);
+        if (status !== 502) throw e;
+
+        // Do not count 502 failures towards successfulChecks budget.
+        successfulChecks -= 1;
+
+        const nowMs = Date.now();
+        if (nowMs >= retry502DeadlineMs) {
+          throw new Error(
+            `SearchLeads: statusCheck returned 502 for too long (>${Math.round(
+              SEARCHLEADS_502_MAX_TOTAL_MS / 60_000,
+            )}m): ${logId}`,
+          );
+        }
+
+        const backoffMinutes =
+          SEARCHLEADS_502_BACKOFF_MINUTES[
+            Math.min(retry502Index, SEARCHLEADS_502_BACKOFF_MINUTES.length - 1)
+          ];
+        retry502Index += 1;
+
+        const backoffMs = backoffMinutes * 60_000;
+        const remainingMs = retry502DeadlineMs - nowMs;
+
+        console.warn("[SearchLeads] 502 from statusCheck; retrying", {
+          logId,
+          backoffMinutes,
+          remainingSeconds: Math.round(remainingMs / 1000),
+        });
+
+        await sleep(Math.min(backoffMs, remainingMs));
+      }
+    }
+
+    throw new Error(
+      `SearchLeads: export not completed yet after ${opts.maxAttempts} successful status checks (logId=${logId})`,
+    );
   }
 
   async getResult(logId: string): Promise<SearchLeadsResultResponse> {

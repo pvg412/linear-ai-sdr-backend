@@ -7,6 +7,7 @@ import {
   type AxiosRequestConfig,
   type AxiosResponse,
 } from "axios";
+import axios from "axios";
 import { LeadProvider } from "@prisma/client";
 
 import {
@@ -19,6 +20,7 @@ import { mapSearchLeadsRowsToLeads } from "../searchleads.leadMapper";
 import { validateNormalizedLeads } from "@/capabilities/shared/leadValidate";
 import { wrapSearchLeadsAxiosError } from "../searchleads.errors";
 import { UserFacingError } from "@/infra/userFacingError";
+import { SearchLeadsClient } from "../searchleads.client";
 
 function fixture(name: string): unknown {
   const p = join(__dirname, "..", "__fixtures__", name);
@@ -135,5 +137,45 @@ describe("SearchLeads contract", () => {
       const uf = e as UserFacingError & { code?: string };
       expect(uf.code).toBe("SEARCHLEADS_INVALID_INPUT");
     }
+  });
+
+  it("retries statusCheck on 502 with smart backoff (1m, 3m, ...), without failing the whole run", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+    const logId = "test-log-id";
+    const client = new SearchLeadsClient("test-api-key");
+
+    const getSpy = vi.spyOn(axios, "get");
+
+    getSpy
+      .mockRejectedValueOnce(makeAxiosError(502, "<html>bad gateway</html>"))
+      .mockRejectedValueOnce(makeAxiosError(502, "<html>bad gateway</html>"))
+      .mockResolvedValueOnce({ data: fixture("statusCheck.pending.json") })
+      .mockResolvedValueOnce({ data: fixture("statusCheck.completed.json") });
+
+    const p = client.waitForCompleted(logId, { intervalMs: 5_000, maxAttempts: 10 });
+
+    // 1st call -> 502 -> sleeps 1 minute
+    vi.runAllTicks();
+    expect(getSpy).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    vi.runAllTicks();
+    expect(getSpy).toHaveBeenCalledTimes(2);
+
+    // 2nd call -> 502 -> sleeps 3 minutes
+    await vi.advanceTimersByTimeAsync(180_000);
+    vi.runAllTicks();
+    expect(getSpy).toHaveBeenCalledTimes(3);
+
+    // pending -> waits regular poll interval (5s) -> completed
+    await vi.advanceTimersByTimeAsync(5_000);
+    vi.runAllTicks();
+    expect(getSpy).toHaveBeenCalledTimes(4);
+
+    await expect(p).resolves.toBeUndefined();
+
+    vi.useRealTimers();
   });
 });
