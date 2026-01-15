@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 
 import { getPrisma } from "@/infra/prisma";
+import { buildLeadVisibilityWhere } from "@/modules/lead/lead-visibility";
 
 export type LeadDirectoryDto = {
 	id: string;
@@ -238,11 +239,15 @@ export class LeadDirectoryRepository {
 		return res.count > 0;
 	}
 
-	async getLeadStatus(
-		leadId: string
-	): Promise<{ exists: boolean; isVerified: boolean }> {
-		const row = await this.prisma.lead.findUnique({
-			where: { id: leadId },
+	async getLeadStatus(input: {
+		ownerId: string;
+		leadId: string;
+	}): Promise<{ exists: boolean; isVerified: boolean }> {
+		const row = await this.prisma.lead.findFirst({
+			where: {
+				id: input.leadId,
+				AND: [buildLeadVisibilityWhere(input.ownerId)],
+			},
 			select: { id: true, isVerified: true },
 		});
 		if (!row) return { exists: false, isVerified: false };
@@ -323,14 +328,19 @@ export class LeadDirectoryRepository {
 	}
 
 	async countUnassignedLeads(input: { ownerId: string }): Promise<number> {
-		// Unassigned = a lead not linked to any directory owned by this user.
-		// We also scope to leads created by this user to avoid leaking data across users.
+		// Unassigned = a visible lead not linked to any directory owned by this user.
 		return this.prisma.lead.count({
 			where: {
-				createdById: input.ownerId,
-				isVerified: true,
-				leadDirectoryLeads: { none: { directory: { ownerId: input.ownerId } } },
-			},
+				AND: [
+					buildLeadVisibilityWhere(input.ownerId),
+					{ isVerified: true },
+					{
+						leadDirectoryLeads: {
+							none: { directory: { ownerId: input.ownerId } },
+						},
+					},
+				],
+			} satisfies Prisma.LeadWhereInput,
 		});
 	}
 
@@ -340,9 +350,15 @@ export class LeadDirectoryRepository {
 		offset: number;
 	}): Promise<{ total: number; items: Prisma.LeadGetPayload<object>[] }> {
 		const where = {
-			createdById: input.ownerId,
-			isVerified: true,
-			leadDirectoryLeads: { none: { directory: { ownerId: input.ownerId } } },
+			AND: [
+				buildLeadVisibilityWhere(input.ownerId),
+				{ isVerified: true },
+				{
+					leadDirectoryLeads: {
+						none: { directory: { ownerId: input.ownerId } },
+					},
+				},
+			],
 		} satisfies Prisma.LeadWhereInput;
 
 		const [total, items] = await this.prisma.$transaction([

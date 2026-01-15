@@ -4,24 +4,44 @@ import { UNASSIGNED_DIRECTORY_ID } from "@/modules/lead-directory/lead-directory
 import { buildLeadWhere } from "./lead.repository";
 
 describe("buildLeadWhere", () => {
+	const ownerId = "user_1";
+	const ownerVisibility = {
+		OR: [
+			{ createdById: ownerId },
+			{ searches: { some: { leadSearch: { createdById: ownerId } } } },
+			{ leadDirectoryLeads: { some: { directory: { ownerId } } } },
+		],
+	};
+
 	it("adds isVerified=true by default", () => {
-		const where = buildLeadWhere({ ownerId: "user_1" });
-		expect(where).toEqual({ AND: [{ isVerified: true }] });
+		const where = buildLeadWhere({ ownerId });
+		const andFilters = (where as { AND: unknown[] }).AND;
+		expect(andFilters).toEqual(
+			expect.arrayContaining([{ isVerified: true }, ownerVisibility])
+		);
 	});
 
 	it("does not add isVerified=true when includeUnverified=true", () => {
-		const where = buildLeadWhere({ ownerId: "user_1", includeUnverified: true });
-		expect(where).toEqual({});
+		const where = buildLeadWhere({ ownerId, includeUnverified: true });
+		const andFilters = (where as { AND: unknown[] }).AND;
+		expect(andFilters).toEqual(expect.arrayContaining([ownerVisibility]));
+		expect(
+			andFilters.some(
+				(f) => (f as { isVerified?: boolean }).isVerified === true
+			)
+		).toBe(false);
 	});
 
 	it("supports search across multiple fields (contains, insensitive)", () => {
 		const where = buildLeadWhere({
-			ownerId: "user_1",
+			ownerId,
 			filters: { search: "Acme" },
 		});
 
-		expect(where).toMatchObject({
-			AND: [
+		const andFilters = (where as { AND: unknown[] }).AND;
+		expect(andFilters).toEqual(
+			expect.arrayContaining([
+				ownerVisibility,
 				{ isVerified: true },
 				{
 					OR: [
@@ -37,39 +57,43 @@ describe("buildLeadWhere", () => {
 						{ location: { contains: "Acme", mode: "insensitive" } },
 					],
 				},
-			],
-		});
+			])
+		);
 	});
 
 	it("supports directoryIds with OR semantics (any selected directory)", () => {
 		const where = buildLeadWhere({
-			ownerId: "user_1",
+			ownerId,
 			filters: { directoryIds: ["dir_a", "dir_b"] },
 		});
 
-		expect(where).toMatchObject({
-			AND: [
+		const andFilters = (where as { AND: unknown[] }).AND;
+		expect(andFilters).toEqual(
+			expect.arrayContaining([
+				ownerVisibility,
 				{ isVerified: true },
 				{
 					leadDirectoryLeads: {
 						some: {
 							directoryId: { in: ["dir_a", "dir_b"] },
-							directory: { ownerId: "user_1" },
+							directory: { ownerId },
 						},
 					},
 				},
-			],
-		});
+			])
+		);
 	});
 
 	it("supports directoryIds including UNASSIGNED_DIRECTORY_ID (OR with unassigned)", () => {
 		const where = buildLeadWhere({
-			ownerId: "user_1",
+			ownerId,
 			filters: { directoryIds: ["dir_a", UNASSIGNED_DIRECTORY_ID] },
 		});
 
-		expect(where).toMatchObject({
-			AND: [
+		const andFilters = (where as { AND: unknown[] }).AND;
+		expect(andFilters).toEqual(
+			expect.arrayContaining([
+				ownerVisibility,
 				{ isVerified: true },
 				{
 					OR: [
@@ -77,20 +101,19 @@ describe("buildLeadWhere", () => {
 							leadDirectoryLeads: {
 								some: {
 									directoryId: { in: ["dir_a"] },
-									directory: { ownerId: "user_1" },
+									directory: { ownerId },
 								},
 							},
 						},
 						{
 							leadDirectoryLeads: {
-								none: { directory: { ownerId: "user_1" } },
+								none: { directory: { ownerId } },
 							},
 						},
 					],
 				},
-			],
-		});
+			])
+		);
 	});
 });
-
 

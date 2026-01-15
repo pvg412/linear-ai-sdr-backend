@@ -6,10 +6,10 @@ const EnvSchema = z.object({
 		.default("development"),
 	PORT: z.coerce.number().default(3001),
 	DATABASE_URL: z.url(),
-	REDIS_URL: z.url(),
+	REDIS_URL: z.url().optional(),
 	FRONTEND_URL: z.url(),
 
-	AI_GRPC_ADDRESS: z.string(),
+	AI_GRPC_ADDRESS: z.string().optional(),
 	AI_GRPC_INSECURE: z
 		.string()
 		.optional()

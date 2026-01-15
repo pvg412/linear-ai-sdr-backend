@@ -1,5 +1,6 @@
 import { inject, injectable } from "inversify";
 import { randomUUID } from "crypto";
+import * as grpc from "@grpc/grpc-js";
 import { ChatMessageRole, ChatMessageType, Prisma } from "@prisma/client";
 
 import { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
@@ -81,6 +82,20 @@ function parseCitations(itemsUnknown: unknown): Citation[] {
 	}
 
 	return out;
+}
+
+function isAbortError(err: unknown, signal?: AbortSignal): boolean {
+	if (signal?.aborted) return true;
+
+	if (err && typeof err === "object") {
+		const code = (err as { code?: number }).code;
+		// grpc.status is a numeric enum; coerce to number to keep TS happy when comparing to a number.
+		if (typeof code === "number" && code === Number(grpc.status.CANCELLED)) {
+			return true;
+		}
+	}
+
+	return err instanceof Error && err.name === "AbortError";
 }
 
 function getEventPayload(ev: ChatStreamEvent): {
@@ -464,6 +479,8 @@ export class ChatAiStreamService {
 			// flush leftovers if stream ends without final (rare)
 			if (!finalized) flush();
 		} catch (e) {
+			if (isAbortError(e, input.signal)) return;
+
 			const msg = e instanceof Error ? e.message : String(e);
 
 			const errMsg = await this.chatRepo.createMessage({

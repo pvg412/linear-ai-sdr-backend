@@ -4,6 +4,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { getPrisma } from "@/infra/prisma";
 import { UserFacingError } from "@/infra/userFacingError";
 import { UNASSIGNED_DIRECTORY_ID } from "@/modules/lead-directory/lead-directory.unassigned";
+import { buildLeadVisibilityWhere } from "@/modules/lead/lead-visibility";
 import { LeadPaginationFilters } from "../schemas/lead.schemas";
 
 function toIso(d: Date): string {
@@ -16,6 +17,8 @@ export function buildLeadWhere(opts: {
 	includeUnverified?: boolean;
 }): Prisma.LeadWhereInput {
 	const andFilters: Prisma.LeadWhereInput[] = [];
+
+	andFilters.push(buildLeadVisibilityWhere(opts.ownerId));
 
 	// Unverified leads are system-internal and must not be displayed anywhere,
 	// unless explicitly requested for leadSearch-scoped moderation flows.

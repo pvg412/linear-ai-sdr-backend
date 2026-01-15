@@ -259,7 +259,10 @@ export class LeadDirectoryCommandService {
 		});
 		if (!dir) throw new LeadDirectoryNotFoundError("Directory not found");
 
-		const lead = await this.leadDirectoryRepository.getLeadStatus(leadId);
+		const lead = await this.leadDirectoryRepository.getLeadStatus({
+			ownerId,
+			leadId,
+		});
 		if (!lead.exists) throw new LeadDirectoryNotFoundError("Lead not found");
 		if (!lead.isVerified) {
 			throw new LeadDirectoryForbiddenError("Lead is not verified");

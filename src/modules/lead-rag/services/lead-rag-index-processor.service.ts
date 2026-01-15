@@ -15,6 +15,7 @@ import type {
 import { LeadDocumentKind } from "@/generated/aisdr/v1/ai_sdr";
 
 import { UNASSIGNED_DIRECTORY_ID } from "@/modules/lead-directory/lead-directory.unassigned";
+import { buildLeadVisibilityWhere } from "@/modules/lead/lead-visibility";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -117,28 +118,17 @@ export class LeadRagIndexProcessorService {
 	}): Promise<void> {
 		const lg = ensureLogger(args.log);
 
-		const lead = await this.prisma.lead.findUnique({
-			where: { id: args.leadId },
+		const lead = await this.prisma.lead.findFirst({
+			where: {
+				id: args.leadId,
+				AND: [buildLeadVisibilityWhere(args.ownerId)],
+			},
 		});
 
 		if (!lead) {
 			lg.info(
 				{ ownerId: args.ownerId, leadId: args.leadId },
-				"RAG: lead not found -> delete doc"
-			);
-			await this.deleteLeadNow({
-				ownerId: args.ownerId,
-				leadId: args.leadId,
-				log: lg,
-			});
-			return;
-		}
-
-		// If your lead model has ownership / verification flags, enforce them.
-		if (lead.createdById !== args.ownerId) {
-			lg.warn(
-				{ ownerId: args.ownerId, leadId: args.leadId },
-				"RAG: lead owner mismatch -> delete doc"
+				"RAG: lead not found or not visible -> delete doc"
 			);
 			await this.deleteLeadNow({
 				ownerId: args.ownerId,
@@ -162,7 +152,10 @@ export class LeadRagIndexProcessorService {
 		}
 
 		const directoryRows = await this.prisma.leadDirectoryLead.findMany({
-			where: { leadId: args.leadId },
+			where: {
+				leadId: args.leadId,
+				directory: { ownerId: args.ownerId },
+			},
 			select: { directoryId: true },
 		});
 
