@@ -86,3 +86,30 @@ export function validateNormalizedLeads<T extends object>(
 
   return out;
 }
+
+export function dedupeLeads(leads: NormalizedLead[]): NormalizedLead[] {
+  const seen = new Set<string>();
+  const out: NormalizedLead[] = [];
+
+  for (const lead of leads) {
+    const key =
+      lead.linkedinUrl?.trim() ||
+      lead.externalId?.trim() ||
+      lead.email?.trim() ||
+      "";
+
+    // If we can’t build a stable key, don’t dedupe this record (or drop it).
+    if (!key) {
+      out.push(lead);
+      continue;
+    }
+
+    const scoped = `${lead.source}:${key}`;
+    if (seen.has(scoped)) continue;
+    seen.add(scoped);
+    out.push(lead);
+  }
+
+  return out;
+}
+

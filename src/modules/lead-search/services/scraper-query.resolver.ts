@@ -1,6 +1,6 @@
-import { Prisma } from "@prisma/client";
+import { LeadProvider, Prisma } from "@prisma/client";
 import {
-	ScrapeQuerySchema,
+	getScrapeQuerySchemaForProvider,
 	type ScrapeQuery,
 } from "@/capabilities/scraper/scraper.dto";
 import { canonicalizeScraperStoredQuery } from "@/modules/lead-search/scraperQueryCanonicalizer";
@@ -16,6 +16,7 @@ export async function resolveScrapeQuery(input: {
 	leadSearchId: string;
 	leadSearchLimit: number;
 	storedQueryJson: unknown;
+	provider: LeadProvider;
 	leadSearchRepository: LeadSearchRepository;
 }): Promise<ResolveScrapeQueryResult> {
 	const queryObj =
@@ -29,6 +30,7 @@ export async function resolveScrapeQuery(input: {
 		storedQuery: queryObj,
 		limit: input.leadSearchLimit,
 		leadSearchId: input.leadSearchId,
+		provider: input.provider,
 	});
 
 	if (didAddApolloUrl) {
@@ -39,7 +41,16 @@ export async function resolveScrapeQuery(input: {
 		);
 	}
 
-	const parsed = ScrapeQuerySchema.safeParse({
+	const schema = getScrapeQuerySchemaForProvider(input.provider);
+
+	if (!schema) {
+		return {
+			ok: false,
+			issues: [{ path: "provider", message: "Invalid provider" }],
+		};
+	}
+
+	const parsed = schema.safeParse({
 		...canonicalQuery,
 		limit: input.leadSearchLimit,
 	});

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { LeadProvider, LeadSearchKind } from "@prisma/client";
 import { UserFacingError } from "@/infra/userFacingError";
 
-export const CHAT_PARSER_IDS = ["PARSER_A", "PARSER_B"] as const;
+export const CHAT_PARSER_IDS = ["PARSER_A", "PARSER_B", "PARSER_C"] as const;
 export type ChatParserId = (typeof CHAT_PARSER_IDS)[number];
 export const ChatParserIdSchema = z.enum(CHAT_PARSER_IDS);
 
@@ -16,7 +16,7 @@ type ChatParserConfig = ChatParserPublicInfo & {
 	allowedKinds: LeadSearchKind[]; // validate (parser + kind) compatibility
 };
 
-function mustLeadProvider(v: string): LeadProvider {
+function mustLeadProvider(v: LeadProvider): LeadProvider {
 	const ok = (Object.values(LeadProvider) as string[]).includes(v);
 	if (!ok) {
 		throw new Error(
@@ -24,7 +24,7 @@ function mustLeadProvider(v: string): LeadProvider {
 				`Allowed: ${(Object.values(LeadProvider) as string[]).join(", ")}`
 		);
 	}
-	return v as LeadProvider;
+	return v;
 }
 
 function mustAllowedKinds(v: LeadSearchKind[]): LeadSearchKind[] {
@@ -47,14 +47,20 @@ export const CHAT_PARSERS: ChatParserConfig[] = [
 	{
 		id: "PARSER_A",
 		label: "Parser A",
-		provider: mustLeadProvider("SCRAPER_CITY"),
+		provider: mustLeadProvider(LeadProvider.SCRAPER_CITY),
 		allowedKinds: mustAllowedKinds([LeadSearchKind.LEAD_DB, LeadSearchKind.SCRAPER]),
 	},
 	{
 		id: "PARSER_B",
 		label: "Parser B",
-		provider: mustLeadProvider("SEARCH_LEADS"),
+		provider: mustLeadProvider(LeadProvider.SEARCH_LEADS),
 		allowedKinds: mustAllowedKinds([LeadSearchKind.LEAD_DB]),
+	},
+	{
+		id: "PARSER_C",
+		label: "Parser C",
+		provider: mustLeadProvider(LeadProvider.APIFY),
+		allowedKinds: mustAllowedKinds([LeadSearchKind.SCRAPER]),
 	},
 ];
 

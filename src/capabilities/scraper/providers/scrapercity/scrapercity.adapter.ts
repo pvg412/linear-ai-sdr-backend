@@ -2,7 +2,7 @@ import { injectable } from "inversify";
 import { LeadProvider } from "@prisma/client";
 
 import type {
-	ScrapeQuery,
+	ScraperCityScraperQuery,
 	ScraperAdapter,
 	ScraperStartResult,
 	ScraperStatusResult,
@@ -12,6 +12,7 @@ import {
 	type NormalizedLead,
 } from "@/capabilities/shared/leadValidate";
 import { pollUntil } from "@/capabilities/shared/polling";
+import { UserFacingError } from "@/infra/userFacingError";
 
 import { ScraperCityClient } from "./scrapercity.client";
 import { mapScraperCityRowsToLeads } from "./scrapercity.leadMapper";
@@ -42,12 +43,13 @@ export class ScraperCityScraperAdapter implements ScraperAdapter {
 		return this.enabled && !!this.apiKey;
 	}
 
-	async start(query: ScrapeQuery): Promise<ScraperStartResult> {
+	async start(query: ScraperCityScraperQuery): Promise<ScraperStartResult> {
 		try {
 			const count = normalizeCount(query.limit);
+			const apolloUrl = ensureApolloUrl(query.apolloUrl);
 
 			const runId = await this.client.startApolloUrl({
-				url: query.apolloUrl,
+				url: apolloUrl,
 				count,
 			});
 
@@ -82,7 +84,7 @@ export class ScraperCityScraperAdapter implements ScraperAdapter {
 
 	async fetchLeads(input: {
 		providerRunId: string;
-		query: ScrapeQuery;
+		query: ScraperCityScraperQuery;
 		status?: ScraperStatusResult;
 	}): Promise<NormalizedLead[]> {
 		try {
@@ -201,4 +203,17 @@ function normalizeCount(limit: number): number {
 	if (n < min) return min;
 	if (n > max) return max;
 	return n;
+}
+
+function ensureApolloUrl(apolloUrl: string | undefined): string {
+	const url = typeof apolloUrl === "string" ? apolloUrl.trim() : "";
+	if (url) return url;
+
+	throw new UserFacingError({
+		code: "SCRAPERCITY_MISSING_APOLLO_URL",
+		userMessage:
+			"ScraperCity requires an Apollo URL.\n" +
+			"Please update your scraper query.\n",
+		debugMessage: "ScraperCity query missing apolloUrl.",
+	});
 }

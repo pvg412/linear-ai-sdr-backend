@@ -1,0 +1,9 @@
+{
+  "error": {
+    "type": "unauthorized",
+    "message": "Invalid token",
+    "data": {
+      "hint": "APIFY_TOKEN is missing or invalid"
+    }
+  }
+}

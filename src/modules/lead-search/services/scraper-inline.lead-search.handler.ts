@@ -62,6 +62,7 @@ export class ScraperInlineLeadSearchHandler {
 			leadSearchId,
 			leadSearchLimit: leadSearch.limit,
 			storedQueryJson: leadSearch.query,
+			provider,
 			leadSearchRepository: this.leadSearchRepository,
 		});
 

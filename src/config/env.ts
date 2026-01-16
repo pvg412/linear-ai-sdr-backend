@@ -40,6 +40,9 @@ const EnvSchema = z.object({
 	AUTH_INITIAL_ADMIN_EMAIL: z.email().optional(),
 	AUTH_INITIAL_ADMIN_PASSWORD: z.string().min(8).optional(),
 
+	APIFY_TOKEN: z.string().optional(),
+	APIFY_MONGODB_CONNECTION_STRING: z.string().optional(),
+
 	SCRAPERCITY_API_KEY: z.string().optional(),
 	SCRAPERCITY_API_URL: z.url().optional(),
 

@@ -36,6 +36,7 @@
 		"@grpc/grpc-js": "^1.14.3",
 		"@prisma/adapter-pg": "^7.0.1",
 		"@prisma/client": "^7.0.1",
+		"apify-client": "^2.21.0",
 		"axios": "^1.13.2",
 		"bcryptjs": "^3.0.3",
 		"bullmq": "^5.66.3",

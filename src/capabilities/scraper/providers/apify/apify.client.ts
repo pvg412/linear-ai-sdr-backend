@@ -1,0 +1,113 @@
+import { ApifyClient } from "apify-client";
+
+import {
+	ApifyActorRunSchema,
+	ApifyLinkedinProfileRowSchema,
+	type ApifyActorRun,
+	type ApifyLinkedinProfileRow,
+} from "./apify.schemas";
+
+const DEFAULT_ACTOR_ID = "harvestapi/linkedin-profile-search";
+const DATASET_PAGE_LIMIT = 1000;
+
+export type ApifyLinkedinProfileSearchInput = {
+  profileScraperMode?: string;
+  searchQuery?: string;
+  maxItems?: number;
+
+  locations?: string[];
+  currentCompanies?: string[];
+  pastCompanies?: string[];
+  schools?: string[];
+  currentJobTitles?: string[];
+  pastJobTitles?: string[];
+  yearsOfExperienceIds?: string[];
+  yearsAtCurrentCompanyIds?: string[];
+  seniorityLevelIds?: string[];
+  functionIds?: string[];
+  industryIds?: string[];
+  firstNames?: string[];
+  lastNames?: string[];
+  profileLanguages?: string[];
+  recentlyChangedJobs?: boolean;
+
+  excludeLocations?: string[];
+  excludeCurrentCompanies?: string[];
+  excludePastCompanies?: string[];
+  excludeSchools?: string[];
+  excludeCurrentJobTitles?: string[];
+  excludePastJobTitles?: string[];
+  excludeIndustryIds?: string[];
+  excludeSeniorityLevelIds?: string[];
+  excludeFunctionIds?: string[];
+
+  startPage?: number;
+  takePages?: number;
+
+  autoQuerySegmentation?: boolean;
+  autoQuerySegmentationLevels?: string[];
+  autoQuerySegmentationTargetCountries?: string[];
+
+  // dedup across runs via MongoDB (actor input)
+  profileDeduplicationMode?: "off" | "insert_ids" | "insert_profiles" | "read_only";
+  mongoDbConnectionString?: string;
+
+  // post-filtering (actor input)
+  postFilteringMongoDbQuery?: Record<string, unknown>;
+  postFilteringMongoDbAggregation?: Record<string, unknown>[];
+};
+
+
+export class ApifyLinkedinProfileSearchClient {
+	private readonly client: ApifyClient;
+
+	constructor(
+		private readonly token: string,
+		private readonly actorId: string = DEFAULT_ACTOR_ID
+	) {
+		this.client = new ApifyClient({ token });
+	}
+
+	async start(input: ApifyLinkedinProfileSearchInput): Promise<ApifyActorRun> {
+		const run = await this.client.actor(this.actorId).start(input);
+		return ApifyActorRunSchema.parse(run);
+	}
+
+	async getRun(runId: string): Promise<ApifyActorRun> {
+		const run = await this.client.run(runId).get();
+		if (!run) {
+			throw new Error(`Apify run not found: ${runId}`);
+		}
+		return ApifyActorRunSchema.parse(run);
+	}
+
+	async listDatasetItems(
+		datasetId: string,
+		limit: number
+	): Promise<ApifyLinkedinProfileRow[]> {
+		const out: ApifyLinkedinProfileRow[] = [];
+		let offset = 0;
+		const target = Math.max(1, Math.floor(limit));
+
+		while (out.length < target) {
+			const remaining = target - out.length;
+			const batchLimit = Math.min(remaining, DATASET_PAGE_LIMIT);
+
+			const res = await this.client.dataset(datasetId).listItems({
+				limit: batchLimit,
+				offset,
+				clean: false,
+			});
+
+			if (!res || !Array.isArray(res.items) || res.items.length === 0) break;
+
+			const rows = ApifyLinkedinProfileRowSchema.array().parse(res.items);
+			out.push(...rows);
+
+			offset += rows.length;
+			if (rows.length < batchLimit) break;
+		}
+
+		return out;
+	}
+}

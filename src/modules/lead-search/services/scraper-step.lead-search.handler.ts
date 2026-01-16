@@ -82,6 +82,7 @@ export class ScraperStepLeadSearchHandler {
 			leadSearchId,
 			leadSearchLimit: leadSearch.limit,
 			storedQueryJson: leadSearch.query,
+			provider,
 			leadSearchRepository: this.leadSearchRepository,
 		});
 

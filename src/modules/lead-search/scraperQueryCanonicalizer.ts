@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LeadProvider } from "@prisma/client";
 
 import { buildApolloPeopleUrl } from "@/capabilities/scraper/apolloUrlBuilder";
 import { CompanySizeSchema } from "@/capabilities/lead-db/lead-db.dto";
@@ -23,8 +24,14 @@ export function canonicalizeScraperStoredQuery(input: {
 	storedQuery: unknown;
 	limit: number;
 	leadSearchId?: string;
+	provider?: LeadProvider;
 }): { canonicalQuery: UnknownRecord; didAddApolloUrl: boolean } {
 	const base: UnknownRecord = isRecord(input.storedQuery) ? input.storedQuery : {};
+
+	// Only ScraperCity relies on Apollo URL. Avoid persisting apolloUrl for other providers.
+	if (input.provider && input.provider !== LeadProvider.SCRAPER_CITY) {
+		return { canonicalQuery: base, didAddApolloUrl: false };
+	}
 
 	const apolloUrlRaw = base.apolloUrl;
 	if (typeof apolloUrlRaw === "string" && apolloUrlRaw.trim().length > 0) {
@@ -49,5 +56,4 @@ export function canonicalizeScraperStoredQuery(input: {
 		didAddApolloUrl: true,
 	};
 }
-
 

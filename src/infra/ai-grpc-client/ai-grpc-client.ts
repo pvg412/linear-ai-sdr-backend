@@ -103,7 +103,7 @@ export class AiGrpcClient {
 
     this.timeouts = {
       pingMs: opts.timeouts?.pingMs ?? 1500,
-      parseMs: opts.timeouts?.parseMs ?? 20_000,
+      parseMs: opts.timeouts?.parseMs ?? 40_000,
       upsertMs: opts.timeouts?.upsertMs ?? 60_000,
       deleteMs: opts.timeouts?.deleteMs ?? 60_000,
     };
