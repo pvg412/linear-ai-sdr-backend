@@ -28,6 +28,23 @@ import {
 
 type Json = Prisma.InputJsonValue;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveLimitFromApplyDto(input: {
+	dtoLimit: number | undefined;
+	query: unknown;
+}): number | null {
+	const queryLimit =
+		isRecord(input.query) && typeof input.query.limit === "number"
+			? input.query.limit
+			: undefined;
+
+	// Prefer new shape (query.limit) if present.
+	return queryLimit ?? input.dtoLimit ?? null;
+}
+
 @injectable()
 export class ChatCommandService {
 	constructor(
@@ -218,12 +235,17 @@ export class ChatCommandService {
 
 		const limit = parsed.suggestedLimit ?? 100;
 
+		// New shape: limit is embedded into query (still persisted separately in LeadSearch).
+		const queryWithLimit: Record<string, unknown> = {
+			...(isRecord(parsed.query) ? parsed.query : {}),
+			limit,
+		};
+
 		const assistantPayload = {
 			parser,
 			...(parserLabel ? { parserLabel } : {}),
 			kind,
-			limit,
-			query: parsed.query,
+			query: queryWithLimit,
 		};
 
 		const assistantMessage = await this.chatRepository.createMessage({
@@ -255,6 +277,17 @@ export class ChatCommandService {
 
 		const requestedParser = dto.parser ?? undefined;
 		const requestedKind = dto.kind ?? undefined;
+		const limit = resolveLimitFromApplyDto({
+			dtoLimit: dto.limit ?? undefined,
+			query: dto.query,
+		});
+
+		if (!limit) {
+			throw new UserFacingError({
+				code: "CHAT_APPLY_JSON_LIMIT_MISSING",
+				userMessage: "Limit is missing. Please try again.",
+			});
+		}
 
 		let provider = thread.defaultProvider ?? null;
 		let kind = thread.defaultKind ?? null;
@@ -322,7 +355,7 @@ export class ChatCommandService {
 			provider,
 			kind,
 			query: dto.query as unknown as Json,
-			limit: dto.limit,
+			limit,
 		});
 
 		const eventMessage = await this.chatRepository.createMessage({

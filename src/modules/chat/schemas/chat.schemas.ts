@@ -26,9 +26,15 @@ export const ChatSendMessageSchema = z.object({
 	text: z.string().trim().min(1).max(4000),
 });
 
+const QueryWithOptionalLimitSchema = z
+	.looseObject({
+		limit: z.coerce.number().int().min(1).max(50_000).optional(),
+	})
+
 export const ChatApplyJsonSchema = z.object({
-	query: z.record(z.string(), z.unknown()),
-	limit: z.coerce.number().int().min(1).max(50_000),
+	query: QueryWithOptionalLimitSchema,
+
+	limit: z.coerce.number().int().min(1).max(50_000).optional(),
 
 	parser: ChatParserIdSchema.nullable().optional(),
 	kind: z.enum(LeadSearchKind).nullable().optional(),

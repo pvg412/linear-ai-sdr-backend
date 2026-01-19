@@ -70,6 +70,13 @@ export class LeadSearchRepository {
 		});
 	}
 
+	async countLeads(id: string): Promise<number> {
+		const res = await this.prisma.leadSearchLead.count({
+			where: { leadSearchId: id },
+		});
+		return Math.max(0, res);
+	}
+
 	async markDone(id: string, totalLeads: number): Promise<void> {
 		await this.prisma.leadSearch.update({
 			where: { id },

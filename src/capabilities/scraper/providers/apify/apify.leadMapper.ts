@@ -14,6 +14,7 @@ import type {
 	ApifyLinkedinProfileExperience,
 	ApifyLinkedinProfileRow,
 } from "./apify.schemas";
+import { normalizeApifyEmailStatus } from "./apify.emailStatus";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -206,6 +207,12 @@ export function mapApifyLinkedinRowsToLeads(
 			location: location ?? undefined,
 
 			email: email ?? undefined,
+			emailStatus: normalizeApifyEmailStatus({
+				selectedEmail: email ?? undefined,
+				emails: row.emails,
+				contactEmails: row.contactInfo?.emails,
+				legacyEmailResult: pickString(row.emailResult, row.email_result),
+			}),
 
 			raw: row,
 		};

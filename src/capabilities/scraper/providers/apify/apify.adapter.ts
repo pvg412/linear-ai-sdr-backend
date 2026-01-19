@@ -78,18 +78,19 @@ export class ApifyScraperAdapter implements ScraperAdapter {
 				statusMessage.includes("rate limited") ||
 				statusMessage.includes("rate limit");
 
-			// Actor may report SUCCEEDED while being rate-limited mid-run (partial dataset).
-			// In this case we mark it FAILED so the orchestrator can retry/resume later.
-			if (status === "SUCCEEDED" && isRateLimited) {
+			// Actor sometimes reports RUNNING but with rate limit message; treat as retryable failure.
+			if (isRateLimited) {
 				return {
 					status: "FAILED",
 					raw: {
 						...(run as Record<string, unknown>),
-						_hint: "RATE_LIMITED_PARTIAL",
+						_hint: status === "SUCCEEDED" ? "RATE_LIMITED_PARTIAL" : "RATE_LIMITED",
 					},
 				};
 			}
 
+			// Actor may report SUCCEEDED while being rate-limited mid-run (partial dataset).
+			// In this case we mark it FAILED so the orchestrator can retry/resume later.
 			if (status === "SUCCEEDED") {
 				return { status: "SUCCEEDED", raw: run };
 			}
@@ -106,6 +107,82 @@ export class ApifyScraperAdapter implements ScraperAdapter {
 			wrapApifyError(e);
 			throw e;
 		}
+	}
+
+	/**
+	 * Compute a "resume plan" when Apify actor hits hourly rate limit.
+	 * The caller can then wait until the next hour and start a NEW run with:
+	 * - startPage = nextStartPage
+	 * - takePages = remainingTakePages
+	 */
+	async getRateLimitResumePlan(input: {
+		providerRunId: string;
+		query: ApifyScraperQuery;
+		status?: ScraperStatusResult;
+		now?: Date;
+	}): Promise<{
+		waitMs: number;
+		datasetItemCount: number;
+		lastScrapedPage: number;
+		nextStartPage: number;
+		remainingTakePages: number;
+	}> {
+		const now = input.now ?? new Date();
+		const waitMs = msUntilNextHour(now);
+
+		const statusObj: unknown = input.status?.raw;
+		const parsed = statusObj
+			? ApifyActorRunSchema.safeParse(statusObj)
+			: { success: false as const };
+
+		const run = parsed.success
+			? parsed.data
+			: await this.client.getRun(input.providerRunId);
+
+		const datasetId = run.defaultDatasetId;
+		if (!datasetId) {
+			throw new Error(
+				`Apify run ${input.providerRunId} has no defaultDatasetId`
+			);
+		}
+
+		const datasetItemCount = await this.client.getDatasetItemCount(datasetId);
+		const lastRow = await this.client.getDatasetLastItem(datasetId);
+
+		const startPageBase =
+			typeof input.query.startPage === "number" &&
+			Number.isFinite(input.query.startPage)
+				? Math.max(1, Math.min(100, Math.floor(input.query.startPage)))
+				: 1;
+
+		const takePagesTotal =
+			typeof input.query.takePages === "number" &&
+			Number.isFinite(input.query.takePages)
+				? Math.max(0, Math.min(100, Math.floor(input.query.takePages)))
+				: calcTakePages(input.query.limit);
+
+		const lastPageFromMeta = extractApifyPageNumberFromMeta(lastRow?._meta);
+		const lastPageApprox =
+			datasetItemCount > 0
+				? startPageBase - 1 + Math.ceil(datasetItemCount / RESULTS_PER_PAGE)
+				: startPageBase - 1;
+
+		const lastScrapedPage =
+			typeof lastPageFromMeta === "number" && Number.isFinite(lastPageFromMeta)
+				? Math.max(startPageBase - 1, Math.floor(lastPageFromMeta))
+				: Math.max(startPageBase - 1, lastPageApprox);
+
+		const nextStartPage = Math.max(startPageBase, lastScrapedPage + 1);
+		const scrapedPages = Math.max(0, nextStartPage - startPageBase);
+		const remainingTakePages = Math.max(0, takePagesTotal - scrapedPages);
+
+		return {
+			waitMs,
+			datasetItemCount,
+			lastScrapedPage,
+			nextStartPage,
+			remainingTakePages,
+		};
 	}
 
 	async fetchLeads(input: {
@@ -469,4 +546,27 @@ function applyApifyMongoDedupAndPostFilters(
 	out.profileDeduplicationMode = mode;
 	out.mongoDbConnectionString = mongo;
 	return out;
+}
+
+export function msUntilNextHour(now: Date): number {
+	const ms =
+		60 * 60 * 1000 -
+		(now.getMinutes() * 60 * 1000 +
+			now.getSeconds() * 1000 +
+			now.getMilliseconds());
+	// never return 0 to avoid tight loops on exact hour boundaries
+	return Math.max(1_000, ms);
+}
+
+export function extractApifyPageNumberFromMeta(meta: unknown): number | null {
+	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+
+	const pagination = (meta as Record<string, unknown>)["pagination"];
+	if (!pagination || typeof pagination !== "object" || Array.isArray(pagination)) {
+		return null;
+	}
+
+	const pageNumber = (pagination as Record<string, unknown>)["pageNumber"];
+	if (typeof pageNumber !== "number" || !Number.isFinite(pageNumber)) return null;
+	return Math.max(0, Math.floor(pageNumber));
 }

@@ -110,4 +110,34 @@ export class ApifyLinkedinProfileSearchClient {
 
 		return out;
 	}
+
+	async getDatasetItemCount(datasetId: string): Promise<number> {
+		const ds: unknown = await this.client.dataset(datasetId).get();
+		if (!ds || typeof ds !== "object") return 0;
+
+		const itemCount = (ds as Record<string, unknown>)["itemCount"];
+		if (typeof itemCount === "number" && Number.isFinite(itemCount)) {
+			return Math.max(0, Math.floor(itemCount));
+		}
+		return 0;
+	}
+
+	async getDatasetLastItem(
+		datasetId: string
+	): Promise<ApifyLinkedinProfileRow | null> {
+		const total = await this.getDatasetItemCount(datasetId);
+		if (total <= 0) return null;
+
+		const res: unknown = await this.client.dataset(datasetId).listItems({
+			limit: 1,
+			offset: Math.max(0, total - 1),
+			clean: false,
+		});
+
+		if (!res || typeof res !== "object") return null;
+		const items = (res as Record<string, unknown>)["items"];
+		if (!Array.isArray(items) || items.length === 0) return null;
+
+		return ApifyLinkedinProfileRowSchema.parse(items[0]);
+	}
 }

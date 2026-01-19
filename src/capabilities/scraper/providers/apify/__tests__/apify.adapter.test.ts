@@ -2,6 +2,8 @@ import { describe, expect, test, vi } from "vitest";
 
 const getRunMock = vi.fn();
 const startMock = vi.fn();
+const getDatasetItemCountMock = vi.fn();
+const getDatasetLastItemMock = vi.fn();
 
 vi.mock("../apify.client", () => {
 	return {
@@ -10,6 +12,8 @@ vi.mock("../apify.client", () => {
 			public start = startMock;
 			public getRun = getRunMock;
 			public listDatasetItems = vi.fn();
+			public getDatasetItemCount = getDatasetItemCountMock;
+			public getDatasetLastItem = getDatasetLastItemMock;
 
 			constructor(_token: string) {
 				// no-op
@@ -77,5 +81,42 @@ describe("ApifyScraperAdapter.checkStatus()", () => {
 
 		const res = await adapter.checkStatus("run_3");
 		expect(res.status).toBe("FAILED");
+	});
+});
+
+describe("ApifyScraperAdapter.getRateLimitResumePlan()", () => {
+	test("computes nextStartPage/remainingTakePages from dataset meta pageNumber", async () => {
+		getRunMock.mockResolvedValueOnce({
+			id: "run_10",
+			status: "SUCCEEDED",
+			statusMessage: "Rate limited",
+			defaultDatasetId: "ds_10",
+		});
+
+		getDatasetItemCountMock.mockResolvedValueOnce(75);
+		getDatasetLastItemMock.mockResolvedValueOnce({
+			id: "x",
+			_meta: { pagination: { pageNumber: 3 } },
+		});
+
+		const { ApifyScraperAdapter, msUntilNextHour } = await import("../apify.adapter");
+		const adapter = new ApifyScraperAdapter(
+			"token",
+			true,
+			"mongodb://localhost:27017"
+		);
+
+		const now = new Date("2026-01-19T10:35:43.128Z");
+		const plan = await adapter.getRateLimitResumePlan({
+			providerRunId: "run_10",
+			query: { limit: 250, titles: [], locations: [] },
+			now,
+		});
+
+		expect(plan.datasetItemCount).toBe(75);
+		expect(plan.lastScrapedPage).toBe(3);
+		expect(plan.nextStartPage).toBe(4);
+		expect(plan.remainingTakePages).toBe(7);
+		expect(plan.waitMs).toBe(msUntilNextHour(now));
 	});
 });

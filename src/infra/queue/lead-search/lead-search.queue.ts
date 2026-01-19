@@ -26,6 +26,17 @@ export interface LeadSearchScraperJobState {
 	 * Used only for recovery decisions. Stored in Redis.
 	 */
 	initAtMs?: number | null;
+
+	/**
+	 * Apify-only resume state when the actor hits hourly rate limits.
+	 * Stored in Redis so the next INIT can start a new run with updated pagination.
+	 */
+	apifyResume?: {
+		startPage: number;
+		takePages: number;
+		plannedAtMs: number;
+		fromProviderRunId?: string | null;
+	} | null;
 }
 
 export type LeadSearchJobData = {

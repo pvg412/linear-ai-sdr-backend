@@ -1,6 +1,6 @@
 import { inject, injectable } from "inversify";
 import { DelayedError, type Job } from "bullmq";
-import { LeadSearchKind, LeadSearchStatus, Prisma } from "@prisma/client";
+import { LeadProvider, LeadSearchKind, LeadSearchStatus, Prisma } from "@prisma/client";
 
 import {
 	ensureLogger,
@@ -10,6 +10,11 @@ import {
 } from "@/infra/observability";
 import { SCRAPER_TYPES } from "@/capabilities/scraper/scraper.types";
 import { ScraperOrchestrator } from "@/capabilities/scraper/scraper.orchestrator";
+import type {
+	ApifyScraperQuery,
+	ScraperAdapter,
+	ScraperStatusResult,
+} from "@/capabilities/scraper/scraper.dto";
 
 import { LEAD_SEARCH_TYPES } from "@/modules/lead-search/lead-search.types";
 import { LeadSearchRepository } from "@/modules/lead-search/persistence/lead-search.repository";
@@ -26,6 +31,46 @@ import type {
 // Protects from crash window start() -> persist externalRunId
 const EXTERNAL_RUN_ID_GRACE_MS = 2 * 60 * 1000;
 const EXTERNAL_RUN_ID_RETRY_DELAY_MS = 15 * 1000;
+
+function isApifyScrapeQuery(q: unknown): q is ApifyScraperQuery {
+	return (
+		typeof q === "object" &&
+		q !== null &&
+		typeof (q as Record<string, unknown>)["limit"] === "number" &&
+		!("apolloUrl" in (q as Record<string, unknown>))
+	);
+}
+
+function isRateLimitedStatus(raw: unknown): boolean {
+	if (!raw || typeof raw !== "object") return false;
+	const r = raw as Record<string, unknown>;
+	const hint = typeof r["_hint"] === "string" ? r["_hint"].toLowerCase() : "";
+	if (hint.includes("rate_limited")) return true;
+
+	const statusMessage =
+		typeof r["statusMessage"] === "string" ? r["statusMessage"].toLowerCase() : "";
+	return statusMessage.includes("rate limited") || statusMessage.includes("rate limit");
+}
+
+function canComputeApifyResume(adapter: ScraperAdapter): adapter is ScraperAdapter & {
+	getRateLimitResumePlan: (input: {
+		providerRunId: string;
+		query: ApifyScraperQuery;
+		status?: ScraperStatusResult;
+		now?: Date;
+	}) => Promise<{
+		waitMs: number;
+		datasetItemCount: number;
+		lastScrapedPage: number;
+		nextStartPage: number;
+		remainingTakePages: number;
+	}>;
+} {
+	return (
+		typeof (adapter as unknown as Record<string, unknown>)["getRateLimitResumePlan"] ===
+			"function"
+	);
+}
 
 @injectable()
 export class ScraperStepLeadSearchHandler {
@@ -133,6 +178,7 @@ export class ScraperStepLeadSearchHandler {
 			providerRunId: null,
 			lastStatus: null,
 			initAtMs: Date.now(),
+			apifyResume: null,
 		};
 
 		try {
@@ -282,7 +328,19 @@ export class ScraperStepLeadSearchHandler {
 
 				let started: Awaited<ReturnType<typeof adapter.start>>;
 				try {
-					started = await adapter.start(scrapeQuery);
+					// If we have an Apify resume plan (rate limit), apply it for the next run.
+					const effectiveQuery =
+						provider === LeadProvider.APIFY &&
+						state.apifyResume &&
+						isApifyScrapeQuery(scrapeQuery)
+							? ({
+									...scrapeQuery,
+									startPage: state.apifyResume.startPage,
+									takePages: state.apifyResume.takePages,
+							  } satisfies ApifyScraperQuery)
+							: scrapeQuery;
+
+					started = await adapter.start(effectiveQuery);
 				} catch (err) {
 					const internalMsg = err instanceof Error ? err.message : String(err);
 
@@ -480,6 +538,92 @@ export class ScraperStepLeadSearchHandler {
 				}
 
 				if (statusRes.status === "FAILED") {
+					// Special-case: Apify hourly rate limits. Resume on next hour boundary.
+					if (
+						provider === LeadProvider.APIFY &&
+						isRateLimitedStatus(statusRes.raw) &&
+						canComputeApifyResume(adapter) &&
+						isApifyScrapeQuery(scrapeQuery)
+					) {
+						const effectiveQuery: ApifyScraperQuery =
+							state.apifyResume != null
+								? ({
+										...scrapeQuery,
+										startPage: state.apifyResume.startPage,
+										takePages: state.apifyResume.takePages,
+								  } satisfies ApifyScraperQuery)
+								: scrapeQuery;
+
+						const plan = await adapter.getRateLimitResumePlan({
+							providerRunId,
+							query: effectiveQuery,
+							status: statusRes,
+							now: new Date(),
+						});
+
+						// If there's nothing left to scrape, proceed to FETCH and finish the run.
+						if (plan.remainingTakePages <= 0) {
+							await job.updateData({
+								...job.data,
+								scraper: {
+									...state,
+									step: "FETCH",
+									runId,
+									providerRunId,
+									lastStatus: "SUCCEEDED",
+								},
+							});
+							// fallthrough to FETCH in the same tick
+						} else {
+							// Persist partial dataset so we don't lose leads from earlier pages.
+							const partialLeads = await adapter.fetchLeads({
+								providerRunId,
+								query: effectiveQuery,
+								status: statusRes,
+							});
+
+							await this.persister.persistLeadsAndRelations({
+								leadSearchId,
+								runId,
+								provider,
+								leads: partialLeads,
+								createdById: job.data.triggeredById ?? undefined,
+								log: lg,
+							});
+
+							const nextRunAt = new Date(Date.now() + plan.waitMs).toISOString();
+							const internalMsg =
+								`SCRAPER rate limited (provider=${provider}, run=${providerRunId}); ` +
+								`will resume at ${nextRunAt} (nextStartPage=${plan.nextStartPage}, remainingTakePages=${plan.remainingTakePages})`;
+
+							// Mark current run as failed (it cannot be reused because externalRunId is immutable).
+							await this.leadSearchRunRepository.markRunFailed(runId, internalMsg);
+
+							// Keep LeadSearch RUNNING, schedule a new INIT on next hour.
+							const nextData: LeadSearchJobData = {
+								...job.data,
+								scraper: {
+									...state,
+									step: "INIT",
+									runId: null,
+									providerRunId: null,
+									pollAttempt: 0,
+									lastStatus: "RUNNING",
+									initAtMs: Date.now(),
+									apifyResume: {
+										startPage: plan.nextStartPage,
+										takePages: plan.remainingTakePages,
+										plannedAtMs: Date.now(),
+										fromProviderRunId: providerRunId,
+									},
+								},
+							};
+
+							await this.delayJob(job, token, plan.waitMs, nextData, lg);
+							return;
+						}
+					}
+
 					const internalMsg = `SCRAPER provider failed (provider=${provider}, run=${providerRunId})`;
 					await this.leadSearchRunRepository.markRunFailed(runId, internalMsg);
 					await this.leadSearchRepository.markFailed(
@@ -534,39 +678,82 @@ export class ScraperStepLeadSearchHandler {
 					throw new Error(msg);
 				}
 
+				const effectiveQuery =
+					provider === LeadProvider.APIFY &&
+					fetchState.apifyResume &&
+					isApifyScrapeQuery(scrapeQuery)
+						? ({
+								...scrapeQuery,
+								startPage: fetchState.apifyResume.startPage,
+								takePages: fetchState.apifyResume.takePages,
+						  } satisfies ApifyScraperQuery)
+						: scrapeQuery;
+
 				const statusRes = await adapter.checkStatus(providerRunId);
 				if (statusRes.status !== "SUCCEEDED") {
-					lg.debug(
-						{
-							leadSearchId,
-							provider,
-							runId,
-							providerRunId,
-							status: statusRes.status,
-						},
-						"SCRAPER FETCH: status is not SUCCEEDED, going back to POLL"
-					);
+					let allowPartialFetch = false;
 
-					await this.delayJob(
-						job,
-						token,
-						adapter.pollIntervalMs,
-						{
-							...job.data,
-							scraper: {
-								...fetchState,
-								step: "POLL",
-								lastStatus: statusRes.status,
+					if (
+						provider === LeadProvider.APIFY &&
+						isRateLimitedStatus(statusRes.raw) &&
+						canComputeApifyResume(adapter) &&
+						isApifyScrapeQuery(effectiveQuery)
+					) {
+						const plan = await adapter.getRateLimitResumePlan({
+							providerRunId,
+							query: effectiveQuery,
+							status: statusRes,
+							now: new Date(),
+						});
+
+						if (plan.remainingTakePages <= 0) {
+							allowPartialFetch = true;
+							lg.info(
+								{
+									leadSearchId,
+									provider,
+									providerRunId,
+									datasetItemCount: plan.datasetItemCount,
+									lastScrapedPage: plan.lastScrapedPage,
+								},
+								"SCRAPER FETCH: rate limited but dataset complete; proceeding"
+							);
+						}
+					}
+
+					if (!allowPartialFetch) {
+						lg.debug(
+							{
+								leadSearchId,
+								provider,
+								runId,
+								providerRunId,
+								status: statusRes.status,
 							},
-						},
-						lg
-					);
-					return;
-				}
+							"SCRAPER FETCH: status is not SUCCEEDED, going back to POLL"
+						);
+
+						await this.delayJob(
+							job,
+							token,
+							adapter.pollIntervalMs,
+							{
+								...job.data,
+								scraper: {
+									...fetchState,
+									step: "POLL",
+									lastStatus: statusRes.status,
+								},
+							},
+							lg
+						);
+						return;
+					}
+					}
 
 				const leads = await adapter.fetchLeads({
 					providerRunId,
-					query: scrapeQuery,
+					query: effectiveQuery,
 					status: statusRes,
 				});
 
@@ -579,6 +766,8 @@ export class ScraperStepLeadSearchHandler {
 					log: lg,
 				});
 
+				const total = await this.leadSearchRepository.countLeads(leadSearchId);
+
 				await this.leadSearchRunRepository.markRunSuccess({
 					runId,
 					leadsCount: insertedLeadIds.length,
@@ -586,12 +775,8 @@ export class ScraperStepLeadSearchHandler {
 					responseMeta: { lastStatus: "SUCCEEDED" } as Prisma.InputJsonValue,
 				});
 
-				await this.leadSearchRepository.markDone(
-					leadSearchId,
-					insertedLeadIds.length
-				);
+				await this.leadSearchRepository.markDone(leadSearchId, total);
 
-				const total = insertedLeadIds.length;
 				const doneStatus =
 					total > 0 ? LeadSearchStatus.DONE : LeadSearchStatus.DONE_NO_RESULTS;
 
