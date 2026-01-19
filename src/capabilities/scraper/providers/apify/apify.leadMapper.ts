@@ -15,6 +15,12 @@ import type {
 	ApifyLinkedinProfileRow,
 } from "./apify.schemas";
 
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is UnknownRecord {
+	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
 function cleanValue(value: unknown): string | undefined {
 	const trimmed = trimOrUndefined(value);
 	if (!trimmed) return undefined;
@@ -28,6 +34,30 @@ function pickString(...vals: unknown[]): string | undefined {
 		const t = cleanValue(v);
 		if (t) return t;
 	}
+	return undefined;
+}
+
+function extractEmailLike(value: unknown): string | undefined {
+	// Common case: already a string.
+	const direct = cleanValue(value);
+	if (direct) return direct;
+
+	// Apify sometimes returns objects, e.g. { email: "a@b.com" } or { value: "a@b.com" }.
+	if (!isRecord(value)) return undefined;
+
+	const candidates: unknown[] = [
+		value.email,
+		value.address,
+		value.value,
+		// Nested variants: { email: { address: "a@b.com" } }
+		isRecord(value.email) ? value.email.address ?? value.email.value : undefined,
+	];
+
+	for (const c of candidates) {
+		const extracted = cleanValue(c);
+		if (extracted) return extracted;
+	}
+
 	return undefined;
 }
 
@@ -96,7 +126,7 @@ function readStringArray(values: unknown): string[] {
 	if (!Array.isArray(values)) return [];
 	const out: string[] = [];
 	for (const v of values) {
-		const t = cleanValue(v);
+		const t = extractEmailLike(v);
 		if (t) out.push(t);
 	}
 	return out;

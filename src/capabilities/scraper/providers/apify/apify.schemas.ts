@@ -77,11 +77,13 @@ export const ApifyLinkedinProfileRowSchema = z.looseObject({
 	companyLinkedinUrl: z.string().optional().nullable(),
 
 	email: z.string().optional().nullable(),
-	emails: z.array(z.string()).optional().nullable(),
+	// Apify sometimes returns objects inside emails[]; keep it permissive and normalize later.
+	emails: z.array(z.unknown()).optional().nullable(),
 	contactInfo: z
 		.looseObject({
 			email: z.string().optional().nullable(),
-			emails: z.array(z.string()).optional().nullable(),
+			// Apify sometimes returns objects inside emails[]; keep it permissive and normalize later.
+			emails: z.array(z.unknown()).optional().nullable(),
 		})
 		.optional()
 		.nullable(),
