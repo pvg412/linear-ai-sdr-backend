@@ -14,14 +14,6 @@ export type LeadSearchSelectorRow = {
 	_count: { leads: number };
 };
 
-export function buildLeadSearchSelectorWhere(userId: string): Prisma.LeadSearchWhereInput {
-	return {
-		createdById: userId,
-		// Exclude LeadSearch records that have 0 leads in the join table
-		leads: { some: {} },
-	};
-}
-
 @injectable()
 export class LeadSearchRepository {
 	private readonly prisma: PrismaClient = getPrisma();
@@ -34,7 +26,11 @@ export class LeadSearchRepository {
 
 	async listForSelector(userId: string): Promise<LeadSearchSelectorRow[]> {
 		const rows = await this.prisma.leadSearch.findMany({
-			where: buildLeadSearchSelectorWhere(userId),
+			where: {
+				createdById: userId,
+				// Exclude LeadSearch records that have 0 leads in the join table
+				leads: { some: { lead: { isVerified: true } } },
+			},
 			orderBy: { createdAt: "desc" },
 			select: {
 				id: true,
@@ -44,7 +40,15 @@ export class LeadSearchRepository {
 				kind: true,
 				status: true,
 				thread: { select: { title: true } },
-				_count: { select: { leads: true } },
+				_count: {
+					select: {
+						leads: {
+							where: {
+								lead: { isVerified: true },
+							},
+						},
+					},
+				},
 			},
 		});
 		// Prisma types can become `any` in some tooling contexts; keep controller/service strict.
