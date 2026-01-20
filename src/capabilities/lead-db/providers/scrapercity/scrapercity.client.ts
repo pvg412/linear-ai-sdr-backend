@@ -3,113 +3,113 @@ import z from "zod";
 
 import { pollUntil } from "@/capabilities/shared/polling";
 import {
-	ScraperCityStartResponseSchema,
-	ScraperCityStatusResponseSchema,
-	ScraperCityApolloRowSchema,
-	type ScraperCityStatusResponse,
-	type ScraperCityApolloRow,
+  ScraperCityStartResponseSchema,
+  ScraperCityStatusResponseSchema,
+  ScraperCityApolloRowSchema,
+  type ScraperCityStatusResponse,
+  type ScraperCityApolloRow,
 } from "./scrapercity.schemas";
 import type { ScraperCityLimiter } from "./scrapercity.limiter";
 
 export class ScraperCityClient {
-	constructor(
-		private readonly apiKey: string,
-		private readonly limiter?: ScraperCityLimiter,
-		private readonly apiUrlOverride?: string
-	) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly limiter?: ScraperCityLimiter,
+    private readonly apiUrlOverride?: string,
+  ) {}
 
-	private get baseUrl(): string {
-		// Resolve lazily so tests can stub env vars after imports.
-		const raw = this.apiUrlOverride ?? process.env.SCRAPERCITY_API_URL;
-		if (!raw) throw new Error("SCRAPERCITY_API_URL is not set");
-		return raw.replace(/\/+$/, "");
-	}
+  private get baseUrl(): string {
+    // Resolve lazily so tests can stub env vars after imports.
+    const raw = this.apiUrlOverride ?? process.env.SCRAPERCITY_API_URL;
+    if (!raw) throw new Error("SCRAPERCITY_API_URL is not set");
+    return raw.replace(/\/+$/, "");
+  }
 
-	async startApolloFilters(payload: Record<string, unknown>): Promise<string> {
-		const url = `${this.baseUrl}/v1/scrape/apollo-filters`;
+  async startApolloFilters(payload: Record<string, unknown>): Promise<string> {
+    const url = `${this.baseUrl}/v1/scrape/apollo-filters`;
 
-		if (this.limiter) await this.limiter.waitForRequestSlot();
-		const res = await axios.post(url, payload, {
-			headers: {
-				Authorization: `Bearer ${this.apiKey}`,
-				"Content-Type": "application/json",
-			},
-			timeout: 60_000,
-		});
+    if (this.limiter) await this.limiter.waitForRequestSlot();
+    const res = await axios.post(url, payload, {
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      timeout: 60_000,
+    });
 
-		const data = ScraperCityStartResponseSchema.parse(res.data);
-		return data.runId;
-	}
+    const data = ScraperCityStartResponseSchema.parse(res.data);
+    return data.runId;
+  }
 
-	async getStatus(runId: string): Promise<ScraperCityStatusResponse> {
-		const url = `${this.baseUrl}/v1/scrape/status/${runId}`;
+  async getStatus(runId: string): Promise<ScraperCityStatusResponse> {
+    const url = `${this.baseUrl}/v1/scrape/status/${runId}`;
 
-		if (this.limiter) await this.limiter.waitForRequestSlot();
-		const res = await axios.get(url, {
-			headers: { Authorization: `Bearer ${this.apiKey}` },
-			timeout: 30_000,
-		});
+    if (this.limiter) await this.limiter.waitForRequestSlot();
+    const res = await axios.get(url, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      timeout: 30_000,
+    });
 
-		return ScraperCityStatusResponseSchema.parse(res.data);
-	}
+    return ScraperCityStatusResponseSchema.parse(res.data);
+  }
 
-	async waitForSucceeded(
-		runId: string,
-		opts: { intervalMs: number; maxAttempts: number }
-	): Promise<ScraperCityStatusResponse> {
-		let lastStatus: string | undefined;
+  async waitForSucceeded(
+    runId: string,
+    opts: { intervalMs: number; maxAttempts: number },
+  ): Promise<ScraperCityStatusResponse> {
+    let lastStatus: string | undefined;
 
-		return pollUntil<ScraperCityStatusResponse>({
-			intervalMs: opts.intervalMs,
-			maxAttempts: opts.maxAttempts,
-			task: async (attempt) => {
-				const s = await this.getStatus(runId);
-				const status = String(s.status ?? "").toUpperCase();
+    return pollUntil<ScraperCityStatusResponse>({
+      intervalMs: opts.intervalMs,
+      maxAttempts: opts.maxAttempts,
+      task: async (attempt) => {
+        const s = await this.getStatus(runId);
+        const status = String(s.status ?? "").toUpperCase();
 
-				if (attempt === 1 || status !== lastStatus) {
-					console.debug("[ScraperCity] status", { runId, attempt, status });
-				}
-				lastStatus = status;
+        if (attempt === 1 || status !== lastStatus) {
+          console.debug("[ScraperCity] status", { runId, attempt, status });
+        }
+        lastStatus = status;
 
-				return s;
-			},
-			isDone: (s) => {
-				const status = String(s.status ?? "").toUpperCase();
-				return status === "SUCCEEDED" || status === "SUCCESS";
-			},
-			isError: (s) => {
-				const status = String(s.status ?? "").toUpperCase();
-				if (status === "FAILED") return `ScraperCity run failed: ${runId}`;
-				return false;
-			},
-		});
-	}
+        return s;
+      },
+      isDone: (s) => {
+        const status = String(s.status ?? "").toUpperCase();
+        return status === "SUCCEEDED" || status === "SUCCESS";
+      },
+      isError: (s) => {
+        const status = String(s.status ?? "").toUpperCase();
+        if (status === "FAILED") return `ScraperCity run failed: ${runId}`;
+        return false;
+      },
+    });
+  }
 
-	async downloadJsonRows(
-		runId: string,
-		status?: ScraperCityStatusResponse
-	): Promise<ScraperCityApolloRow[]> {
-		const downloadUrl = this.buildDownloadUrl(runId, status?.outputUrl);
+  async downloadJsonRows(
+    runId: string,
+    status?: ScraperCityStatusResponse,
+  ): Promise<ScraperCityApolloRow[]> {
+    const downloadUrl = this.buildDownloadUrl(runId, status?.outputUrl);
 
-		if (this.limiter) await this.limiter.waitForRequestSlot();
-		const res = await axios.get(downloadUrl, {
-			headers: { Authorization: `Bearer ${this.apiKey}` },
-			timeout: 120_000,
-		});
+    if (this.limiter) await this.limiter.waitForRequestSlot();
+    const res = await axios.get(downloadUrl, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      timeout: 120_000,
+    });
 
-		return z.array(ScraperCityApolloRowSchema).parse(res.data);
-	}
+    return z.array(ScraperCityApolloRowSchema).parse(res.data);
+  }
 
-	private buildDownloadUrl(runId: string, outputUrl?: string | null): string {
-		const base = this.baseUrl;
+  private buildDownloadUrl(runId: string, outputUrl?: string | null): string {
+    const base = this.baseUrl;
 
-		if (outputUrl) {
-			const origin = new URL(base).origin;
-			const path = outputUrl.startsWith("/") ? outputUrl : `/${outputUrl}`;
-			const sep = path.includes("?") ? "&" : "?";
-			return `${origin}${path}${sep}format=json`;
-		}
+    if (outputUrl) {
+      const origin = new URL(base).origin;
+      const path = outputUrl.startsWith("/") ? outputUrl : `/${outputUrl}`;
+      const sep = path.includes("?") ? "&" : "?";
+      return `${origin}${path}${sep}format=json`;
+    }
 
-		return `${base}/downloads/${runId}?format=json`;
-	}
+    return `${base}/downloads/${runId}?format=json`;
+  }
 }

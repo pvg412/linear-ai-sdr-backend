@@ -6,21 +6,21 @@ import { LeadRagIndexProcessorService } from "./services/lead-rag-index-processo
 import { LeadRagIndexSyncService } from "./services/lead-rag-index-sync.service";
 
 export function registerLeadRagModule(container: Container) {
-	container
-		.bind<LeadRagIndexProcessorService>(
-			LEAD_RAG_TYPES.LeadRagIndexProcessorService
-		)
-		.to(LeadRagIndexProcessorService)
-		.inSingletonScope();
+  container
+    .bind<LeadRagIndexProcessorService>(
+      LEAD_RAG_TYPES.LeadRagIndexProcessorService,
+    )
+    .to(LeadRagIndexProcessorService)
+    .inSingletonScope();
 
-	container
-		.bind<LeadRagIndexSyncService>(LEAD_RAG_TYPES.LeadRagIndexSyncService)
-		.toDynamicValue((ctx) => {
-			const processor = ctx.get<LeadRagIndexProcessorService>(
-				LEAD_RAG_TYPES.LeadRagIndexProcessorService
-			);
+  container
+    .bind<LeadRagIndexSyncService>(LEAD_RAG_TYPES.LeadRagIndexSyncService)
+    .toDynamicValue((ctx) => {
+      const processor = ctx.get<LeadRagIndexProcessorService>(
+        LEAD_RAG_TYPES.LeadRagIndexProcessorService,
+      );
 
-			return new LeadRagIndexSyncService({ processor });
-		})
-		.inSingletonScope();
+      return new LeadRagIndexSyncService({ processor });
+    })
+    .inSingletonScope();
 }

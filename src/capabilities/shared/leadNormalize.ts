@@ -22,9 +22,7 @@ export function composeFullName(input: {
 }
 
 export function joinLocationParts(parts: unknown[]): string | undefined {
-  const cleaned = parts
-    .map(trimOrUndefined)
-    .filter(Boolean) as string[];
+  const cleaned = parts.map(trimOrUndefined).filter(Boolean) as string[];
   return cleaned.length ? cleaned.join(", ") : undefined;
 }
 

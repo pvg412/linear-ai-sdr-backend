@@ -5,24 +5,24 @@ import { ChatRepository } from "../persistence/chat.repository";
 
 @injectable()
 export class ChatQueryService {
-	constructor(
-		@inject(CHAT_TYPES.ChatRepository)
-		private readonly chatRepository: ChatRepository
-	) {}
+  constructor(
+    @inject(CHAT_TYPES.ChatRepository)
+    private readonly chatRepository: ChatRepository,
+  ) {}
 
-	listThreads(userId: string, opts: { limit: number; cursor?: string }) {
-		return this.chatRepository.listThreads(userId, opts);
-	}
+  listThreads(userId: string, opts: { limit: number; cursor?: string }) {
+    return this.chatRepository.listThreads(userId, opts);
+  }
 
-	getThread(userId: string, threadId: string) {
-		return this.chatRepository.getThread(userId, threadId);
-	}
+  getThread(userId: string, threadId: string) {
+    return this.chatRepository.getThread(userId, threadId);
+  }
 
-	listMessages(
-		userId: string,
-		threadId: string,
-		opts: { limit: number; cursor?: string }
-	) {
-		return this.chatRepository.listMessages(userId, threadId, opts);
-	}
+  listMessages(
+    userId: string,
+    threadId: string,
+    opts: { limit: number; cursor?: string },
+  ) {
+    return this.chatRepository.listMessages(userId, threadId, opts);
+  }
 }

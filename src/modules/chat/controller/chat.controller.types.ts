@@ -4,8 +4,8 @@ import type { RealtimeHub } from "@/infra/realtime/realtimeHub";
 import type { ChatAiStreamService } from "../services/chat-ai-stream.service";
 
 export type ChatControllerDeps = {
-	queryService: ChatQueryService;
-	commandService: ChatCommandService;
-	realtimeHub: RealtimeHub;
-	aiStreamService: ChatAiStreamService;
+  queryService: ChatQueryService;
+  commandService: ChatCommandService;
+  realtimeHub: RealtimeHub;
+  aiStreamService: ChatAiStreamService;
 };

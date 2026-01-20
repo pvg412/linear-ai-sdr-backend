@@ -1,5 +1,5 @@
 ignoredBuiltDependencies:
-  - '@prisma/engines'
+  - "@prisma/engines"
   - esbuild
   - msgpackr-extract
   - prisma

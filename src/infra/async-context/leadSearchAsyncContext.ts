@@ -33,6 +33,8 @@ export function withLeadSearchAsyncContext<T>(
   return storage.run(ctx, fn);
 }
 
-export function getLeadSearchAsyncContext(): LeadSearchAsyncContext | undefined {
+export function getLeadSearchAsyncContext():
+  | LeadSearchAsyncContext
+  | undefined {
   return storage.getStore();
 }

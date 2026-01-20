@@ -23,4 +23,3 @@ export function normalizeScraperCityEmailResult(result: unknown): EmailStatus {
       return "UNKNOWN";
   }
 }
-

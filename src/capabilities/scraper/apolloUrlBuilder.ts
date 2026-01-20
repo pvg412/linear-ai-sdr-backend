@@ -13,7 +13,9 @@ export interface ApolloUrlBuildResult {
   fileName: string;
 }
 
-export function buildApolloPeopleUrl(input: ApolloUrlBuildInput): ApolloUrlBuildResult {
+export function buildApolloPeopleUrl(
+  input: ApolloUrlBuildInput,
+): ApolloUrlBuildResult {
   const base = "https://app.apollo.io/#/people";
   const parts: string[] = [];
 

@@ -6,7 +6,7 @@ export function isAxiosError(e: unknown): e is AxiosError {
 
 function truncateString(
   value: string,
-  maxLen: number
+  maxLen: number,
 ): { value: string; truncated: boolean } {
   if (value.length <= maxLen) return { value, truncated: false };
   return {
@@ -18,13 +18,16 @@ function truncateString(
 export function formatAxiosErrorForLog(e: AxiosError): {
   status?: number;
   data?: unknown;
-  request: { method?: unknown; url?: unknown; params?: unknown; data?: unknown };
+  request: {
+    method?: unknown;
+    url?: unknown;
+    params?: unknown;
+    data?: unknown;
+  };
 } {
   const data = e.response?.data;
   const safeData =
-    typeof data === "string"
-      ? truncateString(data, 2_000).value
-      : data;
+    typeof data === "string" ? truncateString(data, 2_000).value : data;
 
   return {
     status: e.response?.status,

@@ -5,11 +5,10 @@ import { ChatParserIdSchema } from "../parsers/chat.parsers";
 
 const ClientMessageIdSchema = z.string().min(1).max(64).optional();
 
-const QueryWithOptionalLimitSchema = z
-  .looseObject({
-    // New shape: limit is inside query
-    limit: z.coerce.number().int().min(1).max(50_000).optional(),
-  })
+const QueryWithOptionalLimitSchema = z.looseObject({
+  // New shape: limit is inside query
+  limit: z.coerce.number().int().min(1).max(50_000).optional(),
+});
 
 export const ChatWsClientCommandSchema = z.discriminatedUnion("type", [
   z.object({
@@ -60,32 +59,44 @@ export type ChatWsServerEvent =
   | { type: "thread.ready"; payload: { threadId: string; serverTime: string } }
   | { type: "ack"; payload: { ok: boolean; clientMessageId?: string | null } }
   | {
-    type: "error";
-    payload: { code: string; message: string; details?: unknown };
-  }
+      type: "error";
+      payload: { code: string; message: string; details?: unknown };
+    }
   | {
-    type: "message.created";
-    payload: { message: unknown };
-  }
+      type: "message.created";
+      payload: { message: unknown };
+    }
   | {
-    type: "assistant.started";
-    payload: { requestId: string; clientMessageId?: string | null; userMessageId: string };
-  }
+      type: "assistant.started";
+      payload: {
+        requestId: string;
+        clientMessageId?: string | null;
+        userMessageId: string;
+      };
+    }
   | {
-    type: "assistant.delta";
-    payload: { requestId: string; clientMessageId?: string | null; delta: string };
-  }
+      type: "assistant.delta";
+      payload: {
+        requestId: string;
+        clientMessageId?: string | null;
+        delta: string;
+      };
+    }
   | {
-    type: "assistant.final";
-    payload: { requestId: string; clientMessageId?: string | null; assistantMessageId: string };
-  }
+      type: "assistant.final";
+      payload: {
+        requestId: string;
+        clientMessageId?: string | null;
+        assistantMessageId: string;
+      };
+    }
   | {
-    type: "assistant.error";
-    payload: {
-      requestId: string;
-      clientMessageId?: string | null;
-      code: string;
-      message: string;
-      retryable?: boolean;
+      type: "assistant.error";
+      payload: {
+        requestId: string;
+        clientMessageId?: string | null;
+        code: string;
+        message: string;
+        retryable?: boolean;
+      };
     };
-  };

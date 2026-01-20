@@ -78,4 +78,3 @@ export function verifyJwt(token: string, secret: string): JwtPayload {
 
   return payload;
 }
-

@@ -54,7 +54,9 @@ export function resolveScraperCityCompanyIndustry(
  * If user passes "web3", "crypto", "blockchain", etc — it's not an allowed industry,
  * treat it as keywords.
  */
-export function shouldMoveIndustryToKeywords(industry: string | undefined): boolean {
+export function shouldMoveIndustryToKeywords(
+  industry: string | undefined,
+): boolean {
   const s = normalizeKey(industry ?? "");
   if (!s) return false;
 
@@ -76,11 +78,15 @@ export function mergeKeywords(
   const set = new Set<string>();
 
   for (const x of existing ?? []) {
-    const v = String(x ?? "").trim().toLowerCase();
+    const v = String(x ?? "")
+      .trim()
+      .toLowerCase();
     if (v) set.add(v);
   }
   for (const x of additions ?? []) {
-    const v = String(x ?? "").trim().toLowerCase();
+    const v = String(x ?? "")
+      .trim()
+      .toLowerCase();
     if (v) set.add(v);
   }
 
@@ -88,7 +94,9 @@ export function mergeKeywords(
   return res.length ? res : undefined;
 }
 
-export function industryToKeywordTokens(industry: string | undefined): string[] {
+export function industryToKeywordTokens(
+  industry: string | undefined,
+): string[] {
   const parts = splitIndustryInput(industry);
   if (parts.length > 0) return parts;
   const v = String(industry ?? "").trim();

@@ -37,7 +37,10 @@ export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
     const { payload, fileName } = buildSearchLeadsCreateExportRequest(query);
 
     try {
-      console.info("[SearchLeadsLeadDb] create export payload", { fileName, payload });
+      console.info("[SearchLeadsLeadDb] create export payload", {
+        fileName,
+        payload,
+      });
 
       const { filters, bulkKey } = splitSearchLeadsBulkFilter(payload.filter);
       if (bulkKey && filters.length > 1) {
@@ -50,7 +53,9 @@ export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
 
       const ctx = getLeadSearchAsyncContext();
       const resumeIds = Array.isArray(ctx?.resumeProviderRunIds)
-        ? ctx?.resumeProviderRunIds.filter((v): v is string => typeof v === "string" && v.length > 0)
+        ? ctx?.resumeProviderRunIds.filter(
+            (v): v is string => typeof v === "string" && v.length > 0,
+          )
         : [];
 
       const runChunk = async (args: {
@@ -60,13 +65,19 @@ export class SearchLeadsLeadDbAdapter implements LeadDbAdapter {
         const logId =
           typeof args.resumeLogId === "string" && args.resumeLogId.length > 0
             ? args.resumeLogId
-            : await this.client.createExport({ ...payload, filter: args.filterOverride });
+            : await this.client.createExport({
+                ...payload,
+                filter: args.filterOverride,
+              });
 
         // Persist as early as possible (survives restarts; idempotent in repository).
         await ctx?.onProviderRunId?.({ providerRunId: logId });
 
         // Wait up to 3 days (259200 seconds/5s = 51840 attempts)
-        await this.client.waitForCompleted(logId, { intervalMs: 5_000, maxAttempts: 51840 });
+        await this.client.waitForCompleted(logId, {
+          intervalMs: 5_000,
+          maxAttempts: 51840,
+        });
         const rows = await this.client.getCompletedRows(logId);
         return { logId, rows };
       };

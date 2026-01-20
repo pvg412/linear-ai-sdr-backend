@@ -1,12 +1,12 @@
 import { injectable } from "inversify";
 import {
-	ChatMessageRole,
-	ChatMessageType,
-	LeadProvider,
-	LeadSearchKind,
-	LeadSearchStatus,
-	Prisma,
-	PrismaClient,
+  ChatMessageRole,
+  ChatMessageType,
+  LeadProvider,
+  LeadSearchKind,
+  LeadSearchStatus,
+  Prisma,
+  PrismaClient,
 } from "@prisma/client";
 
 import { getPrisma } from "@/infra/prisma";
@@ -15,368 +15,368 @@ import { UserFacingError } from "@/infra/userFacingError";
 type Json = Prisma.InputJsonValue;
 
 function toIso(d: Date): string {
-	return d.toISOString();
+  return d.toISOString();
 }
 
 @injectable()
 export class ChatRepository {
-	private readonly prisma: PrismaClient = getPrisma();
+  private readonly prisma: PrismaClient = getPrisma();
 
-	async listRecentMessagesForAi(
-		ownerId: string,
-		threadId: string,
-		limit: number
-	) {
-		await this.assertThreadOwner(ownerId, threadId);
+  async listRecentMessagesForAi(
+    ownerId: string,
+    threadId: string,
+    limit: number,
+  ) {
+    await this.assertThreadOwner(ownerId, threadId);
 
-		const take = Math.max(1, Math.min(limit, 50)); // safety
+    const take = Math.max(1, Math.min(limit, 50)); // safety
 
-		const rows = await this.prisma.chatMessage.findMany({
-			where: { threadId },
-			orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-			take,
-			select: {
-				id: true,
-				role: true,
-				type: true,
-				text: true,
-				createdAt: true,
-			},
-		});
+    const rows = await this.prisma.chatMessage.findMany({
+      where: { threadId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take,
+      select: {
+        id: true,
+        role: true,
+        type: true,
+        text: true,
+        createdAt: true,
+      },
+    });
 
-		const ordered = rows.reverse();
+    const ordered = rows.reverse();
 
-		return ordered.map((m) => ({
-			id: m.id,
-			role: m.role,
-			type: m.type,
-			text: m.text ?? null,
-			createdAt: toIso(m.createdAt),
-		}));
-	}
+    return ordered.map((m) => ({
+      id: m.id,
+      role: m.role,
+      type: m.type,
+      text: m.text ?? null,
+      createdAt: toIso(m.createdAt),
+    }));
+  }
 
-	async listThreads(ownerId: string, opts: { limit: number; cursor?: string }) {
-		const take = opts.limit + 1;
+  async listThreads(ownerId: string, opts: { limit: number; cursor?: string }) {
+    const take = opts.limit + 1;
 
-		const [rows, total] = await this.prisma.$transaction([
-			this.prisma.chatThread.findMany({
-				where: { ownerId },
-				take,
-				...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
-				orderBy: [
-					{ lastMessageAt: "desc" },
-					{ updatedAt: "desc" },
-					{ id: "desc" },
-				],
-				select: {
-					id: true,
-					title: true,
-					defaultProvider: true,
-					defaultKind: true,
-					lastMessageAt: true,
-					createdAt: true,
-					updatedAt: true,
-					_count: { select: { messages: true } },
-				},
-			}),
-			this.prisma.chatThread.count({ where: { ownerId } }),
-		]);
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.chatThread.findMany({
+        where: { ownerId },
+        take,
+        ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+        orderBy: [
+          { lastMessageAt: "desc" },
+          { updatedAt: "desc" },
+          { id: "desc" },
+        ],
+        select: {
+          id: true,
+          title: true,
+          defaultProvider: true,
+          defaultKind: true,
+          lastMessageAt: true,
+          createdAt: true,
+          updatedAt: true,
+          _count: { select: { messages: true } },
+        },
+      }),
+      this.prisma.chatThread.count({ where: { ownerId } }),
+    ]);
 
-		const hasMore = rows.length > opts.limit;
-		const pageRows = hasMore ? rows.slice(0, opts.limit) : rows;
+    const hasMore = rows.length > opts.limit;
+    const pageRows = hasMore ? rows.slice(0, opts.limit) : rows;
 
-		const nextCursor = hasMore
-			? pageRows[pageRows.length - 1]?.id ?? null
-			: null;
+    const nextCursor = hasMore
+      ? (pageRows[pageRows.length - 1]?.id ?? null)
+      : null;
 
-		const threads = pageRows.map((t) => ({
-			id: t.id,
-			title: t.title,
+    const threads = pageRows.map((t) => ({
+      id: t.id,
+      title: t.title,
 
-			defaultProvider: t.defaultProvider ?? null,
-			defaultKind: t.defaultKind ?? null,
+      defaultProvider: t.defaultProvider ?? null,
+      defaultKind: t.defaultKind ?? null,
 
-			totalMessages: t._count.messages,
+      totalMessages: t._count.messages,
 
-			lastMessageAt: t.lastMessageAt ? toIso(t.lastMessageAt) : null,
-			createdAt: toIso(t.createdAt),
-			updatedAt: toIso(t.updatedAt),
-		}));
+      lastMessageAt: t.lastMessageAt ? toIso(t.lastMessageAt) : null,
+      createdAt: toIso(t.createdAt),
+      updatedAt: toIso(t.updatedAt),
+    }));
 
-		return { threads, total, nextCursor };
-	}
+    return { threads, total, nextCursor };
+  }
 
-	async createThread(input: {
-		ownerId: string;
-		title?: string;
-		defaultProvider?: LeadProvider;
-		defaultKind?: LeadSearchKind;
-	}) {
-		const row = await this.prisma.chatThread.create({
-			data: {
-				ownerId: input.ownerId,
-				title: input.title ?? null,
-				defaultProvider: input.defaultProvider ?? null,
-				defaultKind: input.defaultKind ?? null,
-			},
-		});
+  async createThread(input: {
+    ownerId: string;
+    title?: string;
+    defaultProvider?: LeadProvider;
+    defaultKind?: LeadSearchKind;
+  }) {
+    const row = await this.prisma.chatThread.create({
+      data: {
+        ownerId: input.ownerId,
+        title: input.title ?? null,
+        defaultProvider: input.defaultProvider ?? null,
+        defaultKind: input.defaultKind ?? null,
+      },
+    });
 
-		return {
-			id: row.id,
-			title: row.title,
-			defaultProvider: row.defaultProvider ?? null,
-			defaultKind: row.defaultKind ?? null,
-			lastMessageAt: row.lastMessageAt ? toIso(row.lastMessageAt) : null,
-			createdAt: toIso(row.createdAt),
-			updatedAt: toIso(row.updatedAt),
-		};
-	}
+    return {
+      id: row.id,
+      title: row.title,
+      defaultProvider: row.defaultProvider ?? null,
+      defaultKind: row.defaultKind ?? null,
+      lastMessageAt: row.lastMessageAt ? toIso(row.lastMessageAt) : null,
+      createdAt: toIso(row.createdAt),
+      updatedAt: toIso(row.updatedAt),
+    };
+  }
 
-	async getThread(ownerId: string, threadId: string) {
-		const row = await this.prisma.chatThread.findFirst({
-			where: { id: threadId, ownerId },
-		});
+  async getThread(ownerId: string, threadId: string) {
+    const row = await this.prisma.chatThread.findFirst({
+      where: { id: threadId, ownerId },
+    });
 
-		if (!row) {
-			throw new UserFacingError({
-				code: "CHAT_THREAD_NOT_FOUND",
-				userMessage: "Thread not found.",
-			});
-		}
+    if (!row) {
+      throw new UserFacingError({
+        code: "CHAT_THREAD_NOT_FOUND",
+        userMessage: "Thread not found.",
+      });
+    }
 
-		return {
-			id: row.id,
-			title: row.title,
-			defaultProvider: row.defaultProvider ?? null,
-			defaultKind: row.defaultKind ?? null,
-			lastMessageAt: row.lastMessageAt ? toIso(row.lastMessageAt) : null,
-			createdAt: toIso(row.createdAt),
-			updatedAt: toIso(row.updatedAt),
-		};
-	}
+    return {
+      id: row.id,
+      title: row.title,
+      defaultProvider: row.defaultProvider ?? null,
+      defaultKind: row.defaultKind ?? null,
+      lastMessageAt: row.lastMessageAt ? toIso(row.lastMessageAt) : null,
+      createdAt: toIso(row.createdAt),
+      updatedAt: toIso(row.updatedAt),
+    };
+  }
 
-	async patchThread(
-		ownerId: string,
-		threadId: string,
-		patch: {
-			title?: string | null;
-			defaultProvider?: LeadProvider | null;
-			defaultKind?: LeadSearchKind | null;
-		}
-	) {
-		const updated = await this.prisma.chatThread.updateMany({
-			where: { id: threadId, ownerId },
-			data: {
-				...(patch.title !== undefined ? { title: patch.title } : {}),
-				...(patch.defaultProvider !== undefined
-					? { defaultProvider: patch.defaultProvider }
-					: {}),
-				...(patch.defaultKind !== undefined
-					? { defaultKind: patch.defaultKind }
-					: {}),
-			},
-		});
+  async patchThread(
+    ownerId: string,
+    threadId: string,
+    patch: {
+      title?: string | null;
+      defaultProvider?: LeadProvider | null;
+      defaultKind?: LeadSearchKind | null;
+    },
+  ) {
+    const updated = await this.prisma.chatThread.updateMany({
+      where: { id: threadId, ownerId },
+      data: {
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.defaultProvider !== undefined
+          ? { defaultProvider: patch.defaultProvider }
+          : {}),
+        ...(patch.defaultKind !== undefined
+          ? { defaultKind: patch.defaultKind }
+          : {}),
+      },
+    });
 
-		if (updated.count === 0) {
-			throw new UserFacingError({
-				code: "CHAT_THREAD_NOT_FOUND",
-				userMessage: "Thread not found.",
-			});
-		}
+    if (updated.count === 0) {
+      throw new UserFacingError({
+        code: "CHAT_THREAD_NOT_FOUND",
+        userMessage: "Thread not found.",
+      });
+    }
 
-		return this.getThread(ownerId, threadId);
-	}
+    return this.getThread(ownerId, threadId);
+  }
 
-	async deleteThread(ownerId: string, threadId: string) {
-		const deleted = await this.prisma.chatThread.deleteMany({
-			where: { id: threadId, ownerId },
-		});
+  async deleteThread(ownerId: string, threadId: string) {
+    const deleted = await this.prisma.chatThread.deleteMany({
+      where: { id: threadId, ownerId },
+    });
 
-		if (deleted.count === 0) {
-			throw new UserFacingError({
-				code: "CHAT_THREAD_NOT_FOUND",
-				userMessage: "Thread not found.",
-			});
-		}
+    if (deleted.count === 0) {
+      throw new UserFacingError({
+        code: "CHAT_THREAD_NOT_FOUND",
+        userMessage: "Thread not found.",
+      });
+    }
 
-		return { ok: true as const };
-	}
+    return { ok: true as const };
+  }
 
-	async listMessages(
-		ownerId: string,
-		threadId: string,
-		opts: { limit: number; cursor?: string }
-	) {
-		await this.assertThreadOwner(ownerId, threadId);
+  async listMessages(
+    ownerId: string,
+    threadId: string,
+    opts: { limit: number; cursor?: string },
+  ) {
+    await this.assertThreadOwner(ownerId, threadId);
 
-		// Fetch one extra item to know if there is a next page
-		const take = opts.limit + 1;
+    // Fetch one extra item to know if there is a next page
+    const take = opts.limit + 1;
 
-		const rows = await this.prisma.chatMessage.findMany({
-			where: { threadId },
-			orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-			take,
-			...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
-			select: {
-				id: true,
-				threadId: true,
-				role: true,
-				type: true,
-				text: true,
-				payload: true,
-				leadSearchId: true,
-				createdAt: true,
-				updatedAt: true,
-			},
-		});
+    const rows = await this.prisma.chatMessage.findMany({
+      where: { threadId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take,
+      ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        threadId: true,
+        role: true,
+        type: true,
+        text: true,
+        payload: true,
+        leadSearchId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
 
-		const hasMore = rows.length > opts.limit;
-		const pageRows = hasMore ? rows.slice(0, opts.limit) : rows;
+    const hasMore = rows.length > opts.limit;
+    const pageRows = hasMore ? rows.slice(0, opts.limit) : rows;
 
-		const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.id : null;
+    const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.id : null;
 
-		return {
-			messages: pageRows.map((m) => ({
-				id: m.id,
-				threadId: m.threadId,
-				role: m.role,
-				type: m.type,
-				text: m.text ?? null,
-				payload: (m.payload ?? null) as Json | null,
-				leadSearchId: m.leadSearchId ?? null,
-				createdAt: toIso(m.createdAt),
-				updatedAt: toIso(m.updatedAt),
-			})),
-			nextCursor,
-		};
-	}
+    return {
+      messages: pageRows.map((m) => ({
+        id: m.id,
+        threadId: m.threadId,
+        role: m.role,
+        type: m.type,
+        text: m.text ?? null,
+        payload: (m.payload ?? null) as Json | null,
+        leadSearchId: m.leadSearchId ?? null,
+        createdAt: toIso(m.createdAt),
+        updatedAt: toIso(m.updatedAt),
+      })),
+      nextCursor,
+    };
+  }
 
-	async createMessage(input: {
-		ownerId: string;
-		threadId: string;
-		role: ChatMessageRole;
-		type: ChatMessageType;
-		text?: string | null;
-		payload?: Json | null;
-		authorUserId?: string | null;
-		leadSearchId?: string | null;
-	}) {
-		await this.assertThreadOwner(input.ownerId, input.threadId);
+  async createMessage(input: {
+    ownerId: string;
+    threadId: string;
+    role: ChatMessageRole;
+    type: ChatMessageType;
+    text?: string | null;
+    payload?: Json | null;
+    authorUserId?: string | null;
+    leadSearchId?: string | null;
+  }) {
+    await this.assertThreadOwner(input.ownerId, input.threadId);
 
-		let payload:
-			| Prisma.InputJsonValue
-			| Prisma.NullableJsonNullValueInput
-			| undefined;
-		if (input.payload === undefined) {
-			payload = undefined;
-		} else if (input.payload === null) {
-			payload = Prisma.DbNull;
-		} else {
-			payload = input.payload;
-		}
+    let payload:
+      | Prisma.InputJsonValue
+      | Prisma.NullableJsonNullValueInput
+      | undefined;
+    if (input.payload === undefined) {
+      payload = undefined;
+    } else if (input.payload === null) {
+      payload = Prisma.DbNull;
+    } else {
+      payload = input.payload;
+    }
 
-		const row = await this.prisma.chatMessage.create({
-			data: {
-				threadId: input.threadId,
-				role: input.role,
-				type: input.type,
-				text: input.text ?? null,
-				payload,
-				authorUserId: input.authorUserId ?? null,
-				leadSearchId: input.leadSearchId ?? null,
-			},
-			select: {
-				id: true,
-				threadId: true,
-				role: true,
-				type: true,
-				text: true,
-				payload: true,
-				leadSearchId: true,
-				createdAt: true,
-				updatedAt: true,
-			},
-		});
+    const row = await this.prisma.chatMessage.create({
+      data: {
+        threadId: input.threadId,
+        role: input.role,
+        type: input.type,
+        text: input.text ?? null,
+        payload,
+        authorUserId: input.authorUserId ?? null,
+        leadSearchId: input.leadSearchId ?? null,
+      },
+      select: {
+        id: true,
+        threadId: true,
+        role: true,
+        type: true,
+        text: true,
+        payload: true,
+        leadSearchId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
 
-		await this.prisma.chatThread.update({
-			where: { id: input.threadId },
-			data: { lastMessageAt: new Date() },
-		});
+    await this.prisma.chatThread.update({
+      where: { id: input.threadId },
+      data: { lastMessageAt: new Date() },
+    });
 
-		return {
-			id: row.id,
-			threadId: row.threadId,
-			role: row.role,
-			type: row.type,
-			text: row.text ?? null,
-			payload: (row.payload ?? null) as Json | null,
-			leadSearchId: row.leadSearchId ?? null,
-			createdAt: toIso(row.createdAt),
-			updatedAt: toIso(row.updatedAt),
-		};
-	}
+    return {
+      id: row.id,
+      threadId: row.threadId,
+      role: row.role,
+      type: row.type,
+      text: row.text ?? null,
+      payload: (row.payload ?? null) as Json | null,
+      leadSearchId: row.leadSearchId ?? null,
+      createdAt: toIso(row.createdAt),
+      updatedAt: toIso(row.updatedAt),
+    };
+  }
 
-	async createLeadSearchFromChat(input: {
-		createdById: string;
-		threadId: string;
-		provider: LeadProvider;
-		kind: LeadSearchKind;
-		query: Json;
-		limit: number;
-	}): Promise<{ id: string }> {
-		await this.assertThreadOwner(input.createdById, input.threadId);
+  async createLeadSearchFromChat(input: {
+    createdById: string;
+    threadId: string;
+    provider: LeadProvider;
+    kind: LeadSearchKind;
+    query: Json;
+    limit: number;
+  }): Promise<{ id: string }> {
+    await this.assertThreadOwner(input.createdById, input.threadId);
 
-		// Ensure capability row exists (composite PK [provider, kind])
-		await this.prisma.leadProviderCapability.upsert({
-			where: {
-				provider_kind: {
-					provider: input.provider,
-					kind: input.kind,
-				},
-			},
-			create: {
-				provider: input.provider,
-				kind: input.kind,
-				label: null,
-				description: null,
-			},
-			update: {},
-		});
+    // Ensure capability row exists (composite PK [provider, kind])
+    await this.prisma.leadProviderCapability.upsert({
+      where: {
+        provider_kind: {
+          provider: input.provider,
+          kind: input.kind,
+        },
+      },
+      create: {
+        provider: input.provider,
+        kind: input.kind,
+        label: null,
+        description: null,
+      },
+      update: {},
+    });
 
-		const row = await this.prisma.leadSearch.create({
-			data: {
-				createdById: input.createdById,
-				provider: input.provider,
-				kind: input.kind,
+    const row = await this.prisma.leadSearch.create({
+      data: {
+        createdById: input.createdById,
+        provider: input.provider,
+        kind: input.kind,
 
-				threadId: input.threadId,
+        threadId: input.threadId,
 
-				prompt: null,
-				query: input.query,
-				limit: input.limit,
+        prompt: null,
+        query: input.query,
+        limit: input.limit,
 
-				status: LeadSearchStatus.PENDING,
-			},
-			select: { id: true },
-		});
+        status: LeadSearchStatus.PENDING,
+      },
+      select: { id: true },
+    });
 
-		return { id: row.id };
-	}
+    return { id: row.id };
+  }
 
-	private async assertThreadOwner(
-		ownerId: string,
-		threadId: string
-	): Promise<void> {
-		const row = await this.prisma.chatThread.findFirst({
-			where: { id: threadId, ownerId },
-			select: { id: true },
-		});
+  private async assertThreadOwner(
+    ownerId: string,
+    threadId: string,
+  ): Promise<void> {
+    const row = await this.prisma.chatThread.findFirst({
+      where: { id: threadId, ownerId },
+      select: { id: true },
+    });
 
-		if (!row) {
-			throw new UserFacingError({
-				code: "CHAT_THREAD_NOT_FOUND",
-				userMessage: "Thread not found.",
-			});
-		}
-	}
+    if (!row) {
+      throw new UserFacingError({
+        code: "CHAT_THREAD_NOT_FOUND",
+        userMessage: "Thread not found.",
+      });
+    }
+  }
 }

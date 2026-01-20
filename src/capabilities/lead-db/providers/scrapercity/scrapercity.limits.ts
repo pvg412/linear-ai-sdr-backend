@@ -10,4 +10,3 @@ export const SCRAPERCITY_REDIS_KEYS = {
   activeTasks: "scrapercity:limits:activeTasks",
   requestsPerMinutePrefix: "scrapercity:limits:reqPerMin:",
 } as const;
-

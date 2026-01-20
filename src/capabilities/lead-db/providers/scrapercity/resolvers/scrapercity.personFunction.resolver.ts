@@ -24,7 +24,9 @@ for (const v of SCRAPERCITY_ALLOWED_PERSON_FUNCTIONS) {
   BY_KEY.set(key(v), v);
 }
 
-function resolveOne(input: string): ScraperCityAllowedPersonFunction | undefined {
+function resolveOne(
+  input: string,
+): ScraperCityAllowedPersonFunction | undefined {
   const k = key(input);
   if (!k) return undefined;
 

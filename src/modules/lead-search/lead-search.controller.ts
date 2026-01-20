@@ -7,14 +7,12 @@ import { LEAD_SEARCH_TYPES } from "@/modules/lead-search/lead-search.types";
 import { LeadSearchQueryService } from "@/modules/lead-search/services/lead-search.query.service";
 
 export function registerLeadSearchRoutes(app: FastifyInstance): void {
-	const qry = container.get<LeadSearchQueryService>(
-		LEAD_SEARCH_TYPES.LeadSearchQueryService
-	);
+  const qry = container.get<LeadSearchQueryService>(
+    LEAD_SEARCH_TYPES.LeadSearchQueryService,
+  );
 
-	app.get("/lead-searches/flat", async (req) => {
-		const userId = requireRequestUserId(req);
-		return await qry.listForSelector(userId);
-	});
+  app.get("/lead-searches/flat", async (req) => {
+    const userId = requireRequestUserId(req);
+    return await qry.listForSelector(userId);
+  });
 }
-
-

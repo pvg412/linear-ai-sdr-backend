@@ -33,7 +33,11 @@ describe("ScraperCityLimiter", () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 
     const limiter = new ScraperCityLimiter(null);
-    const throttles: Array<{ reason: string; retryAfterMs: number; message: string }> = [];
+    const throttles: Array<{
+      reason: string;
+      retryAfterMs: number;
+      message: string;
+    }> = [];
 
     await withLeadSearchAsyncContext(
       { onThrottle: (t) => throttles.push(t) },
@@ -60,7 +64,11 @@ describe("ScraperCityLimiter", () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 
     const limiter = new ScraperCityLimiter(null);
-    const throttles: Array<{ reason: string; retryAfterMs: number; message: string }> = [];
+    const throttles: Array<{
+      reason: string;
+      retryAfterMs: number;
+      message: string;
+    }> = [];
 
     let entered = 0;
     const gates = Array.from({ length: 10 }, () => deferred<void>());
@@ -107,4 +115,3 @@ describe("ScraperCityLimiter", () => {
     vi.useRealTimers();
   });
 });
-

@@ -11,63 +11,63 @@ export type LeadSearchJobName = "leadSearch.run";
 export type LeadSearchScraperStep = "INIT" | "POLL" | "FETCH";
 
 export interface LeadSearchScraperJobState {
-	step: LeadSearchScraperStep;
+  step: LeadSearchScraperStep;
 
-	providerIndex: number;
-	providersOrder: LeadProvider[];
+  providerIndex: number;
+  providersOrder: LeadProvider[];
 
-	runId?: string | null;
-	providerRunId?: string | null;
+  runId?: string | null;
+  providerRunId?: string | null;
 
-	pollAttempt: number;
-	lastStatus?: ScraperRunStatus | null;
+  pollAttempt: number;
+  lastStatus?: ScraperRunStatus | null;
 
-	/**
-	 * Used only for recovery decisions. Stored in Redis.
-	 */
-	initAtMs?: number | null;
+  /**
+   * Used only for recovery decisions. Stored in Redis.
+   */
+  initAtMs?: number | null;
 
-	/**
-	 * Apify-only resume state when the actor hits hourly rate limits.
-	 * Stored in Redis so the next INIT can start a new run with updated pagination.
-	 */
-	apifyResume?: {
-		startPage: number;
-		takePages: number;
-		plannedAtMs: number;
-		fromProviderRunId?: string | null;
-	} | null;
+  /**
+   * Apify-only resume state when the actor hits hourly rate limits.
+   * Stored in Redis so the next INIT can start a new run with updated pagination.
+   */
+  apifyResume?: {
+    startPage: number;
+    takePages: number;
+    plannedAtMs: number;
+    fromProviderRunId?: string | null;
+  } | null;
 }
 
 export type LeadSearchJobData = {
-	leadSearchId: string;
-	triggeredById?: string | null;
+  leadSearchId: string;
+  triggeredById?: string | null;
 
-	/**
-	 * Only for SCRAPER long-running flow.
-	 */
-	scraper?: LeadSearchScraperJobState;
+  /**
+   * Only for SCRAPER long-running flow.
+   */
+  scraper?: LeadSearchScraperJobState;
 };
 
 const env = loadEnv();
 
 export function createLeadSearchQueue(redis: Redis) {
-	return new Queue<LeadSearchJobData, void, LeadSearchJobName>(
-		LEAD_SEARCH_QUEUE_NAME,
-		{
-			connection: redis,
-		}
-	);
+  return new Queue<LeadSearchJobData, void, LeadSearchJobName>(
+    LEAD_SEARCH_QUEUE_NAME,
+    {
+      connection: redis,
+    },
+  );
 }
 
 export function leadSearchJobOptions() {
-	const attempts = env.LEAD_SEARCH_QUEUE_ATTEMPTS;
-	const backoffMs = env.LEAD_SEARCH_QUEUE_BACKOFF_MS;
+  const attempts = env.LEAD_SEARCH_QUEUE_ATTEMPTS;
+  const backoffMs = env.LEAD_SEARCH_QUEUE_BACKOFF_MS;
 
-	return {
-		attempts,
-		backoff: { type: "exponential" as const, delay: backoffMs },
-		removeOnComplete: true,
-		removeOnFail: false,
-	};
+  return {
+    attempts,
+    backoff: { type: "exponential" as const, delay: backoffMs },
+    removeOnComplete: true,
+    removeOnFail: false,
+  };
 }

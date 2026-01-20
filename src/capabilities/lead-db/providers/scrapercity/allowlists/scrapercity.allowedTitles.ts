@@ -499,7 +499,8 @@ export const SCRAPERCITY_ALLOWED_PERSON_TITLES = [
   "Accounts Manager",
   "Customer Service Associate",
   "Investment Banking Analyst",
-  "Director HR"
+  "Director HR",
 ] as const;
 
-export type ScraperCityAllowedPersonTitle = typeof SCRAPERCITY_ALLOWED_PERSON_TITLES[number];
+export type ScraperCityAllowedPersonTitle =
+  (typeof SCRAPERCITY_ALLOWED_PERSON_TITLES)[number];

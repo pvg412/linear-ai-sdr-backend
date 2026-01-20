@@ -50,7 +50,11 @@ export type LeadValidationMode = "strict" | "drop";
 
 export function validateNormalizedLeads<T extends object>(
   leads: T[],
-  opts?: { mode?: LeadValidationMode; provider?: LeadProvider; minValid?: number },
+  opts?: {
+    mode?: LeadValidationMode;
+    provider?: LeadProvider;
+    minValid?: number;
+  },
 ): T[] {
   const mode = opts?.mode ?? "drop";
   const minValid = opts?.minValid ?? 1;
@@ -112,4 +116,3 @@ export function dedupeLeads(leads: NormalizedLead[]): NormalizedLead[] {
 
   return out;
 }
-

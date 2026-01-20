@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-export const SearchLeadsStatusSchema = z.enum(["pending", "completed", "failed"]);
+export const SearchLeadsStatusSchema = z.enum([
+  "pending",
+  "completed",
+  "failed",
+]);
 export type SearchLeadsStatus = z.infer<typeof SearchLeadsStatusSchema>;
 
 export const SearchLeadsCreateExportResponseSchema = z.object({
@@ -69,4 +73,6 @@ export const SearchLeadsResultLogSchema = z.looseObject({
 export const SearchLeadsResultResponseSchema = z.object({
   log: SearchLeadsResultLogSchema,
 });
-export type SearchLeadsResultResponse = z.infer<typeof SearchLeadsResultResponseSchema>;
+export type SearchLeadsResultResponse = z.infer<
+  typeof SearchLeadsResultResponseSchema
+>;

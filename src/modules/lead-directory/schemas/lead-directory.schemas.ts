@@ -15,7 +15,9 @@ export const CreateLeadDirectoryBodySchema = z.object({
   position: z.number().int().min(0).max(1_000_000).optional(),
 });
 
-export type CreateLeadDirectoryBody = z.infer<typeof CreateLeadDirectoryBodySchema>;
+export type CreateLeadDirectoryBody = z.infer<
+  typeof CreateLeadDirectoryBodySchema
+>;
 
 export const UpdateLeadDirectoryBodySchema = z
   .object({
@@ -25,7 +27,9 @@ export const UpdateLeadDirectoryBodySchema = z
   })
   .refine((v) => Object.keys(v).length > 0, "Body must not be empty");
 
-export type UpdateLeadDirectoryBody = z.infer<typeof UpdateLeadDirectoryBodySchema>;
+export type UpdateLeadDirectoryBody = z.infer<
+  typeof UpdateLeadDirectoryBodySchema
+>;
 
 export const MoveLeadDirectoryBodySchema = z.object({
   parentId: IdSchema.nullable(),
@@ -37,12 +41,19 @@ export const AddLeadToDirectoryBodySchema = z.object({
   leadId: IdSchema,
 });
 
-export type AddLeadToDirectoryBody = z.infer<typeof AddLeadToDirectoryBodySchema>;
+export type AddLeadToDirectoryBody = z.infer<
+  typeof AddLeadToDirectoryBodySchema
+>;
 
 export const ListDirectoriesQuerySchema = z.object({
   parentId: IdSchema.optional(),
   tree: z
-    .union([z.literal("1"), z.literal("true"), z.literal("0"), z.literal("false")])
+    .union([
+      z.literal("1"),
+      z.literal("true"),
+      z.literal("0"),
+      z.literal("false"),
+    ])
     .optional(),
 });
 
@@ -59,7 +70,9 @@ export const ListDirectoriesFlatQuerySchema = z.object({
     }),
 });
 
-export type ListDirectoriesFlatQuery = z.infer<typeof ListDirectoriesFlatQuerySchema>;
+export type ListDirectoriesFlatQuery = z.infer<
+  typeof ListDirectoriesFlatQuerySchema
+>;
 
 export const ListDirectoryLeadsQuerySchema = z.object({
   limit: z
@@ -67,7 +80,9 @@ export const ListDirectoryLeadsQuerySchema = z.object({
     .optional()
     .transform((v) => {
       const n = v ? Number(v) : 50;
-      return Number.isFinite(n) ? Math.max(1, Math.min(200, Math.floor(n))) : 50;
+      return Number.isFinite(n)
+        ? Math.max(1, Math.min(200, Math.floor(n)))
+        : 50;
     }),
   offset: z
     .string()
@@ -78,4 +93,6 @@ export const ListDirectoryLeadsQuerySchema = z.object({
     }),
 });
 
-export type ListDirectoryLeadsQuery = z.infer<typeof ListDirectoryLeadsQuerySchema>;
+export type ListDirectoryLeadsQuery = z.infer<
+  typeof ListDirectoryLeadsQuerySchema
+>;

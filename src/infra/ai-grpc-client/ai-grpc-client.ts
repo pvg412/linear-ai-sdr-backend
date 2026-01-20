@@ -66,7 +66,9 @@ export interface ChatStreamOptions {
 
 type RequestWithRequestId = { requestId?: string };
 
-function withRequestId<T extends RequestWithRequestId>(req: T): T & { requestId: string } {
+function withRequestId<T extends RequestWithRequestId>(
+  req: T,
+): T & { requestId: string } {
   const rid = typeof req.requestId === "string" ? req.requestId.trim() : "";
   if (rid.length > 0) return { ...req, requestId: rid };
   return { ...req, requestId: randomUUID() };
@@ -109,7 +111,9 @@ export class AiGrpcClient {
     };
 
     const insecure = opts.insecure ?? true;
-    const creds = insecure ? grpc.credentials.createInsecure() : grpc.credentials.createSsl();
+    const creds = insecure
+      ? grpc.credentials.createInsecure()
+      : grpc.credentials.createSsl();
 
     // Match Python server defaults (50MB)
     const defaultChannelOptions: grpc.ChannelOptions = {
@@ -125,12 +129,17 @@ export class AiGrpcClient {
       ...(opts.channelOptions ?? {}),
     };
 
-    this.client = new AiSdrServiceClientConstructor(opts.address, creds, clientOptions);
+    this.client = new AiSdrServiceClientConstructor(
+      opts.address,
+      creds,
+      clientOptions,
+    );
   }
 
   static fromEnv(logger?: LoggerLike): AiGrpcClient {
     const address = (env.AI_GRPC_ADDRESS || "127.0.0.1:50051").trim();
-    const insecure = String(env.AI_GRPC_INSECURE ?? "true").toLowerCase() !== "false";
+    const insecure =
+      String(env.AI_GRPC_INSECURE ?? "true").toLowerCase() !== "false";
 
     return new AiGrpcClient({ address, insecure, logger });
   }
@@ -198,7 +207,9 @@ export class AiGrpcClient {
     );
   }
 
-  parseLeadSearchPrompt(req: ParseLeadSearchPromptRequest): Promise<ParseLeadSearchPromptResponse> {
+  parseLeadSearchPrompt(
+    req: ParseLeadSearchPromptRequest,
+  ): Promise<ParseLeadSearchPromptResponse> {
     const normalized = withRequestId(req);
     return this.unary(
       "parseLeadSearchPrompt",
@@ -208,7 +219,9 @@ export class AiGrpcClient {
     );
   }
 
-  upsertLeadDocuments(req: UpsertLeadDocumentsRequest): Promise<UpsertLeadDocumentsResponse> {
+  upsertLeadDocuments(
+    req: UpsertLeadDocumentsRequest,
+  ): Promise<UpsertLeadDocumentsResponse> {
     const normalized = withRequestId(req);
     return this.unary(
       "upsertLeadDocuments",
@@ -218,7 +231,9 @@ export class AiGrpcClient {
     );
   }
 
-  deleteLeadDocuments(req: DeleteLeadDocumentsRequest): Promise<DeleteLeadDocumentsResponse> {
+  deleteLeadDocuments(
+    req: DeleteLeadDocumentsRequest,
+  ): Promise<DeleteLeadDocumentsResponse> {
     const normalized = withRequestId(req);
     return this.unary(
       "deleteLeadDocuments",
@@ -232,7 +247,10 @@ export class AiGrpcClient {
   // Server streaming: ChatStream
   // -------------------------
 
-  chatStreamCall(req: ChatStreamRequest, opts?: ChatStreamOptions): grpc.ClientReadableStream<ChatStreamEvent> {
+  chatStreamCall(
+    req: ChatStreamRequest,
+    opts?: ChatStreamOptions,
+  ): grpc.ClientReadableStream<ChatStreamEvent> {
     const normalized = withRequestId(req);
     const md = opts?.metadata ?? new grpc.Metadata();
 
@@ -251,7 +269,8 @@ export class AiGrpcClient {
       } else {
         opts.signal.addEventListener("abort", onAbort, { once: true });
 
-        const cleanup = () => opts.signal?.removeEventListener("abort", onAbort);
+        const cleanup = () =>
+          opts.signal?.removeEventListener("abort", onAbort);
         stream.on("end", cleanup);
         stream.on("error", cleanup);
       }
@@ -260,7 +279,10 @@ export class AiGrpcClient {
     return stream;
   }
 
-  async *chatStream(req: ChatStreamRequest, opts?: ChatStreamOptions): AsyncIterable<ChatStreamEvent> {
+  async *chatStream(
+    req: ChatStreamRequest,
+    opts?: ChatStreamOptions,
+  ): AsyncIterable<ChatStreamEvent> {
     const stream = this.chatStreamCall(req, opts);
 
     const queue: ChatStreamEvent[] = [];

@@ -2,7 +2,10 @@ import { inject, injectable } from "inversify";
 
 import { LEAD_DIRECTORY_TYPES } from "../lead-directory.types";
 import { LeadDirectoryRepository } from "../persistence/lead-directory.repository";
-import { UNASSIGNED_DIRECTORY_ID, UNASSIGNED_DIRECTORY_NAME } from "../lead-directory.unassigned";
+import {
+  UNASSIGNED_DIRECTORY_ID,
+  UNASSIGNED_DIRECTORY_NAME,
+} from "../lead-directory.unassigned";
 
 export type ResolveMentionsResult = {
   directoryIds: string[];
@@ -18,7 +21,11 @@ function normalizeToken(s: string): string {
   return s.trim().toLowerCase();
 }
 
-function addMap(map: Map<string, Set<string>>, key: string, directoryId: string) {
+function addMap(
+  map: Map<string, Set<string>>,
+  key: string,
+  directoryId: string,
+) {
   const k = normalizeToken(key);
   if (!k) return;
   const set = map.get(k) ?? new Set<string>();
@@ -54,9 +61,15 @@ export class LeadDirectoryMentionResolverService implements LeadDirectoryMention
     private readonly repo: LeadDirectoryRepository,
   ) {}
 
-  async resolve(ownerId: string, mentions: string[]): Promise<ResolveMentionsResult> {
-    const uniqMentions = Array.from(new Set(mentions.map(normalizeToken))).filter(Boolean);
-    if (uniqMentions.length === 0) return { directoryIds: [], missing: [], ambiguous: [] };
+  async resolve(
+    ownerId: string,
+    mentions: string[],
+  ): Promise<ResolveMentionsResult> {
+    const uniqMentions = Array.from(
+      new Set(mentions.map(normalizeToken)),
+    ).filter(Boolean);
+    if (uniqMentions.length === 0)
+      return { directoryIds: [], missing: [], ambiguous: [] };
 
     const dirs = await this.repo.listAllForOwner(ownerId);
 
@@ -65,7 +78,8 @@ export class LeadDirectoryMentionResolverService implements LeadDirectoryMention
     // synthetic "unassigned"
     addMap(map, "unassigned", UNASSIGNED_DIRECTORY_ID);
     addMap(map, "inbox", UNASSIGNED_DIRECTORY_ID);
-    for (const k of slugVariantsFromName(UNASSIGNED_DIRECTORY_NAME)) addMap(map, k, UNASSIGNED_DIRECTORY_ID);
+    for (const k of slugVariantsFromName(UNASSIGNED_DIRECTORY_NAME))
+      addMap(map, k, UNASSIGNED_DIRECTORY_ID);
 
     for (const d of dirs) {
       // allow @<directoryId>

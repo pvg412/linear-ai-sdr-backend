@@ -2,7 +2,10 @@ import type { Redis } from "ioredis";
 
 import { sleep } from "@/capabilities/shared/polling";
 
-import { SEARCHLEADS_LIMITS, SEARCHLEADS_REDIS_KEYS } from "./searchleads.limits";
+import {
+  SEARCHLEADS_LIMITS,
+  SEARCHLEADS_REDIS_KEYS,
+} from "./searchleads.limits";
 import { getLeadSearchAsyncContext } from "@/infra/async-context/leadSearchAsyncContext";
 
 type ThrottleReason = "RATE_LIMIT" | "CONCURRENCY";

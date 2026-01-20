@@ -12,60 +12,62 @@ import { ScraperStepLeadSearchHandler } from "./services/scraper-step.lead-searc
 import { LeadSearchRecoveryService } from "./services/lead-search.recovery.service";
 
 export function registerLeadSearchModule(container: Container) {
-	container
-		.bind<LeadSearchRunnerService>(LEAD_SEARCH_TYPES.LeadSearchRunnerService)
-		.to(LeadSearchRunnerService)
-		.inSingletonScope();
+  container
+    .bind<LeadSearchRunnerService>(LEAD_SEARCH_TYPES.LeadSearchRunnerService)
+    .to(LeadSearchRunnerService)
+    .inSingletonScope();
 
-	container
-		.bind<LeadSearchQueryService>(LEAD_SEARCH_TYPES.LeadSearchQueryService)
-		.to(LeadSearchQueryService)
-		.inSingletonScope();
+  container
+    .bind<LeadSearchQueryService>(LEAD_SEARCH_TYPES.LeadSearchQueryService)
+    .to(LeadSearchQueryService)
+    .inSingletonScope();
 
-	container
-		.bind<LeadSearchRunRepository>(LEAD_SEARCH_TYPES.LeadSearchRunRepository)
-		.to(LeadSearchRunRepository)
-		.inSingletonScope();
+  container
+    .bind<LeadSearchRunRepository>(LEAD_SEARCH_TYPES.LeadSearchRunRepository)
+    .to(LeadSearchRunRepository)
+    .inSingletonScope();
 
-	container
-		.bind<LeadSearchNotifierService>(
-			LEAD_SEARCH_TYPES.LeadSearchNotifierService
-		)
-		.to(LeadSearchNotifierService)
-		.inSingletonScope();
+  container
+    .bind<LeadSearchNotifierService>(
+      LEAD_SEARCH_TYPES.LeadSearchNotifierService,
+    )
+    .to(LeadSearchNotifierService)
+    .inSingletonScope();
 
-	container
-		.bind<LeadSearchLeadPersisterService>(
-			LEAD_SEARCH_TYPES.LeadSearchLeadPersisterService
-		)
-		.to(LeadSearchLeadPersisterService)
-		.inSingletonScope();
+  container
+    .bind<LeadSearchLeadPersisterService>(
+      LEAD_SEARCH_TYPES.LeadSearchLeadPersisterService,
+    )
+    .to(LeadSearchLeadPersisterService)
+    .inSingletonScope();
 
-	container
-		.bind<LeadDbLeadSearchHandler>(LEAD_SEARCH_TYPES.LeadDbLeadSearchHandler)
-		.to(LeadDbLeadSearchHandler)
-		.inSingletonScope();
+  container
+    .bind<LeadDbLeadSearchHandler>(LEAD_SEARCH_TYPES.LeadDbLeadSearchHandler)
+    .to(LeadDbLeadSearchHandler)
+    .inSingletonScope();
 
-	container
-		.bind<ScraperInlineLeadSearchHandler>(
-			LEAD_SEARCH_TYPES.ScraperInlineLeadSearchHandler
-		)
-		.to(ScraperInlineLeadSearchHandler)
-		.inSingletonScope();
+  container
+    .bind<ScraperInlineLeadSearchHandler>(
+      LEAD_SEARCH_TYPES.ScraperInlineLeadSearchHandler,
+    )
+    .to(ScraperInlineLeadSearchHandler)
+    .inSingletonScope();
 
-	container
-		.bind<ScraperStepLeadSearchHandler>(
-			LEAD_SEARCH_TYPES.ScraperStepLeadSearchHandler
-		)
-		.to(ScraperStepLeadSearchHandler)
-		.inSingletonScope();
+  container
+    .bind<ScraperStepLeadSearchHandler>(
+      LEAD_SEARCH_TYPES.ScraperStepLeadSearchHandler,
+    )
+    .to(ScraperStepLeadSearchHandler)
+    .inSingletonScope();
 
-	container
-		.bind<LeadSearchRepository>(LEAD_SEARCH_TYPES.LeadSearchRepository)
-		.to(LeadSearchRepository)
-		.inSingletonScope();
-	container
-		.bind<LeadSearchRecoveryService>(LEAD_SEARCH_TYPES.LeadSearchRecoveryService)
-		.to(LeadSearchRecoveryService)
-		.inSingletonScope();
+  container
+    .bind<LeadSearchRepository>(LEAD_SEARCH_TYPES.LeadSearchRepository)
+    .to(LeadSearchRepository)
+    .inSingletonScope();
+  container
+    .bind<LeadSearchRecoveryService>(
+      LEAD_SEARCH_TYPES.LeadSearchRecoveryService,
+    )
+    .to(LeadSearchRecoveryService)
+    .inSingletonScope();
 }

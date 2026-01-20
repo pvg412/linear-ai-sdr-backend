@@ -106,11 +106,15 @@ describe("SearchLeads contract", () => {
   });
 
   it("parses result.csv fixture where log.data is a URL string (Guarantee A)", () => {
-    const parsed = SearchLeadsResultResponseSchema.parse(fixture("result.csv.json"));
+    const parsed = SearchLeadsResultResponseSchema.parse(
+      fixture("result.csv.json"),
+    );
 
     expect(parsed.log.status).toBe("completed");
     expect(typeof parsed.log.data).toBe("string");
-    expect((parsed.log.data as string).includes("export?format=csv")).toBe(true);
+    expect((parsed.log.data as string).includes("export?format=csv")).toBe(
+      true,
+    );
   });
 
   it("wraps 401 into UserFacingError (Guarantee C: error contract)", () => {
@@ -157,7 +161,10 @@ describe("SearchLeads contract", () => {
       .mockResolvedValueOnce({ data: fixture("statusCheck.pending.json") })
       .mockResolvedValueOnce({ data: fixture("statusCheck.completed.json") });
 
-    const p = client.waitForCompleted(logId, { intervalMs: 5_000, maxAttempts: 10 });
+    const p = client.waitForCompleted(logId, {
+      intervalMs: 5_000,
+      maxAttempts: 10,
+    });
 
     // 1st call -> 502 -> sleeps 1 minute
     vi.runAllTicks();

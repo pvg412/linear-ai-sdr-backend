@@ -20,7 +20,7 @@ async function start() {
       void (async () => {
         try {
           const recovery = container.get<LeadSearchRecoveryService>(
-            LEAD_SEARCH_TYPES.LeadSearchRecoveryService
+            LEAD_SEARCH_TYPES.LeadSearchRecoveryService,
           );
           await recovery.recover(app.log);
         } catch (err) {

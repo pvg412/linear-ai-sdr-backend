@@ -20,15 +20,15 @@ function formatTimestamp(d: Date): string {
 }
 
 const consoleLogger: LoggerLike = {
-	info: (obj: unknown, msg?: string) =>
-		console.log(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
-	debug: (obj: unknown, msg?: string) =>
-		console.debug(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
-	warn: (obj: unknown, msg?: string) =>
-		console.warn(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
-	error: (obj: unknown, msg?: string) =>
-		console.error(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
-	child: () => consoleLogger,
+  info: (obj: unknown, msg?: string) =>
+    console.log(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
+  debug: (obj: unknown, msg?: string) =>
+    console.debug(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
+  warn: (obj: unknown, msg?: string) =>
+    console.warn(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
+  error: (obj: unknown, msg?: string) =>
+    console.error(`[${formatTimestamp(new Date())}] ${msg ?? ""}`.trim(), obj),
+  child: () => consoleLogger,
 };
 export function nowNs(): bigint {
   return process.hrtime.bigint();
@@ -46,23 +46,29 @@ export function safePreview(input: string, maxLen = 120): string {
 }
 
 export function ensureLogger(log?: LoggerLike): LoggerLike {
-	return log ?? consoleLogger;
+  return log ?? consoleLogger;
 }
 
-export function isP2002Unique(e: unknown): e is Prisma.PrismaClientKnownRequestError {
-	return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
+export function isP2002Unique(
+  e: unknown,
+): e is Prisma.PrismaClientKnownRequestError {
+  return (
+    e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002"
+  );
 }
 
-export function uniqueTarget(e: Prisma.PrismaClientKnownRequestError): string[] {
-	const t = (e.meta as { target?: unknown } | undefined)?.target;
-	if (Array.isArray(t)) return t.map(String);
-	if (typeof t === "string") return [t];
-	return [];
+export function uniqueTarget(
+  e: Prisma.PrismaClientKnownRequestError,
+): string[] {
+  const t = (e.meta as { target?: unknown } | undefined)?.target;
+  if (Array.isArray(t)) return t.map(String);
+  if (typeof t === "string") return [t];
+  return [];
 }
 
 export function hasAnyDefined(obj: Record<string, unknown>): boolean {
-	for (const v of Object.values(obj)) {
-		if (v !== undefined) return true;
-	}
-	return false;
+  for (const v of Object.values(obj)) {
+    if (v !== undefined) return true;
+  }
+  return false;
 }

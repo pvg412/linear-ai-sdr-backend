@@ -14,49 +14,49 @@ import { QUEUE_TYPES } from "@/infra/queue/queue.types";
 const env = loadEnv();
 
 const isSearchLeadsEnabled = Boolean(
-	env.SEARCH_LEADS_API_KEY && env.SEARCH_LEADS_API_URL
+  env.SEARCH_LEADS_API_KEY && env.SEARCH_LEADS_API_URL,
 );
 
 const isScraperCityEnabled = Boolean(
-	env.SCRAPERCITY_API_KEY && env.SCRAPERCITY_API_URL
+  env.SCRAPERCITY_API_KEY && env.SCRAPERCITY_API_URL,
 );
 
 export function registerLeadDbModule(container: Container) {
-	let redis: Redis | null = null;
-	try {
-		redis = container.get<Redis>(QUEUE_TYPES.Redis);
-	} catch {
-		redis = null;
-	}
+  let redis: Redis | null = null;
+  try {
+    redis = container.get<Redis>(QUEUE_TYPES.Redis);
+  } catch {
+    redis = null;
+  }
 
-	const searchLeadsLimiter = new SearchLeadsLimiter(redis);
-	const scraperCityLimiter = new ScraperCityLimiter(redis);
+  const searchLeadsLimiter = new SearchLeadsLimiter(redis);
+  const scraperCityLimiter = new ScraperCityLimiter(redis);
 
-	container
-		.bind<LeadDbAdapter>(LEAD_DB_TYPES.LeadDbAdapter)
-		.toDynamicValue(
-			() =>
-				new SearchLeadsLeadDbAdapter(
-					env.SEARCH_LEADS_API_KEY ?? "",
-					isSearchLeadsEnabled,
-					searchLeadsLimiter
-				)
-		)
-		.inSingletonScope();
+  container
+    .bind<LeadDbAdapter>(LEAD_DB_TYPES.LeadDbAdapter)
+    .toDynamicValue(
+      () =>
+        new SearchLeadsLeadDbAdapter(
+          env.SEARCH_LEADS_API_KEY ?? "",
+          isSearchLeadsEnabled,
+          searchLeadsLimiter,
+        ),
+    )
+    .inSingletonScope();
 
-	container
-		.bind<LeadDbAdapter>(LEAD_DB_TYPES.LeadDbAdapter)
-		.toDynamicValue(() => {
-			return new ScraperCityLeadDbAdapter(
-				env.SCRAPERCITY_API_KEY ?? "",
-				isScraperCityEnabled,
-				scraperCityLimiter
-			);
-		})
-		.inSingletonScope();
+  container
+    .bind<LeadDbAdapter>(LEAD_DB_TYPES.LeadDbAdapter)
+    .toDynamicValue(() => {
+      return new ScraperCityLeadDbAdapter(
+        env.SCRAPERCITY_API_KEY ?? "",
+        isScraperCityEnabled,
+        scraperCityLimiter,
+      );
+    })
+    .inSingletonScope();
 
-	container
-		.bind<LeadDbOrchestrator>(LEAD_DB_TYPES.LeadDbOrchestrator)
-		.to(LeadDbOrchestrator)
-		.inSingletonScope();
+  container
+    .bind<LeadDbOrchestrator>(LEAD_DB_TYPES.LeadDbOrchestrator)
+    .to(LeadDbOrchestrator)
+    .inSingletonScope();
 }

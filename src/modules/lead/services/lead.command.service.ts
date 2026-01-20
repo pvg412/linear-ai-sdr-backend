@@ -100,7 +100,10 @@ export class LeadCommandService {
     return res;
   }
 
-  private async assertLeadSearchOwned(userId: string, leadSearchId: string): Promise<void> {
+  private async assertLeadSearchOwned(
+    userId: string,
+    leadSearchId: string,
+  ): Promise<void> {
     const prisma = getPrisma();
 
     const owned = await prisma.leadSearch.findFirst({

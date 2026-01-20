@@ -12,20 +12,24 @@ type ResolveResult = {
 const STOP = new Set(["of", "and", "the", "to", "for", "in", "on", "at"]);
 
 function normalizeKey(s: string): string {
-  return String(s ?? "")
-    .trim()
-    .toLowerCase()
-    // make "&" comparable with "and"
-    .replace(/&/g, " and ")
-    // remove punctuation by turning into spaces
-    .replace(/[()/,]/g, " ")
-    .replace(/[^a-z0-9 ]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    String(s ?? "")
+      .trim()
+      .toLowerCase()
+      // make "&" comparable with "and"
+      .replace(/&/g, " and ")
+      // remove punctuation by turning into spaces
+      .replace(/[()/,]/g, " ")
+      .replace(/[^a-z0-9 ]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 function stripParentheses(s: string): string {
-  return String(s ?? "").replace(/\([^)]*\)/g, "").trim();
+  return String(s ?? "")
+    .replace(/\([^)]*\)/g, "")
+    .trim();
 }
 
 function tokens(s: string): string[] {
@@ -51,12 +55,20 @@ function looksLikeAcronym(input: string): string | null {
   const lettersOnly = raw.replace(/[^A-Za-z]/g, "");
   if (!lettersOnly) return null;
 
-  if (lettersOnly.length >= 2 && lettersOnly.length <= 6 && lettersOnly === lettersOnly.toUpperCase()) {
+  if (
+    lettersOnly.length >= 2 &&
+    lettersOnly.length <= 6 &&
+    lettersOnly === lettersOnly.toUpperCase()
+  ) {
     return lettersOnly.toLowerCase();
   }
 
   // also handle "cto" typed in lowercase
-  if (lettersOnly.length >= 2 && lettersOnly.length <= 6 && lettersOnly === lettersOnly.toLowerCase()) {
+  if (
+    lettersOnly.length >= 2 &&
+    lettersOnly.length <= 6 &&
+    lettersOnly === lettersOnly.toLowerCase()
+  ) {
     return lettersOnly.toLowerCase();
   }
 
@@ -94,7 +106,9 @@ for (const e of ALLOWED) {
   }
 }
 
-function pickBestAcronymCandidate(cands: ScraperCityAllowedPersonTitle[]): ScraperCityAllowedPersonTitle {
+function pickBestAcronymCandidate(
+  cands: ScraperCityAllowedPersonTitle[],
+): ScraperCityAllowedPersonTitle {
   // deterministic, avoids “(CTO)” variants when plain exists
   return [...cands].sort((a, b) => {
     const aHasParens = a.includes("(") ? 1 : 0;

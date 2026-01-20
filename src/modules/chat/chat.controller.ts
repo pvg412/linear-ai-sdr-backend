@@ -13,17 +13,17 @@ import { RealtimeHub } from "@/infra/realtime/realtimeHub";
 import { ChatAiStreamService } from "./services/chat-ai-stream.service";
 
 const deps: ChatControllerDeps = {
-	queryService: container.get<ChatQueryService>(CHAT_TYPES.ChatQueryService),
-	commandService: container.get<ChatCommandService>(
-		CHAT_TYPES.ChatCommandService
-	),
-	realtimeHub: container.get<RealtimeHub>(REALTIME_TYPES.RealtimeHub),
-	aiStreamService: container.get<ChatAiStreamService>(
-		CHAT_TYPES.ChatAiStreamService
-	),
+  queryService: container.get<ChatQueryService>(CHAT_TYPES.ChatQueryService),
+  commandService: container.get<ChatCommandService>(
+    CHAT_TYPES.ChatCommandService,
+  ),
+  realtimeHub: container.get<RealtimeHub>(REALTIME_TYPES.RealtimeHub),
+  aiStreamService: container.get<ChatAiStreamService>(
+    CHAT_TYPES.ChatAiStreamService,
+  ),
 };
 
 export function registerChatRoutes(app: FastifyInstance): void {
-	registerChatHttpRoutes(app, deps);
-	registerChatWsRoutes(app, deps);
+  registerChatHttpRoutes(app, deps);
+  registerChatWsRoutes(app, deps);
 }

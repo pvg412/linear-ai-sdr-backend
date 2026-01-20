@@ -9,28 +9,28 @@ import { ChatAiPromptParserService } from "./services/chat-ai-prompt-parser.serv
 import { ChatAiStreamService } from "./services/chat-ai-stream.service";
 
 export function registerChatModule(container: Container) {
-	container
-		.bind<ChatRepository>(CHAT_TYPES.ChatRepository)
-		.to(ChatRepository)
-		.inSingletonScope();
+  container
+    .bind<ChatRepository>(CHAT_TYPES.ChatRepository)
+    .to(ChatRepository)
+    .inSingletonScope();
 
-	container
-		.bind<ChatCommandService>(CHAT_TYPES.ChatCommandService)
-		.to(ChatCommandService)
-		.inSingletonScope();
+  container
+    .bind<ChatCommandService>(CHAT_TYPES.ChatCommandService)
+    .to(ChatCommandService)
+    .inSingletonScope();
 
-	container
-		.bind<ChatQueryService>(CHAT_TYPES.ChatQueryService)
-		.to(ChatQueryService)
-		.inSingletonScope();
+  container
+    .bind<ChatQueryService>(CHAT_TYPES.ChatQueryService)
+    .to(ChatQueryService)
+    .inSingletonScope();
 
-	container
-		.bind<ChatPromptParser>(CHAT_TYPES.ChatPromptParser)
-		.to(ChatAiPromptParserService)
-		.inSingletonScope();
+  container
+    .bind<ChatPromptParser>(CHAT_TYPES.ChatPromptParser)
+    .to(ChatAiPromptParserService)
+    .inSingletonScope();
 
-	container
-		.bind<ChatAiStreamService>(CHAT_TYPES.ChatAiStreamService)
-		.to(ChatAiStreamService)
-		.inSingletonScope();
+  container
+    .bind<ChatAiStreamService>(CHAT_TYPES.ChatAiStreamService)
+    .to(ChatAiStreamService)
+    .inSingletonScope();
 }

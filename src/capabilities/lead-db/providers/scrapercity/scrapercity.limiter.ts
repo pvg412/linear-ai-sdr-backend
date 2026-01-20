@@ -2,7 +2,10 @@ import type { Redis } from "ioredis";
 
 import { sleep } from "@/capabilities/shared/polling";
 import { getLeadSearchAsyncContext } from "@/infra/async-context/leadSearchAsyncContext";
-import { SCRAPERCITY_LIMITS, SCRAPERCITY_REDIS_KEYS } from "./scrapercity.limits";
+import {
+  SCRAPERCITY_LIMITS,
+  SCRAPERCITY_REDIS_KEYS,
+} from "./scrapercity.limits";
 
 type ThrottleReason = "RATE_LIMIT" | "CONCURRENCY";
 
@@ -138,4 +141,3 @@ export class ScraperCityLimiter {
     return n <= SCRAPERCITY_LIMITS.maxRequestsPerMinute;
   }
 }
-

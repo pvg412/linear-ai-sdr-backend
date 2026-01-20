@@ -6,390 +6,390 @@ import { getPrisma } from "@/infra/prisma";
 import { buildLeadVisibilityWhere } from "@/modules/lead/lead-visibility";
 
 export type LeadDirectoryDto = {
-	id: string;
-	ownerId: string;
-	parentId: string | null;
-	parentName: string | null;
-	name: string;
-	description: string | null;
-	position: number;
-	createdAt: Date;
-	updatedAt: Date;
-	childrenCount: number;
-	leadsCount: number;
+  id: string;
+  ownerId: string;
+  parentId: string | null;
+  parentName: string | null;
+  name: string;
+  description: string | null;
+  position: number;
+  createdAt: Date;
+  updatedAt: Date;
+  childrenCount: number;
+  leadsCount: number;
 };
 
 export type LeadDirectoryTreeNodeDto = LeadDirectoryDto & {
-	children: LeadDirectoryTreeNodeDto[];
+  children: LeadDirectoryTreeNodeDto[];
 };
 
 function toDirectoryDto(
-	row: Prisma.LeadDirectoryGetPayload<{
-		include: {
-			_count: { select: { children: true; leads: true } };
-			parent: { select: { name: true } };
-		};
-	}>
+  row: Prisma.LeadDirectoryGetPayload<{
+    include: {
+      _count: { select: { children: true; leads: true } };
+      parent: { select: { name: true } };
+    };
+  }>,
 ): LeadDirectoryDto {
-	return {
-		id: row.id,
-		ownerId: row.ownerId,
-		parentId: row.parentId,
-		parentName: row.parent?.name ?? null,
-		name: row.name,
-		description: row.description,
-		position: row.position,
-		createdAt: row.createdAt,
-		updatedAt: row.updatedAt,
-		childrenCount: row._count.children,
-		leadsCount: row._count.leads,
-	};
+  return {
+    id: row.id,
+    ownerId: row.ownerId,
+    parentId: row.parentId,
+    parentName: row.parent?.name ?? null,
+    name: row.name,
+    description: row.description,
+    position: row.position,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    childrenCount: row._count.children,
+    leadsCount: row._count.leads,
+  };
 }
 
 @injectable()
 export class LeadDirectoryRepository {
-	private readonly prisma: PrismaClient = getPrisma();
+  private readonly prisma: PrismaClient = getPrisma();
 
-	async deleteOwnedAndListLeadIds(input: {
-		ownerId: string;
-		directoryId: string;
-	}): Promise<string[] | null> {
-		return this.prisma.$transaction<string[] | null>(async (tx) => {
-			// Acquire row-level lock for the directory.
-			// Any concurrent FK checks (inserts into LeadDirectoryLead) will block on this row.
-			const locked = await tx.$queryRaw<Array<{ id: string }>>(
-				Prisma.sql`SELECT id FROM "LeadDirectory" WHERE id = ${input.directoryId} AND "ownerId" = ${input.ownerId} FOR UPDATE`
-			);
+  async deleteOwnedAndListLeadIds(input: {
+    ownerId: string;
+    directoryId: string;
+  }): Promise<string[] | null> {
+    return this.prisma.$transaction<string[] | null>(async (tx) => {
+      // Acquire row-level lock for the directory.
+      // Any concurrent FK checks (inserts into LeadDirectoryLead) will block on this row.
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`SELECT id FROM "LeadDirectory" WHERE id = ${input.directoryId} AND "ownerId" = ${input.ownerId} FOR UPDATE`,
+      );
 
-			if (locked.length === 0) return null;
+      if (locked.length === 0) return null;
 
-			const rows = await tx.leadDirectoryLead.findMany({
-				where: {
-					directoryId: input.directoryId,
-					directory: { ownerId: input.ownerId },
-				},
-				select: { leadId: true },
-			});
-			const leadIds = rows.map((r) => r.leadId);
+      const rows = await tx.leadDirectoryLead.findMany({
+        where: {
+          directoryId: input.directoryId,
+          directory: { ownerId: input.ownerId },
+        },
+        select: { leadId: true },
+      });
+      const leadIds = rows.map((r) => r.leadId);
 
-			await tx.leadDirectory.delete({
-				where: { id: input.directoryId },
-			});
+      await tx.leadDirectory.delete({
+        where: { id: input.directoryId },
+      });
 
-			return leadIds;
-		});
-	}
+      return leadIds;
+    });
+  }
 
-	async findOwnedByName(input: {
-		ownerId: string;
-		name: string;
-	}): Promise<{ id: string } | null> {
-		return this.prisma.leadDirectory.findUnique({
-			where: { ownerId_name: { ownerId: input.ownerId, name: input.name } },
-			select: { id: true },
-		});
-	}
+  async findOwnedByName(input: {
+    ownerId: string;
+    name: string;
+  }): Promise<{ id: string } | null> {
+    return this.prisma.leadDirectory.findUnique({
+      where: { ownerId_name: { ownerId: input.ownerId, name: input.name } },
+      select: { id: true },
+    });
+  }
 
-	async findOwnedByNamesInsensitive(input: {
-		ownerId: string;
-		names: string[];
-	}): Promise<Array<{ id: string; name: string }>> {
-		const uniq: string[] = [];
-		const seen = new Set<string>();
+  async findOwnedByNamesInsensitive(input: {
+    ownerId: string;
+    names: string[];
+  }): Promise<Array<{ id: string; name: string }>> {
+    const uniq: string[] = [];
+    const seen = new Set<string>();
 
-		for (const raw of input.names) {
-			const n = raw.trim();
-			if (!n) continue;
-			const key = n.toLowerCase();
-			if (seen.has(key)) continue;
-			seen.add(key);
-			uniq.push(n);
-		}
+    for (const raw of input.names) {
+      const n = raw.trim();
+      if (!n) continue;
+      const key = n.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniq.push(n);
+    }
 
-		if (uniq.length === 0) return [];
+    if (uniq.length === 0) return [];
 
-		// OR over equals+insensitive (Postgres supports it)
-		const or = uniq.map((n) => ({
-			name: { equals: n, mode: Prisma.QueryMode.insensitive },
-		})) satisfies Prisma.LeadDirectoryWhereInput[];
+    // OR over equals+insensitive (Postgres supports it)
+    const or = uniq.map((n) => ({
+      name: { equals: n, mode: Prisma.QueryMode.insensitive },
+    })) satisfies Prisma.LeadDirectoryWhereInput[];
 
-		const rows = await this.prisma.leadDirectory.findMany({
-			where: {
-				ownerId: input.ownerId,
-				OR: or,
-			},
-			select: { id: true, name: true },
-		});
+    const rows = await this.prisma.leadDirectory.findMany({
+      where: {
+        ownerId: input.ownerId,
+        OR: or,
+      },
+      select: { id: true, name: true },
+    });
 
-		return rows;
-	}
+    return rows;
+  }
 
-	async findOwnedById(input: {
-		directoryId: string;
-		ownerId: string;
-	}): Promise<LeadDirectoryDto | null> {
-		const row = await this.prisma.leadDirectory.findFirst({
-			where: { id: input.directoryId, ownerId: input.ownerId },
-			include: {
-				_count: { select: { children: true, leads: true } },
-				parent: { select: { name: true } },
-			},
-		});
-		return row ? toDirectoryDto(row) : null;
-	}
+  async findOwnedById(input: {
+    directoryId: string;
+    ownerId: string;
+  }): Promise<LeadDirectoryDto | null> {
+    const row = await this.prisma.leadDirectory.findFirst({
+      where: { id: input.directoryId, ownerId: input.ownerId },
+      include: {
+        _count: { select: { children: true, leads: true } },
+        parent: { select: { name: true } },
+      },
+    });
+    return row ? toDirectoryDto(row) : null;
+  }
 
-	async findOwnedParentId(input: {
-		directoryId: string;
-		ownerId: string;
-	}): Promise<string | null> {
-		const row = await this.prisma.leadDirectory.findFirst({
-			where: { id: input.directoryId, ownerId: input.ownerId },
-			select: { parentId: true },
-		});
-		return row?.parentId ?? null;
-	}
+  async findOwnedParentId(input: {
+    directoryId: string;
+    ownerId: string;
+  }): Promise<string | null> {
+    const row = await this.prisma.leadDirectory.findFirst({
+      where: { id: input.directoryId, ownerId: input.ownerId },
+      select: { parentId: true },
+    });
+    return row?.parentId ?? null;
+  }
 
-	async listByParent(input: {
-		ownerId: string;
-		parentId: string | null;
-	}): Promise<LeadDirectoryDto[]> {
-		const rows = await this.prisma.leadDirectory.findMany({
-			where: { ownerId: input.ownerId, parentId: input.parentId },
-			orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-			include: {
-				_count: { select: { children: true, leads: true } },
-				parent: { select: { name: true } },
-			},
-		});
-		return rows.map(toDirectoryDto);
-	}
+  async listByParent(input: {
+    ownerId: string;
+    parentId: string | null;
+  }): Promise<LeadDirectoryDto[]> {
+    const rows = await this.prisma.leadDirectory.findMany({
+      where: { ownerId: input.ownerId, parentId: input.parentId },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      include: {
+        _count: { select: { children: true, leads: true } },
+        parent: { select: { name: true } },
+      },
+    });
+    return rows.map(toDirectoryDto);
+  }
 
-	async listAllForOwner(ownerId: string): Promise<LeadDirectoryDto[]> {
-		const rows = await this.prisma.leadDirectory.findMany({
-			where: { ownerId },
-			orderBy: [{ parentId: "asc" }, { position: "asc" }, { createdAt: "asc" }],
-			include: {
-				_count: { select: { children: true, leads: true } },
-				parent: { select: { name: true } },
-			},
-		});
-		return rows.map(toDirectoryDto);
-	}
+  async listAllForOwner(ownerId: string): Promise<LeadDirectoryDto[]> {
+    const rows = await this.prisma.leadDirectory.findMany({
+      where: { ownerId },
+      orderBy: [{ parentId: "asc" }, { position: "asc" }, { createdAt: "asc" }],
+      include: {
+        _count: { select: { children: true, leads: true } },
+        parent: { select: { name: true } },
+      },
+    });
+    return rows.map(toDirectoryDto);
+  }
 
-	async create(input: {
-		ownerId: string;
-		name: string;
-		parentId: string | null;
-		description?: string | null;
-		position?: number;
-	}): Promise<LeadDirectoryDto> {
-		const row = await this.prisma.leadDirectory.create({
-			data: {
-				ownerId: input.ownerId,
-				name: input.name,
-				parentId: input.parentId,
-				description: input.description ?? null,
-				position: input.position ?? 0,
-			},
-			include: {
-				_count: { select: { children: true, leads: true } },
-				parent: { select: { name: true } },
-			},
-		});
-		return toDirectoryDto(row);
-	}
+  async create(input: {
+    ownerId: string;
+    name: string;
+    parentId: string | null;
+    description?: string | null;
+    position?: number;
+  }): Promise<LeadDirectoryDto> {
+    const row = await this.prisma.leadDirectory.create({
+      data: {
+        ownerId: input.ownerId,
+        name: input.name,
+        parentId: input.parentId,
+        description: input.description ?? null,
+        position: input.position ?? 0,
+      },
+      include: {
+        _count: { select: { children: true, leads: true } },
+        parent: { select: { name: true } },
+      },
+    });
+    return toDirectoryDto(row);
+  }
 
-	async updateOwned(input: {
-		ownerId: string;
-		directoryId: string;
-		data: {
-			name?: string;
-			description?: string | null;
-			position?: number;
-			parentId?: string | null;
-		};
-	}): Promise<LeadDirectoryDto | null> {
-		return this.prisma.$transaction(async (tx) => {
-			const res = await tx.leadDirectory.updateMany({
-				where: { id: input.directoryId, ownerId: input.ownerId },
-				data: input.data,
-			});
+  async updateOwned(input: {
+    ownerId: string;
+    directoryId: string;
+    data: {
+      name?: string;
+      description?: string | null;
+      position?: number;
+      parentId?: string | null;
+    };
+  }): Promise<LeadDirectoryDto | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const res = await tx.leadDirectory.updateMany({
+        where: { id: input.directoryId, ownerId: input.ownerId },
+        data: input.data,
+      });
 
-			if (res.count === 0) return null;
+      if (res.count === 0) return null;
 
-			const row = await tx.leadDirectory.findFirst({
-				where: { id: input.directoryId, ownerId: input.ownerId },
-				include: {
-					_count: { select: { children: true, leads: true } },
-					parent: { select: { name: true } },
-				},
-			});
+      const row = await tx.leadDirectory.findFirst({
+        where: { id: input.directoryId, ownerId: input.ownerId },
+        include: {
+          _count: { select: { children: true, leads: true } },
+          parent: { select: { name: true } },
+        },
+      });
 
-			return row ? toDirectoryDto(row) : null;
-		});
-	}
+      return row ? toDirectoryDto(row) : null;
+    });
+  }
 
-	async deleteOwned(input: {
-		ownerId: string;
-		directoryId: string;
-	}): Promise<boolean> {
-		const res = await this.prisma.leadDirectory.deleteMany({
-			where: { id: input.directoryId, ownerId: input.ownerId },
-		});
-		return res.count > 0;
-	}
+  async deleteOwned(input: {
+    ownerId: string;
+    directoryId: string;
+  }): Promise<boolean> {
+    const res = await this.prisma.leadDirectory.deleteMany({
+      where: { id: input.directoryId, ownerId: input.ownerId },
+    });
+    return res.count > 0;
+  }
 
-	async getLeadStatus(input: {
-		ownerId: string;
-		leadId: string;
-	}): Promise<{ exists: boolean; isVerified: boolean }> {
-		const row = await this.prisma.lead.findFirst({
-			where: {
-				id: input.leadId,
-				AND: [buildLeadVisibilityWhere(input.ownerId)],
-			},
-			select: { id: true, isVerified: true },
-		});
-		if (!row) return { exists: false, isVerified: false };
-		return { exists: true, isVerified: row.isVerified };
-	}
+  async getLeadStatus(input: {
+    ownerId: string;
+    leadId: string;
+  }): Promise<{ exists: boolean; isVerified: boolean }> {
+    const row = await this.prisma.lead.findFirst({
+      where: {
+        id: input.leadId,
+        AND: [buildLeadVisibilityWhere(input.ownerId)],
+      },
+      select: { id: true, isVerified: true },
+    });
+    if (!row) return { exists: false, isVerified: false };
+    return { exists: true, isVerified: row.isVerified };
+  }
 
-	async addLeadToDirectory(input: {
-		directoryId: string;
-		leadId: string;
-	}): Promise<void> {
-		await this.prisma.leadDirectoryLead.upsert({
-			where: {
-				directoryId_leadId: {
-					directoryId: input.directoryId,
-					leadId: input.leadId,
-				},
-			},
-			create: {
-				directoryId: input.directoryId,
-				leadId: input.leadId,
-			},
-			update: {},
-		});
-	}
+  async addLeadToDirectory(input: {
+    directoryId: string;
+    leadId: string;
+  }): Promise<void> {
+    await this.prisma.leadDirectoryLead.upsert({
+      where: {
+        directoryId_leadId: {
+          directoryId: input.directoryId,
+          leadId: input.leadId,
+        },
+      },
+      create: {
+        directoryId: input.directoryId,
+        leadId: input.leadId,
+      },
+      update: {},
+    });
+  }
 
-	async removeLeadFromDirectory(input: {
-		ownerId: string;
-		directoryId: string;
-		leadId: string;
-	}): Promise<void> {
-		await this.prisma.leadDirectoryLead.deleteMany({
-			where: {
-				directoryId: input.directoryId,
-				leadId: input.leadId,
-				directory: { ownerId: input.ownerId },
-			},
-		});
-	}
+  async removeLeadFromDirectory(input: {
+    ownerId: string;
+    directoryId: string;
+    leadId: string;
+  }): Promise<void> {
+    await this.prisma.leadDirectoryLead.deleteMany({
+      where: {
+        directoryId: input.directoryId,
+        leadId: input.leadId,
+        directory: { ownerId: input.ownerId },
+      },
+    });
+  }
 
-	async listDirectoryLeads(input: {
-		ownerId: string;
-		directoryId: string;
-		limit: number;
-		offset: number;
-	}): Promise<{ total: number; items: Prisma.LeadGetPayload<object>[] }> {
-		const where = {
-			directoryId: input.directoryId,
-			directory: { ownerId: input.ownerId },
-			lead: { isVerified: true },
-		} satisfies Prisma.LeadDirectoryLeadWhereInput;
+  async listDirectoryLeads(input: {
+    ownerId: string;
+    directoryId: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ total: number; items: Prisma.LeadGetPayload<object>[] }> {
+    const where = {
+      directoryId: input.directoryId,
+      directory: { ownerId: input.ownerId },
+      lead: { isVerified: true },
+    } satisfies Prisma.LeadDirectoryLeadWhereInput;
 
-		const [total, rows] = await this.prisma.$transaction([
-			this.prisma.leadDirectoryLead.count({ where }),
-			this.prisma.leadDirectoryLead.findMany({
-				where,
-				include: { lead: true },
-				orderBy: { createdAt: "desc" },
-				skip: input.offset,
-				take: input.limit,
-			}),
-		]);
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.leadDirectoryLead.count({ where }),
+      this.prisma.leadDirectoryLead.findMany({
+        where,
+        include: { lead: true },
+        orderBy: { createdAt: "desc" },
+        skip: input.offset,
+        take: input.limit,
+      }),
+    ]);
 
-		return { total, items: rows.map((r) => r.lead) };
-	}
+    return { total, items: rows.map((r) => r.lead) };
+  }
 
-	async listLeadIdsInDirectory(input: {
-		ownerId: string;
-		directoryId: string;
-	}): Promise<string[]> {
-		const rows = await this.prisma.leadDirectoryLead.findMany({
-			where: {
-				directoryId: input.directoryId,
-				directory: { ownerId: input.ownerId },
-			},
-			select: { leadId: true },
-		});
-		return rows.map((r) => r.leadId);
-	}
+  async listLeadIdsInDirectory(input: {
+    ownerId: string;
+    directoryId: string;
+  }): Promise<string[]> {
+    const rows = await this.prisma.leadDirectoryLead.findMany({
+      where: {
+        directoryId: input.directoryId,
+        directory: { ownerId: input.ownerId },
+      },
+      select: { leadId: true },
+    });
+    return rows.map((r) => r.leadId);
+  }
 
-	async countUnassignedLeads(input: { ownerId: string }): Promise<number> {
-		// Unassigned = a visible lead not linked to any directory owned by this user.
-		return this.prisma.lead.count({
-			where: {
-				AND: [
-					buildLeadVisibilityWhere(input.ownerId),
-					{ isVerified: true },
-					{
-						leadDirectoryLeads: {
-							none: { directory: { ownerId: input.ownerId } },
-						},
-					},
-				],
-			} satisfies Prisma.LeadWhereInput,
-		});
-	}
+  async countUnassignedLeads(input: { ownerId: string }): Promise<number> {
+    // Unassigned = a visible lead not linked to any directory owned by this user.
+    return this.prisma.lead.count({
+      where: {
+        AND: [
+          buildLeadVisibilityWhere(input.ownerId),
+          { isVerified: true },
+          {
+            leadDirectoryLeads: {
+              none: { directory: { ownerId: input.ownerId } },
+            },
+          },
+        ],
+      } satisfies Prisma.LeadWhereInput,
+    });
+  }
 
-	async listUnassignedLeads(input: {
-		ownerId: string;
-		limit: number;
-		offset: number;
-	}): Promise<{ total: number; items: Prisma.LeadGetPayload<object>[] }> {
-		const where = {
-			AND: [
-				buildLeadVisibilityWhere(input.ownerId),
-				{ isVerified: true },
-				{
-					leadDirectoryLeads: {
-						none: { directory: { ownerId: input.ownerId } },
-					},
-				},
-			],
-		} satisfies Prisma.LeadWhereInput;
+  async listUnassignedLeads(input: {
+    ownerId: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ total: number; items: Prisma.LeadGetPayload<object>[] }> {
+    const where = {
+      AND: [
+        buildLeadVisibilityWhere(input.ownerId),
+        { isVerified: true },
+        {
+          leadDirectoryLeads: {
+            none: { directory: { ownerId: input.ownerId } },
+          },
+        },
+      ],
+    } satisfies Prisma.LeadWhereInput;
 
-		const [total, items] = await this.prisma.$transaction([
-			this.prisma.lead.count({ where }),
-			this.prisma.lead.findMany({
-				where,
-				orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-				skip: input.offset,
-				take: input.limit,
-			}),
-		]);
+    const [total, items] = await this.prisma.$transaction([
+      this.prisma.lead.count({ where }),
+      this.prisma.lead.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: input.offset,
+        take: input.limit,
+      }),
+    ]);
 
-		return { total, items };
-	}
+    return { total, items };
+  }
 
-	async listLeadDirectories(input: {
-		ownerId: string;
-		leadId: string;
-	}): Promise<LeadDirectoryDto[]> {
-		const rows = await this.prisma.leadDirectory.findMany({
-			where: {
-				ownerId: input.ownerId,
-				leads: { some: { leadId: input.leadId } },
-			},
-			orderBy: [{ parentId: "asc" }, { position: "asc" }, { createdAt: "asc" }],
-			include: {
-				_count: { select: { children: true, leads: true } },
-				parent: { select: { name: true } },
-			},
-		});
+  async listLeadDirectories(input: {
+    ownerId: string;
+    leadId: string;
+  }): Promise<LeadDirectoryDto[]> {
+    const rows = await this.prisma.leadDirectory.findMany({
+      where: {
+        ownerId: input.ownerId,
+        leads: { some: { leadId: input.leadId } },
+      },
+      orderBy: [{ parentId: "asc" }, { position: "asc" }, { createdAt: "asc" }],
+      include: {
+        _count: { select: { children: true, leads: true } },
+        parent: { select: { name: true } },
+      },
+    });
 
-		return rows.map(toDirectoryDto);
-	}
+    return rows.map(toDirectoryDto);
+  }
 }

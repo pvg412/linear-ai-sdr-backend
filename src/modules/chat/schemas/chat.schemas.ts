@@ -4,40 +4,39 @@ import { LeadSearchKind } from "@prisma/client";
 import { ChatParserIdSchema } from "../parsers/chat.parsers";
 
 export const CursorPaginationSchema = z.object({
-	limit: z.coerce.number().int().min(1).max(200).default(50),
-	cursor: z.cuid().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  cursor: z.cuid().optional(),
 });
 
 export const ChatThreadCreateSchema = z.object({
-	title: z.string().trim().min(1).max(120).optional(),
+  title: z.string().trim().min(1).max(120).optional(),
 
-	defaultParser: ChatParserIdSchema.nullable().optional(),
-	defaultKind: z.enum(LeadSearchKind).nullable().optional(),
+  defaultParser: ChatParserIdSchema.nullable().optional(),
+  defaultKind: z.enum(LeadSearchKind).nullable().optional(),
 });
 
 export const ChatThreadPatchSchema = z.object({
-	title: z.string().trim().min(1).max(120).nullable().optional(),
+  title: z.string().trim().min(1).max(120).nullable().optional(),
 
-	defaultParser: ChatParserIdSchema.nullable().optional(),
-	defaultKind: z.enum(LeadSearchKind).nullable().optional(),
+  defaultParser: ChatParserIdSchema.nullable().optional(),
+  defaultKind: z.enum(LeadSearchKind).nullable().optional(),
 });
 
 export const ChatSendMessageSchema = z.object({
-	text: z.string().trim().min(1).max(4000),
+  text: z.string().trim().min(1).max(4000),
 });
 
-const QueryWithOptionalLimitSchema = z
-	.looseObject({
-		limit: z.coerce.number().int().min(1).max(50_000).optional(),
-	})
+const QueryWithOptionalLimitSchema = z.looseObject({
+  limit: z.coerce.number().int().min(1).max(50_000).optional(),
+});
 
 export const ChatApplyJsonSchema = z.object({
-	query: QueryWithOptionalLimitSchema,
+  query: QueryWithOptionalLimitSchema,
 
-	limit: z.coerce.number().int().min(1).max(50_000).optional(),
+  limit: z.coerce.number().int().min(1).max(50_000).optional(),
 
-	parser: ChatParserIdSchema.nullable().optional(),
-	kind: z.enum(LeadSearchKind).nullable().optional(),
+  parser: ChatParserIdSchema.nullable().optional(),
+  kind: z.enum(LeadSearchKind).nullable().optional(),
 
-	parsedMessageId: z.cuid().optional(),
+  parsedMessageId: z.cuid().optional(),
 });

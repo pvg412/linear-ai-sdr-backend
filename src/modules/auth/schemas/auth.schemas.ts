@@ -20,4 +20,3 @@ export const createSaleManagerBodySchema = z.object({
 });
 
 export type CreateSaleManagerBody = z.infer<typeof createSaleManagerBodySchema>;
-

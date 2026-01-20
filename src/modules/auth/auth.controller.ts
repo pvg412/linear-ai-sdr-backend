@@ -31,7 +31,10 @@ export function registerAuthRoutes(app: FastifyInstance, envArg?: Env) {
       const body = devRegisterBodySchema.parse(request.body);
 
       try {
-        const result = await service.devRegisterAdmin(body.email, body.password);
+        const result = await service.devRegisterAdmin(
+          body.email,
+          body.password,
+        );
         return reply.code(201).send(result);
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
@@ -53,11 +56,13 @@ export function registerAuthRoutes(app: FastifyInstance, envArg?: Env) {
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       // Best-effort Prisma unique constraint mapping without relying on Prisma error types here.
-      if (/unique constraint/i.test(message) || /unique.*failed/i.test(message)) {
+      if (
+        /unique constraint/i.test(message) ||
+        /unique.*failed/i.test(message)
+      ) {
         return reply.code(409).send({ message: "Email already exists" });
       }
       return reply.code(400).send({ message });
     }
   });
 }
-

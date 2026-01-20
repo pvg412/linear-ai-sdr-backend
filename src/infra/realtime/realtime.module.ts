@@ -5,7 +5,7 @@ import { RealtimeHub } from "./realtimeHub";
 
 export function registerRealtimeModule(container: Container) {
   container
-	.bind<RealtimeHub>(REALTIME_TYPES.RealtimeHub)
-	.to(RealtimeHub)
-	.inSingletonScope();
+    .bind<RealtimeHub>(REALTIME_TYPES.RealtimeHub)
+    .to(RealtimeHub)
+    .inSingletonScope();
 }

@@ -14,56 +14,56 @@ import { registerLeadDirectoryRoutes } from "./modules/lead-directory/lead-direc
 import { registerLeadSearchRoutes } from "./modules/lead-search/lead-search.controller";
 
 export async function buildServer() {
-	const env = loadEnv();
+  const env = loadEnv();
 
-	const app = Fastify({
-		logger: true,
-	});
+  const app = Fastify({
+    logger: true,
+  });
 
-	await app.register(websocketPlugin);
-	await app.register(cors, {
-		origin: env.NODE_ENV === "production" ? [env.FRONTEND_URL] : true,
-		methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-		allowedHeaders: ["Authorization", "Content-Type"],
-		// credentials: true,
-		maxAge: 86400,
-	});
+  await app.register(websocketPlugin);
+  await app.register(cors, {
+    origin: env.NODE_ENV === "production" ? [env.FRONTEND_URL] : true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Authorization", "Content-Type"],
+    // credentials: true,
+    maxAge: 86400,
+  });
 
-	// Swagger should not be exposed in production
-	if (env.NODE_ENV !== "production") {
-		await app.register(swagger, {
-			openapi: {
-				info: { title: "AI SDR API", version: "1.0.0" },
-				components: {
-					securitySchemes: {
-						bearerAuth: {
-							type: "http",
-							scheme: "bearer",
-							bearerFormat: "JWT",
-						},
-					},
-				},
-			},
-		});
-		await app.register(swaggerUi, {
-			routePrefix: "/docs",
-		});
-	}
+  // Swagger should not be exposed in production
+  if (env.NODE_ENV !== "production") {
+    await app.register(swagger, {
+      openapi: {
+        info: { title: "AI SDR API", version: "1.0.0" },
+        components: {
+          securitySchemes: {
+            bearerAuth: {
+              type: "http",
+              scheme: "bearer",
+              bearerFormat: "JWT",
+            },
+          },
+        },
+      },
+    });
+    await app.register(swaggerUi, {
+      routePrefix: "/docs",
+    });
+  }
 
-	// Auth routes first (login stays public)
-	registerAuthRoutes(app, env);
+  // Auth routes first (login stays public)
+  registerAuthRoutes(app, env);
 
-	// Ensure at least one admin exists (via env in prod, optional in dev)
-	const authService = new AuthService();
-	await authService.ensureInitialAdmin(env, app.log);
+  // Ensure at least one admin exists (via env in prod, optional in dev)
+  const authService = new AuthService();
+  await authService.ensureInitialAdmin(env, app.log);
 
-	// Protect everything else
-	app.addHook("onRequest", createAuthGuard(env));
+  // Protect everything else
+  app.addHook("onRequest", createAuthGuard(env));
 
-	registerChatRoutes(app);
-	registerLeadRoutes(app);
-	registerLeadDirectoryRoutes(app);
-	registerLeadSearchRoutes(app);
+  registerChatRoutes(app);
+  registerLeadRoutes(app);
+  registerLeadDirectoryRoutes(app);
+  registerLeadSearchRoutes(app);
 
-	return { app, env };
+  return { app, env };
 }

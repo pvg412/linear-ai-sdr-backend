@@ -22,4 +22,3 @@ export function normalizeSearchLeadsEmailStatus(status: unknown): EmailStatus {
       return "UNKNOWN";
   }
 }
-

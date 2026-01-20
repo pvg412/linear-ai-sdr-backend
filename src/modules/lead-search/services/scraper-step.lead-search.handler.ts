@@ -1,19 +1,24 @@
 import { inject, injectable } from "inversify";
 import { DelayedError, type Job } from "bullmq";
-import { LeadProvider, LeadSearchKind, LeadSearchStatus, Prisma } from "@prisma/client";
+import {
+  LeadProvider,
+  LeadSearchKind,
+  LeadSearchStatus,
+  Prisma,
+} from "@prisma/client";
 
 import {
-	ensureLogger,
-	msSince,
-	nowNs,
-	type LoggerLike,
+  ensureLogger,
+  msSince,
+  nowNs,
+  type LoggerLike,
 } from "@/infra/observability";
 import { SCRAPER_TYPES } from "@/capabilities/scraper/scraper.types";
 import { ScraperOrchestrator } from "@/capabilities/scraper/scraper.orchestrator";
 import type {
-	ApifyScraperQuery,
-	ScraperAdapter,
-	ScraperStatusResult,
+  ApifyScraperQuery,
+  ScraperAdapter,
+  ScraperStatusResult,
 } from "@/capabilities/scraper/scraper.dto";
 
 import { LEAD_SEARCH_TYPES } from "@/modules/lead-search/lead-search.types";
@@ -24,8 +29,8 @@ import { LeadSearchNotifierService } from "@/modules/lead-search/services/lead-s
 import { resolveScrapeQuery } from "@/modules/lead-search/services/scraper-query.resolver";
 
 import type {
-	LeadSearchJobData,
-	LeadSearchJobName,
+  LeadSearchJobData,
+  LeadSearchJobName,
 } from "@/infra/queue/lead-search/lead-search.queue";
 
 // Protects from crash window start() -> persist externalRunId
@@ -33,888 +38,901 @@ const EXTERNAL_RUN_ID_GRACE_MS = 2 * 60 * 1000;
 const EXTERNAL_RUN_ID_RETRY_DELAY_MS = 15 * 1000;
 
 function isApifyScrapeQuery(q: unknown): q is ApifyScraperQuery {
-	return (
-		typeof q === "object" &&
-		q !== null &&
-		typeof (q as Record<string, unknown>)["limit"] === "number" &&
-		!("apolloUrl" in (q as Record<string, unknown>))
-	);
+  return (
+    typeof q === "object" &&
+    q !== null &&
+    typeof (q as Record<string, unknown>)["limit"] === "number" &&
+    !("apolloUrl" in (q as Record<string, unknown>))
+  );
 }
 
 function isRateLimitedStatus(raw: unknown): boolean {
-	if (!raw || typeof raw !== "object") return false;
-	const r = raw as Record<string, unknown>;
-	const hint = typeof r["_hint"] === "string" ? r["_hint"].toLowerCase() : "";
-	if (hint.includes("rate_limited")) return true;
+  if (!raw || typeof raw !== "object") return false;
+  const r = raw as Record<string, unknown>;
+  const hint = typeof r["_hint"] === "string" ? r["_hint"].toLowerCase() : "";
+  if (hint.includes("rate_limited")) return true;
 
-	const statusMessage =
-		typeof r["statusMessage"] === "string" ? r["statusMessage"].toLowerCase() : "";
-	return statusMessage.includes("rate limited") || statusMessage.includes("rate limit");
+  const statusMessage =
+    typeof r["statusMessage"] === "string"
+      ? r["statusMessage"].toLowerCase()
+      : "";
+  return (
+    statusMessage.includes("rate limited") ||
+    statusMessage.includes("rate limit")
+  );
 }
 
-function canComputeApifyResume(adapter: ScraperAdapter): adapter is ScraperAdapter & {
-	getRateLimitResumePlan: (input: {
-		providerRunId: string;
-		query: ApifyScraperQuery;
-		status?: ScraperStatusResult;
-		now?: Date;
-	}) => Promise<{
-		waitMs: number;
-		datasetItemCount: number;
-		lastScrapedPage: number;
-		nextStartPage: number;
-		remainingTakePages: number;
-	}>;
+function canComputeApifyResume(
+  adapter: ScraperAdapter,
+): adapter is ScraperAdapter & {
+  getRateLimitResumePlan: (input: {
+    providerRunId: string;
+    query: ApifyScraperQuery;
+    status?: ScraperStatusResult;
+    now?: Date;
+  }) => Promise<{
+    waitMs: number;
+    datasetItemCount: number;
+    lastScrapedPage: number;
+    nextStartPage: number;
+    remainingTakePages: number;
+  }>;
 } {
-	return (
-		typeof (adapter as unknown as Record<string, unknown>)["getRateLimitResumePlan"] ===
-			"function"
-	);
+  return (
+    typeof (adapter as unknown as Record<string, unknown>)[
+      "getRateLimitResumePlan"
+    ] === "function"
+  );
 }
 
 @injectable()
 export class ScraperStepLeadSearchHandler {
-	constructor(
-		@inject(LEAD_SEARCH_TYPES.LeadSearchRepository)
-		private readonly leadSearchRepository: LeadSearchRepository,
-
-		@inject(LEAD_SEARCH_TYPES.LeadSearchRunRepository)
-		private readonly leadSearchRunRepository: LeadSearchRunRepository,
-
-		@inject(SCRAPER_TYPES.ScraperOrchestrator)
-		private readonly scraperOrchestrator: ScraperOrchestrator,
-
-		@inject(LEAD_SEARCH_TYPES.LeadSearchLeadPersisterService)
-		private readonly persister: LeadSearchLeadPersisterService,
-
-		@inject(LEAD_SEARCH_TYPES.LeadSearchNotifierService)
-		private readonly notifier: LeadSearchNotifierService
-	) {}
-
-	async process(
-		job: Job<LeadSearchJobData, void, LeadSearchJobName>,
-		token: string,
-		log?: LoggerLike
-	): Promise<void> {
-		const lg = ensureLogger(log);
-		const t0 = nowNs();
-
-		const leadSearchId = job.data.leadSearchId;
-
-		const jobAttemptsMade = job.attemptsMade ?? 0;
-		const jobMaxAttempts =
-			typeof job.opts.attempts === "number" ? job.opts.attempts : null;
-		const isLastJobAttempt =
-			jobMaxAttempts !== null ? jobAttemptsMade + 1 >= jobMaxAttempts : false;
-		const userRetryableMessage =
-			"External service temporarily unavailable. We'll retry automatically.";
-		const userFinalMessage =
-			"Failed to search: external service not responding. Please try again later.";
-
-		let leadSearch = await this.leadSearchRepository.getById(leadSearchId);
-		if (!leadSearch) throw new Error("LeadSearch not found");
-
-		if (leadSearch.kind !== LeadSearchKind.SCRAPER) {
-			throw new Error(
-				`ScraperStepLeadSearchHandler called for kind=${leadSearch.kind}`
-			);
-		}
-
-		const provider = leadSearch.provider;
-		const kind = leadSearch.kind;
-
-		const resolvedQuery = await resolveScrapeQuery({
-			leadSearchId,
-			leadSearchLimit: leadSearch.limit,
-			storedQueryJson: leadSearch.query,
-			provider,
-			leadSearchRepository: this.leadSearchRepository,
-		});
-
-		if (!resolvedQuery.ok) {
-			const msg = `Invalid LeadSearch.query schema for SCRAPER: ${JSON.stringify(
-				resolvedQuery.issues
-			)}`;
-			await this.leadSearchRepository.markFailed(leadSearchId, msg);
-
-			await this.notifier.postEvent({
-				threadId: leadSearch.threadId,
-				leadSearchId,
-				text: "Lead search failed: invalid JSON schema.",
-				payload: {
-					event: "leadSearch.failed",
-					leadSearchId,
-					status: LeadSearchStatus.FAILED,
-					...this.notifier.publicParserMeta(provider),
-					kind,
-					errorMessage: "Invalid JSON schema.",
-					errorDetails: resolvedQuery.issues,
-					durationMs: msSince(t0),
-				},
-			});
-
-			throw new Error(msg);
-		}
-
-		const scrapeQuery = resolvedQuery.scrapeQuery;
-
-		await this.leadSearchRepository.markRunning(leadSearchId);
-
-		const resolvedAdapter = this.scraperOrchestrator.resolveAdapter(provider);
-		if (!resolvedAdapter.ok) {
-			const msg = `SCRAPER provider ${provider} is not available: ${resolvedAdapter.message}`;
-			await this.leadSearchRepository.markFailed(leadSearchId, msg);
-			throw new Error(msg);
-		}
-
-		const adapter = resolvedAdapter.adapter;
-
-		const state = job.data.scraper ?? {
-			step: "INIT" as const,
-			providerIndex: 0,
-			providersOrder: [provider],
-			pollAttempt: 0,
-			runId: null,
-			providerRunId: null,
-			lastStatus: null,
-			initAtMs: Date.now(),
-			apifyResume: null,
-		};
-
-		try {
-			// -------------------------
-			// INIT
-			// -------------------------
-			if (state.step === "INIT") {
-				// If Redis state already has runId+providerRunId => reuse, never start again
-				if (state.runId && state.providerRunId) {
-					lg.debug(
-						{
-							leadSearchId,
-							provider,
-							runId: state.runId,
-							providerRunId: state.providerRunId,
-						},
-						"SCRAPER INIT: reuse Redis state (runId+providerRunId already in job.data)"
-					);
-
-					await this.leadSearchRunRepository.ensureExternalRunId(
-						state.runId,
-						state.providerRunId
-					);
-
-					const nextData: LeadSearchJobData = {
-						...job.data,
-						scraper: { ...state, step: "POLL", lastStatus: "RUNNING" },
-					};
-
-					await this.delayJob(job, token, adapter.pollIntervalMs, nextData, lg);
-					return;
-				}
-
-				// If DB has RUNNING with externalRunId => reuse
-				const existing =
-					await this.leadSearchRunRepository.findLatestRunningRun(
-						leadSearchId,
-						provider
-					);
-
-				if (existing?.externalRunId) {
-					lg.debug(
-						{
-							leadSearchId,
-							provider,
-							runId: existing.id,
-							providerRunId: existing.externalRunId,
-						},
-						"SCRAPER INIT: reuse DB RUNNING LeadSearchRun.externalRunId"
-					);
-
-					const nextData: LeadSearchJobData = {
-						...job.data,
-						scraper: {
-							...state,
-							step: "POLL",
-							runId: existing.id,
-							providerRunId: existing.externalRunId,
-							pollAttempt: state.pollAttempt ?? 0,
-							lastStatus: "RUNNING",
-						},
-					};
-					await this.delayJob(job, token, adapter.pollIntervalMs, nextData, lg);
-					return;
-				}
-
-				// RUNNING but missing externalRunId -> wait a bit, then fail that run
-				if (existing && !existing.externalRunId) {
-					const ageMs = Date.now() - existing.updatedAt.getTime();
-
-					if (ageMs <= EXTERNAL_RUN_ID_GRACE_MS) {
-						lg.debug(
-							{
-								leadSearchId,
-								provider,
-								runId: existing.id,
-								ageMs,
-								graceMs: EXTERNAL_RUN_ID_GRACE_MS,
-							},
-							"SCRAPER INIT: waiting for externalRunId (grace period)"
-						);
-
-						const nextData: LeadSearchJobData = {
-							...job.data,
-							scraper: {
-								...state,
-								step: "INIT",
-								runId: existing.id,
-								providerRunId: null,
-								lastStatus: "STARTING",
-								initAtMs: state.initAtMs ?? Date.now(),
-							},
-						};
-						await this.delayJob(
-							job,
-							token,
-							EXTERNAL_RUN_ID_RETRY_DELAY_MS,
-							nextData,
-							lg
-						);
-						return;
-					}
-
-					lg.warn(
-						{
-							leadSearchId,
-							provider,
-							runId: existing.id,
-							ageMs,
-						},
-						"SCRAPER INIT: stale RUNNING LeadSearchRun without externalRunId; marking failed and starting new attempt"
-					);
-
-					await this.leadSearchRunRepository.markRunFailed(
-						existing.id,
-						"RUNNING LeadSearchRun has no externalRunId after grace period; assuming broken start"
-					);
-				}
-
-				// Create new attempt
-				const attempt = await this.leadSearchRunRepository.getNextAttempt(
-					leadSearchId,
-					provider
-				);
-
-				const run = await this.leadSearchRunRepository.createRun({
-					leadSearchId,
-					provider,
-					attempt,
-					triggeredById: job.data.triggeredById ?? null,
-					requestPayload: {
-						limit: leadSearch.limit,
-						query: scrapeQuery,
-					} as Prisma.InputJsonValue,
-				});
-
-				lg.info(
-					{
-						leadSearchId,
-						provider,
-						attempt,
-						pollIntervalMs: adapter.pollIntervalMs,
-						maxPollAttempts: adapter.maxPollAttempts,
-					},
-					"SCRAPER INIT: starting provider run"
-				);
-
-				let started: Awaited<ReturnType<typeof adapter.start>>;
-				try {
-					// If we have an Apify resume plan (rate limit), apply it for the next run.
-					const effectiveQuery =
-						provider === LeadProvider.APIFY &&
-						state.apifyResume &&
-						isApifyScrapeQuery(scrapeQuery)
-							? ({
-									...scrapeQuery,
-									startPage: state.apifyResume.startPage,
-									takePages: state.apifyResume.takePages,
-							  } satisfies ApifyScraperQuery)
-							: scrapeQuery;
-
-					started = await adapter.start(effectiveQuery);
-				} catch (err) {
-					const internalMsg = err instanceof Error ? err.message : String(err);
-
-					// IMPORTANT: mark run failed immediately to avoid "RUNNING without externalRunId" grace loops
-					await this.leadSearchRunRepository
-						.markRunFailed(run.id, `SCRAPER start failed: ${internalMsg}`)
-						.catch(() => {});
-
-					// If this is the last queue attempt, finish LeadSearch and notify user
-					if (isLastJobAttempt) {
-						await this.leadSearchRepository.markFailed(
-							leadSearchId,
-							userFinalMessage
-						);
-
-						// re-read to ensure threadId is not stale
-						leadSearch =
-							(await this.leadSearchRepository.getById(leadSearchId)) ??
-							leadSearch;
-
-						await this.notifier.postEvent({
-							threadId: leadSearch.threadId,
-							leadSearchId,
-							text: userFinalMessage,
-							payload: {
-								event: "leadSearch.failed",
-								leadSearchId,
-								status: LeadSearchStatus.FAILED,
-								...this.notifier.publicParserMeta(provider),
-								kind,
-								errorMessage: userFinalMessage,
-								durationMs: msSince(t0),
-								retries: {
-									attemptsMade: jobAttemptsMade + 1,
-									maxAttempts: jobMaxAttempts,
-								},
-							},
-						});
-					} else {
-						// Optional: a single informative message (no provider mention) on retryable failures
-						await this.notifier.postEvent({
-							threadId: leadSearch.threadId,
-							leadSearchId,
-							text: userRetryableMessage,
-							payload: {
-								event: "leadSearch.retrying",
-								leadSearchId,
-								status: LeadSearchStatus.RUNNING,
-								...this.notifier.publicParserMeta(provider),
-								kind,
-								message: userRetryableMessage,
-								retries: {
-									attemptsMade: jobAttemptsMade + 1,
-									maxAttempts: jobMaxAttempts,
-								},
-							},
-						});
-					}
-
-					throw err;
-				}
-
-				// Persist runId/providerRunId into Redis job data FIRST
-				const nextData: LeadSearchJobData = {
-					...job.data,
-					scraper: {
-						...state,
-						step: "POLL",
-						runId: run.id,
-						providerRunId: started.providerRunId,
-						pollAttempt: 0,
-						lastStatus: "RUNNING",
-						initAtMs: state.initAtMs ?? Date.now(),
-					},
-				};
-
-				await job.updateData(nextData);
-
-				// Then persist into Postgres
-				await this.leadSearchRunRepository.ensureExternalRunId(
-					run.id,
-					started.providerRunId
-				);
-
-				// Delay next poll tick
-				await this.delayAfterUpdate(job, token, adapter.pollIntervalMs, lg);
-				return;
-			}
-
-			// -------------------------
-			// POLL
-			// -------------------------
-			if (state.step === "POLL") {
-				let runId = state.runId ?? null;
-				let providerRunId = state.providerRunId ?? null;
-
-				if (!providerRunId) {
-					const existing =
-						await this.leadSearchRunRepository.findLatestRunningRun(
-							leadSearchId,
-							provider
-						);
-					if (existing?.externalRunId) {
-						runId = existing.id;
-						providerRunId = existing.externalRunId;
-					}
-				}
-
-				if (!runId || !providerRunId) {
-					lg.warn(
-						{ leadSearchId, provider, runId, providerRunId, state },
-						"SCRAPER POLL: missing runId/providerRunId; resetting to INIT"
-					);
-
-					const nextData: LeadSearchJobData = {
-						...job.data,
-						scraper: {
-							...state,
-							step: "INIT",
-							runId: null,
-							providerRunId: null,
-							pollAttempt: 0,
-							lastStatus: null,
-							initAtMs: state.initAtMs ?? Date.now(),
-						},
-					};
-
-					return this.delayJob(job, token, 1_000, nextData, lg);
-				}
-
-				await this.leadSearchRunRepository.ensureExternalRunId(
-					runId,
-					providerRunId
-				);
-
-				const statusRes = await adapter.checkStatus(providerRunId);
-
-				lg.info(
-					{
-						leadSearchId,
-						provider,
-						runId,
-						providerRunId,
-						pollAttempt: state.pollAttempt,
-						status: statusRes.status,
-					},
-					"SCRAPER POLL"
-				);
-
-				if (statusRes.status === "RUNNING") {
-					const nextAttempt = (state.pollAttempt ?? 0) + 1;
-
-					if (nextAttempt >= adapter.maxPollAttempts) {
-						const internalMsg = `SCRAPER polling timed out after ${adapter.maxPollAttempts} attempts (provider=${provider}, run=${providerRunId})`;
-						await this.leadSearchRunRepository.markRunFailed(
-							runId,
-							internalMsg
-						);
-						await this.leadSearchRepository.markFailed(
-							leadSearchId,
-							userFinalMessage
-						);
-
-						await this.notifier.postEvent({
-							threadId: leadSearch.threadId,
-							leadSearchId,
-							text: userFinalMessage,
-							payload: {
-								event: "leadSearch.failed",
-								leadSearchId,
-								status: LeadSearchStatus.FAILED,
-								...this.notifier.publicParserMeta(provider),
-								kind,
-								errorMessage: userFinalMessage,
-								durationMs: msSince(t0),
-							},
-						});
-
-						throw new Error(internalMsg);
-					}
-
-					const nextData: LeadSearchJobData = {
-						...job.data,
-						scraper: {
-							...state,
-							step: "POLL",
-							runId,
-							providerRunId,
-							pollAttempt: nextAttempt,
-							lastStatus: "RUNNING",
-						},
-					};
-					await this.delayJob(job, token, adapter.pollIntervalMs, nextData, lg);
-					return;
-				}
-
-				if (statusRes.status === "FAILED") {
-					// Special-case: Apify hourly rate limits. Resume on next hour boundary.
-					if (
-						provider === LeadProvider.APIFY &&
-						isRateLimitedStatus(statusRes.raw) &&
-						canComputeApifyResume(adapter) &&
-						isApifyScrapeQuery(scrapeQuery)
-					) {
-						const effectiveQuery: ApifyScraperQuery =
-							state.apifyResume != null
-								? ({
-										...scrapeQuery,
-										startPage: state.apifyResume.startPage,
-										takePages: state.apifyResume.takePages,
-								  } satisfies ApifyScraperQuery)
-								: scrapeQuery;
-
-						const plan = await adapter.getRateLimitResumePlan({
-							providerRunId,
-							query: effectiveQuery,
-							status: statusRes,
-							now: new Date(),
-						});
-
-						// If there's nothing left to scrape, proceed to FETCH and finish the run.
-						if (plan.remainingTakePages <= 0) {
-							await job.updateData({
-								...job.data,
-								scraper: {
-									...state,
-									step: "FETCH",
-									runId,
-									providerRunId,
-									lastStatus: "SUCCEEDED",
-								},
-							});
-							// fallthrough to FETCH in the same tick
-						} else {
-							// Persist partial dataset so we don't lose leads from earlier pages.
-							const partialLeads = await adapter.fetchLeads({
-								providerRunId,
-								query: effectiveQuery,
-								status: statusRes,
-							});
-
-							await this.persister.persistLeadsAndRelations({
-								leadSearchId,
-								runId,
-								provider,
-								leads: partialLeads,
-								createdById: job.data.triggeredById ?? undefined,
-								log: lg,
-							});
-
-							const nextRunAt = new Date(Date.now() + plan.waitMs).toISOString();
-							const internalMsg =
-								`SCRAPER rate limited (provider=${provider}, run=${providerRunId}); ` +
-								`will resume at ${nextRunAt} (nextStartPage=${plan.nextStartPage}, remainingTakePages=${plan.remainingTakePages})`;
-
-							// Mark current run as failed (it cannot be reused because externalRunId is immutable).
-							await this.leadSearchRunRepository.markRunFailed(runId, internalMsg);
-
-							// Keep LeadSearch RUNNING, schedule a new INIT on next hour.
-							const nextData: LeadSearchJobData = {
-								...job.data,
-								scraper: {
-									...state,
-									step: "INIT",
-									runId: null,
-									providerRunId: null,
-									pollAttempt: 0,
-									lastStatus: "RUNNING",
-									initAtMs: Date.now(),
-									apifyResume: {
-										startPage: plan.nextStartPage,
-										takePages: plan.remainingTakePages,
-										plannedAtMs: Date.now(),
-										fromProviderRunId: providerRunId,
-									},
-								},
-							};
-
-							await this.delayJob(job, token, plan.waitMs, nextData, lg);
-							return;
-						}
-					}
-
-					const internalMsg = `SCRAPER provider failed (provider=${provider}, run=${providerRunId})`;
-					await this.leadSearchRunRepository.markRunFailed(runId, internalMsg);
-					await this.leadSearchRepository.markFailed(
-						leadSearchId,
-						userFinalMessage
-					);
-
-					await this.notifier.postEvent({
-						threadId: leadSearch.threadId,
-						leadSearchId,
-						text: userFinalMessage,
-						payload: {
-							event: "leadSearch.failed",
-							leadSearchId,
-							status: LeadSearchStatus.FAILED,
-							...this.notifier.publicParserMeta(provider),
-							kind,
-							errorMessage: userFinalMessage,
-							durationMs: msSince(t0),
-						},
-					});
-
-					throw new Error(internalMsg);
-				}
-
-				// SUCCEEDED -> go FETCH (same tick)
-				await job.updateData({
-					...job.data,
-					scraper: {
-						...state,
-						step: "FETCH",
-						runId,
-						providerRunId,
-						lastStatus: "SUCCEEDED",
-					},
-				});
-				// fallthrough
-			}
-
-			// -------------------------
-			// FETCH
-			// -------------------------
-			if (job.data.scraper?.step === "FETCH") {
-				const fetchState = job.data.scraper;
-
-				const runId = fetchState.runId ?? "";
-				const providerRunId = fetchState.providerRunId ?? "";
-
-				if (!runId || !providerRunId) {
-					const msg = "SCRAPER FETCH: missing runId/providerRunId";
-					await this.leadSearchRepository.markFailed(leadSearchId, msg);
-					throw new Error(msg);
-				}
-
-				const effectiveQuery =
-					provider === LeadProvider.APIFY &&
-					fetchState.apifyResume &&
-					isApifyScrapeQuery(scrapeQuery)
-						? ({
-								...scrapeQuery,
-								startPage: fetchState.apifyResume.startPage,
-								takePages: fetchState.apifyResume.takePages,
-						  } satisfies ApifyScraperQuery)
-						: scrapeQuery;
-
-				const statusRes = await adapter.checkStatus(providerRunId);
-				if (statusRes.status !== "SUCCEEDED") {
-					let allowPartialFetch = false;
-
-					if (
-						provider === LeadProvider.APIFY &&
-						isRateLimitedStatus(statusRes.raw) &&
-						canComputeApifyResume(adapter) &&
-						isApifyScrapeQuery(effectiveQuery)
-					) {
-						const plan = await adapter.getRateLimitResumePlan({
-							providerRunId,
-							query: effectiveQuery,
-							status: statusRes,
-							now: new Date(),
-						});
-
-						if (plan.remainingTakePages <= 0) {
-							allowPartialFetch = true;
-							lg.info(
-								{
-									leadSearchId,
-									provider,
-									providerRunId,
-									datasetItemCount: plan.datasetItemCount,
-									lastScrapedPage: plan.lastScrapedPage,
-								},
-								"SCRAPER FETCH: rate limited but dataset complete; proceeding"
-							);
-						}
-					}
-
-					if (!allowPartialFetch) {
-						lg.debug(
-							{
-								leadSearchId,
-								provider,
-								runId,
-								providerRunId,
-								status: statusRes.status,
-							},
-							"SCRAPER FETCH: status is not SUCCEEDED, going back to POLL"
-						);
-
-						await this.delayJob(
-							job,
-							token,
-							adapter.pollIntervalMs,
-							{
-								...job.data,
-								scraper: {
-									...fetchState,
-									step: "POLL",
-									lastStatus: statusRes.status,
-								},
-							},
-							lg
-						);
-						return;
-					}
-					}
-
-				const leads = await adapter.fetchLeads({
-					providerRunId,
-					query: effectiveQuery,
-					status: statusRes,
-				});
-
-				const insertedLeadIds = await this.persister.persistLeadsAndRelations({
-					leadSearchId,
-					runId,
-					provider,
-					leads,
-					createdById: job.data.triggeredById ?? undefined,
-					log: lg,
-				});
-
-				const total = await this.leadSearchRepository.countLeads(leadSearchId);
-
-				await this.leadSearchRunRepository.markRunSuccess({
-					runId,
-					leadsCount: insertedLeadIds.length,
-					externalRunId: providerRunId,
-					responseMeta: { lastStatus: "SUCCEEDED" } as Prisma.InputJsonValue,
-				});
-
-				await this.leadSearchRepository.markDone(leadSearchId, total);
-
-				const doneStatus =
-					total > 0 ? LeadSearchStatus.DONE : LeadSearchStatus.DONE_NO_RESULTS;
-
-				const shown = Math.min(total, 100);
-				const previewLimit = 100;
-				const previewLeads = leads.slice(0, shown).map((l, idx) => ({
-					leadId: insertedLeadIds[idx] ?? null,
-					fullName: l.fullName ?? null,
-					title: l.title ?? null,
-					company: l.company ?? null,
-					email: l.email ?? null,
-					linkedinUrl: l.linkedinUrl ?? null,
-					companyDomain: l.companyDomain ?? null,
-					location: l.location ?? null,
-				}));
-
-				await this.notifier.postEvent({
-					threadId: leadSearch.threadId,
-					leadSearchId,
-					text:
-						doneStatus === LeadSearchStatus.DONE_NO_RESULTS
-							? "No leads found for these filters"
-							: `Lead search completed. Found ${total} leads`,
-					payload: {
-						event: "leadSearch.completed",
-						leadSearchId,
-						status: doneStatus,
-						...this.notifier.publicParserMeta(provider),
-						kind,
-						totalLeads: total,
-						shownLeads: shown,
-						previewLimit,
-						previewLeads,
-						durationMs: msSince(t0),
-					},
-				});
-
-				lg.info(
-					{ leadSearchId, provider, totalLeads: total },
-					"SCRAPER finished"
-				);
-				return;
-			}
-
-			lg.warn(
-				{ leadSearchId, state: job.data.scraper },
-				"SCRAPER step-job: no matching step"
-			);
-		} catch (err) {
-			// Do not intercept BullMQ control flow
-			if (err instanceof DelayedError) throw err;
-
-			// If this is the last queue attempt and we didn't already fail + notify, do it here.
-			if (isLastJobAttempt) {
-				const runIdFromState = job.data.scraper?.runId ?? null;
-				const internalMsg = err instanceof Error ? err.message : String(err);
-
-				if (runIdFromState) {
-					await this.leadSearchRunRepository
-						.markRunFailed(runIdFromState, internalMsg)
-						.catch(() => {});
-				}
-
-				await this.leadSearchRepository.markFailed(
-					leadSearchId,
-					userFinalMessage
-				);
-
-				await this.notifier.postEvent({
-					threadId: leadSearch.threadId,
-					leadSearchId,
-					text: userFinalMessage,
-					payload: {
-						event: "leadSearch.failed",
-						leadSearchId,
-						status: LeadSearchStatus.FAILED,
-						...this.notifier.publicParserMeta(provider),
-						kind,
-						errorMessage: userFinalMessage,
-						durationMs: msSince(t0),
-						retries: {
-							attemptsMade: jobAttemptsMade + 1,
-							maxAttempts: jobMaxAttempts,
-						},
-					},
-				});
-			}
-
-			throw err;
-		}
-	}
-
-	private async delayJob(
-		job: Job<LeadSearchJobData, void, LeadSearchJobName>,
-		token: string,
-		delayMs: number,
-		nextData: LeadSearchJobData,
-		lg: ReturnType<typeof ensureLogger>
-	): Promise<never> {
-		const nextRunAt = Date.now() + delayMs;
-
-		lg.debug(
-			{
-				leadSearchId: job.data.leadSearchId,
-				jobId: job.id,
-				fromStep: job.data.scraper?.step ?? null,
-				toStep: nextData.scraper?.step ?? null,
-				delayMs,
-				nextRunAt: new Date(nextRunAt).toISOString(),
-			},
-			"SCRAPER scheduled next tick (moveToDelayed)"
-		);
-
-		await job.updateData(nextData);
-		await job.moveToDelayed(nextRunAt, token);
-		throw new DelayedError();
-	}
-
-	private async delayAfterUpdate(
-		job: Job<LeadSearchJobData, void, LeadSearchJobName>,
-		token: string,
-		delayMs: number,
-		lg: ReturnType<typeof ensureLogger>
-	): Promise<never> {
-		const nextRunAt = Date.now() + delayMs;
-
-		lg.debug(
-			{
-				leadSearchId: job.data.leadSearchId,
-				jobId: job.id,
-				step: job.data.scraper?.step ?? null,
-				delayMs,
-				nextRunAt: new Date(nextRunAt).toISOString(),
-			},
-			"SCRAPER scheduled next tick after update (moveToDelayed)"
-		);
-
-		await job.moveToDelayed(nextRunAt, token);
-		throw new DelayedError();
-	}
+  constructor(
+    @inject(LEAD_SEARCH_TYPES.LeadSearchRepository)
+    private readonly leadSearchRepository: LeadSearchRepository,
+
+    @inject(LEAD_SEARCH_TYPES.LeadSearchRunRepository)
+    private readonly leadSearchRunRepository: LeadSearchRunRepository,
+
+    @inject(SCRAPER_TYPES.ScraperOrchestrator)
+    private readonly scraperOrchestrator: ScraperOrchestrator,
+
+    @inject(LEAD_SEARCH_TYPES.LeadSearchLeadPersisterService)
+    private readonly persister: LeadSearchLeadPersisterService,
+
+    @inject(LEAD_SEARCH_TYPES.LeadSearchNotifierService)
+    private readonly notifier: LeadSearchNotifierService,
+  ) {}
+
+  async process(
+    job: Job<LeadSearchJobData, void, LeadSearchJobName>,
+    token: string,
+    log?: LoggerLike,
+  ): Promise<void> {
+    const lg = ensureLogger(log);
+    const t0 = nowNs();
+
+    const leadSearchId = job.data.leadSearchId;
+
+    const jobAttemptsMade = job.attemptsMade ?? 0;
+    const jobMaxAttempts =
+      typeof job.opts.attempts === "number" ? job.opts.attempts : null;
+    const isLastJobAttempt =
+      jobMaxAttempts !== null ? jobAttemptsMade + 1 >= jobMaxAttempts : false;
+    const userRetryableMessage =
+      "External service temporarily unavailable. We'll retry automatically.";
+    const userFinalMessage =
+      "Failed to search: external service not responding. Please try again later.";
+
+    let leadSearch = await this.leadSearchRepository.getById(leadSearchId);
+    if (!leadSearch) throw new Error("LeadSearch not found");
+
+    if (leadSearch.kind !== LeadSearchKind.SCRAPER) {
+      throw new Error(
+        `ScraperStepLeadSearchHandler called for kind=${leadSearch.kind}`,
+      );
+    }
+
+    const provider = leadSearch.provider;
+    const kind = leadSearch.kind;
+
+    const resolvedQuery = await resolveScrapeQuery({
+      leadSearchId,
+      leadSearchLimit: leadSearch.limit,
+      storedQueryJson: leadSearch.query,
+      provider,
+      leadSearchRepository: this.leadSearchRepository,
+    });
+
+    if (!resolvedQuery.ok) {
+      const msg = `Invalid LeadSearch.query schema for SCRAPER: ${JSON.stringify(
+        resolvedQuery.issues,
+      )}`;
+      await this.leadSearchRepository.markFailed(leadSearchId, msg);
+
+      await this.notifier.postEvent({
+        threadId: leadSearch.threadId,
+        leadSearchId,
+        text: "Lead search failed: invalid JSON schema.",
+        payload: {
+          event: "leadSearch.failed",
+          leadSearchId,
+          status: LeadSearchStatus.FAILED,
+          ...this.notifier.publicParserMeta(provider),
+          kind,
+          errorMessage: "Invalid JSON schema.",
+          errorDetails: resolvedQuery.issues,
+          durationMs: msSince(t0),
+        },
+      });
+
+      throw new Error(msg);
+    }
+
+    const scrapeQuery = resolvedQuery.scrapeQuery;
+
+    await this.leadSearchRepository.markRunning(leadSearchId);
+
+    const resolvedAdapter = this.scraperOrchestrator.resolveAdapter(provider);
+    if (!resolvedAdapter.ok) {
+      const msg = `SCRAPER provider ${provider} is not available: ${resolvedAdapter.message}`;
+      await this.leadSearchRepository.markFailed(leadSearchId, msg);
+      throw new Error(msg);
+    }
+
+    const adapter = resolvedAdapter.adapter;
+
+    const state = job.data.scraper ?? {
+      step: "INIT" as const,
+      providerIndex: 0,
+      providersOrder: [provider],
+      pollAttempt: 0,
+      runId: null,
+      providerRunId: null,
+      lastStatus: null,
+      initAtMs: Date.now(),
+      apifyResume: null,
+    };
+
+    try {
+      // -------------------------
+      // INIT
+      // -------------------------
+      if (state.step === "INIT") {
+        // If Redis state already has runId+providerRunId => reuse, never start again
+        if (state.runId && state.providerRunId) {
+          lg.debug(
+            {
+              leadSearchId,
+              provider,
+              runId: state.runId,
+              providerRunId: state.providerRunId,
+            },
+            "SCRAPER INIT: reuse Redis state (runId+providerRunId already in job.data)",
+          );
+
+          await this.leadSearchRunRepository.ensureExternalRunId(
+            state.runId,
+            state.providerRunId,
+          );
+
+          const nextData: LeadSearchJobData = {
+            ...job.data,
+            scraper: { ...state, step: "POLL", lastStatus: "RUNNING" },
+          };
+
+          await this.delayJob(job, token, adapter.pollIntervalMs, nextData, lg);
+          return;
+        }
+
+        // If DB has RUNNING with externalRunId => reuse
+        const existing =
+          await this.leadSearchRunRepository.findLatestRunningRun(
+            leadSearchId,
+            provider,
+          );
+
+        if (existing?.externalRunId) {
+          lg.debug(
+            {
+              leadSearchId,
+              provider,
+              runId: existing.id,
+              providerRunId: existing.externalRunId,
+            },
+            "SCRAPER INIT: reuse DB RUNNING LeadSearchRun.externalRunId",
+          );
+
+          const nextData: LeadSearchJobData = {
+            ...job.data,
+            scraper: {
+              ...state,
+              step: "POLL",
+              runId: existing.id,
+              providerRunId: existing.externalRunId,
+              pollAttempt: state.pollAttempt ?? 0,
+              lastStatus: "RUNNING",
+            },
+          };
+          await this.delayJob(job, token, adapter.pollIntervalMs, nextData, lg);
+          return;
+        }
+
+        // RUNNING but missing externalRunId -> wait a bit, then fail that run
+        if (existing && !existing.externalRunId) {
+          const ageMs = Date.now() - existing.updatedAt.getTime();
+
+          if (ageMs <= EXTERNAL_RUN_ID_GRACE_MS) {
+            lg.debug(
+              {
+                leadSearchId,
+                provider,
+                runId: existing.id,
+                ageMs,
+                graceMs: EXTERNAL_RUN_ID_GRACE_MS,
+              },
+              "SCRAPER INIT: waiting for externalRunId (grace period)",
+            );
+
+            const nextData: LeadSearchJobData = {
+              ...job.data,
+              scraper: {
+                ...state,
+                step: "INIT",
+                runId: existing.id,
+                providerRunId: null,
+                lastStatus: "STARTING",
+                initAtMs: state.initAtMs ?? Date.now(),
+              },
+            };
+            await this.delayJob(
+              job,
+              token,
+              EXTERNAL_RUN_ID_RETRY_DELAY_MS,
+              nextData,
+              lg,
+            );
+            return;
+          }
+
+          lg.warn(
+            {
+              leadSearchId,
+              provider,
+              runId: existing.id,
+              ageMs,
+            },
+            "SCRAPER INIT: stale RUNNING LeadSearchRun without externalRunId; marking failed and starting new attempt",
+          );
+
+          await this.leadSearchRunRepository.markRunFailed(
+            existing.id,
+            "RUNNING LeadSearchRun has no externalRunId after grace period; assuming broken start",
+          );
+        }
+
+        // Create new attempt
+        const attempt = await this.leadSearchRunRepository.getNextAttempt(
+          leadSearchId,
+          provider,
+        );
+
+        const run = await this.leadSearchRunRepository.createRun({
+          leadSearchId,
+          provider,
+          attempt,
+          triggeredById: job.data.triggeredById ?? null,
+          requestPayload: {
+            limit: leadSearch.limit,
+            query: scrapeQuery,
+          } as Prisma.InputJsonValue,
+        });
+
+        lg.info(
+          {
+            leadSearchId,
+            provider,
+            attempt,
+            pollIntervalMs: adapter.pollIntervalMs,
+            maxPollAttempts: adapter.maxPollAttempts,
+          },
+          "SCRAPER INIT: starting provider run",
+        );
+
+        let started: Awaited<ReturnType<typeof adapter.start>>;
+        try {
+          // If we have an Apify resume plan (rate limit), apply it for the next run.
+          const effectiveQuery =
+            provider === LeadProvider.APIFY &&
+            state.apifyResume &&
+            isApifyScrapeQuery(scrapeQuery)
+              ? ({
+                  ...scrapeQuery,
+                  startPage: state.apifyResume.startPage,
+                  takePages: state.apifyResume.takePages,
+                } satisfies ApifyScraperQuery)
+              : scrapeQuery;
+
+          started = await adapter.start(effectiveQuery);
+        } catch (err) {
+          const internalMsg = err instanceof Error ? err.message : String(err);
+
+          // IMPORTANT: mark run failed immediately to avoid "RUNNING without externalRunId" grace loops
+          await this.leadSearchRunRepository
+            .markRunFailed(run.id, `SCRAPER start failed: ${internalMsg}`)
+            .catch(() => {});
+
+          // If this is the last queue attempt, finish LeadSearch and notify user
+          if (isLastJobAttempt) {
+            await this.leadSearchRepository.markFailed(
+              leadSearchId,
+              userFinalMessage,
+            );
+
+            // re-read to ensure threadId is not stale
+            leadSearch =
+              (await this.leadSearchRepository.getById(leadSearchId)) ??
+              leadSearch;
+
+            await this.notifier.postEvent({
+              threadId: leadSearch.threadId,
+              leadSearchId,
+              text: userFinalMessage,
+              payload: {
+                event: "leadSearch.failed",
+                leadSearchId,
+                status: LeadSearchStatus.FAILED,
+                ...this.notifier.publicParserMeta(provider),
+                kind,
+                errorMessage: userFinalMessage,
+                durationMs: msSince(t0),
+                retries: {
+                  attemptsMade: jobAttemptsMade + 1,
+                  maxAttempts: jobMaxAttempts,
+                },
+              },
+            });
+          } else {
+            // Optional: a single informative message (no provider mention) on retryable failures
+            await this.notifier.postEvent({
+              threadId: leadSearch.threadId,
+              leadSearchId,
+              text: userRetryableMessage,
+              payload: {
+                event: "leadSearch.retrying",
+                leadSearchId,
+                status: LeadSearchStatus.RUNNING,
+                ...this.notifier.publicParserMeta(provider),
+                kind,
+                message: userRetryableMessage,
+                retries: {
+                  attemptsMade: jobAttemptsMade + 1,
+                  maxAttempts: jobMaxAttempts,
+                },
+              },
+            });
+          }
+
+          throw err;
+        }
+
+        // Persist runId/providerRunId into Redis job data FIRST
+        const nextData: LeadSearchJobData = {
+          ...job.data,
+          scraper: {
+            ...state,
+            step: "POLL",
+            runId: run.id,
+            providerRunId: started.providerRunId,
+            pollAttempt: 0,
+            lastStatus: "RUNNING",
+            initAtMs: state.initAtMs ?? Date.now(),
+          },
+        };
+
+        await job.updateData(nextData);
+
+        // Then persist into Postgres
+        await this.leadSearchRunRepository.ensureExternalRunId(
+          run.id,
+          started.providerRunId,
+        );
+
+        // Delay next poll tick
+        await this.delayAfterUpdate(job, token, adapter.pollIntervalMs, lg);
+        return;
+      }
+
+      // -------------------------
+      // POLL
+      // -------------------------
+      if (state.step === "POLL") {
+        let runId = state.runId ?? null;
+        let providerRunId = state.providerRunId ?? null;
+
+        if (!providerRunId) {
+          const existing =
+            await this.leadSearchRunRepository.findLatestRunningRun(
+              leadSearchId,
+              provider,
+            );
+          if (existing?.externalRunId) {
+            runId = existing.id;
+            providerRunId = existing.externalRunId;
+          }
+        }
+
+        if (!runId || !providerRunId) {
+          lg.warn(
+            { leadSearchId, provider, runId, providerRunId, state },
+            "SCRAPER POLL: missing runId/providerRunId; resetting to INIT",
+          );
+
+          const nextData: LeadSearchJobData = {
+            ...job.data,
+            scraper: {
+              ...state,
+              step: "INIT",
+              runId: null,
+              providerRunId: null,
+              pollAttempt: 0,
+              lastStatus: null,
+              initAtMs: state.initAtMs ?? Date.now(),
+            },
+          };
+
+          return this.delayJob(job, token, 1_000, nextData, lg);
+        }
+
+        await this.leadSearchRunRepository.ensureExternalRunId(
+          runId,
+          providerRunId,
+        );
+
+        const statusRes = await adapter.checkStatus(providerRunId);
+
+        lg.info(
+          {
+            leadSearchId,
+            provider,
+            runId,
+            providerRunId,
+            pollAttempt: state.pollAttempt,
+            status: statusRes.status,
+          },
+          "SCRAPER POLL",
+        );
+
+        if (statusRes.status === "RUNNING") {
+          const nextAttempt = (state.pollAttempt ?? 0) + 1;
+
+          if (nextAttempt >= adapter.maxPollAttempts) {
+            const internalMsg = `SCRAPER polling timed out after ${adapter.maxPollAttempts} attempts (provider=${provider}, run=${providerRunId})`;
+            await this.leadSearchRunRepository.markRunFailed(
+              runId,
+              internalMsg,
+            );
+            await this.leadSearchRepository.markFailed(
+              leadSearchId,
+              userFinalMessage,
+            );
+
+            await this.notifier.postEvent({
+              threadId: leadSearch.threadId,
+              leadSearchId,
+              text: userFinalMessage,
+              payload: {
+                event: "leadSearch.failed",
+                leadSearchId,
+                status: LeadSearchStatus.FAILED,
+                ...this.notifier.publicParserMeta(provider),
+                kind,
+                errorMessage: userFinalMessage,
+                durationMs: msSince(t0),
+              },
+            });
+
+            throw new Error(internalMsg);
+          }
+
+          const nextData: LeadSearchJobData = {
+            ...job.data,
+            scraper: {
+              ...state,
+              step: "POLL",
+              runId,
+              providerRunId,
+              pollAttempt: nextAttempt,
+              lastStatus: "RUNNING",
+            },
+          };
+          await this.delayJob(job, token, adapter.pollIntervalMs, nextData, lg);
+          return;
+        }
+
+        if (statusRes.status === "FAILED") {
+          // Special-case: Apify hourly rate limits. Resume on next hour boundary.
+          if (
+            provider === LeadProvider.APIFY &&
+            isRateLimitedStatus(statusRes.raw) &&
+            canComputeApifyResume(adapter) &&
+            isApifyScrapeQuery(scrapeQuery)
+          ) {
+            const effectiveQuery: ApifyScraperQuery =
+              state.apifyResume != null
+                ? ({
+                    ...scrapeQuery,
+                    startPage: state.apifyResume.startPage,
+                    takePages: state.apifyResume.takePages,
+                  } satisfies ApifyScraperQuery)
+                : scrapeQuery;
+
+            const plan = await adapter.getRateLimitResumePlan({
+              providerRunId,
+              query: effectiveQuery,
+              status: statusRes,
+              now: new Date(),
+            });
+
+            // If there's nothing left to scrape, proceed to FETCH and finish the run.
+            if (plan.remainingTakePages <= 0) {
+              await job.updateData({
+                ...job.data,
+                scraper: {
+                  ...state,
+                  step: "FETCH",
+                  runId,
+                  providerRunId,
+                  lastStatus: "SUCCEEDED",
+                },
+              });
+              // fallthrough to FETCH in the same tick
+            } else {
+              // Persist partial dataset so we don't lose leads from earlier pages.
+              const partialLeads = await adapter.fetchLeads({
+                providerRunId,
+                query: effectiveQuery,
+                status: statusRes,
+              });
+
+              await this.persister.persistLeadsAndRelations({
+                leadSearchId,
+                runId,
+                provider,
+                leads: partialLeads,
+                createdById: job.data.triggeredById ?? undefined,
+                log: lg,
+              });
+
+              const nextRunAt = new Date(
+                Date.now() + plan.waitMs,
+              ).toISOString();
+              const internalMsg =
+                `SCRAPER rate limited (provider=${provider}, run=${providerRunId}); ` +
+                `will resume at ${nextRunAt} (nextStartPage=${plan.nextStartPage}, remainingTakePages=${plan.remainingTakePages})`;
+
+              // Mark current run as failed (it cannot be reused because externalRunId is immutable).
+              await this.leadSearchRunRepository.markRunFailed(
+                runId,
+                internalMsg,
+              );
+
+              // Keep LeadSearch RUNNING, schedule a new INIT on next hour.
+              const nextData: LeadSearchJobData = {
+                ...job.data,
+                scraper: {
+                  ...state,
+                  step: "INIT",
+                  runId: null,
+                  providerRunId: null,
+                  pollAttempt: 0,
+                  lastStatus: "RUNNING",
+                  initAtMs: Date.now(),
+                  apifyResume: {
+                    startPage: plan.nextStartPage,
+                    takePages: plan.remainingTakePages,
+                    plannedAtMs: Date.now(),
+                    fromProviderRunId: providerRunId,
+                  },
+                },
+              };
+
+              await this.delayJob(job, token, plan.waitMs, nextData, lg);
+              return;
+            }
+          }
+
+          const internalMsg = `SCRAPER provider failed (provider=${provider}, run=${providerRunId})`;
+          await this.leadSearchRunRepository.markRunFailed(runId, internalMsg);
+          await this.leadSearchRepository.markFailed(
+            leadSearchId,
+            userFinalMessage,
+          );
+
+          await this.notifier.postEvent({
+            threadId: leadSearch.threadId,
+            leadSearchId,
+            text: userFinalMessage,
+            payload: {
+              event: "leadSearch.failed",
+              leadSearchId,
+              status: LeadSearchStatus.FAILED,
+              ...this.notifier.publicParserMeta(provider),
+              kind,
+              errorMessage: userFinalMessage,
+              durationMs: msSince(t0),
+            },
+          });
+
+          throw new Error(internalMsg);
+        }
+
+        // SUCCEEDED -> go FETCH (same tick)
+        await job.updateData({
+          ...job.data,
+          scraper: {
+            ...state,
+            step: "FETCH",
+            runId,
+            providerRunId,
+            lastStatus: "SUCCEEDED",
+          },
+        });
+        // fallthrough
+      }
+
+      // -------------------------
+      // FETCH
+      // -------------------------
+      if (job.data.scraper?.step === "FETCH") {
+        const fetchState = job.data.scraper;
+
+        const runId = fetchState.runId ?? "";
+        const providerRunId = fetchState.providerRunId ?? "";
+
+        if (!runId || !providerRunId) {
+          const msg = "SCRAPER FETCH: missing runId/providerRunId";
+          await this.leadSearchRepository.markFailed(leadSearchId, msg);
+          throw new Error(msg);
+        }
+
+        const effectiveQuery =
+          provider === LeadProvider.APIFY &&
+          fetchState.apifyResume &&
+          isApifyScrapeQuery(scrapeQuery)
+            ? ({
+                ...scrapeQuery,
+                startPage: fetchState.apifyResume.startPage,
+                takePages: fetchState.apifyResume.takePages,
+              } satisfies ApifyScraperQuery)
+            : scrapeQuery;
+
+        const statusRes = await adapter.checkStatus(providerRunId);
+        if (statusRes.status !== "SUCCEEDED") {
+          let allowPartialFetch = false;
+
+          if (
+            provider === LeadProvider.APIFY &&
+            isRateLimitedStatus(statusRes.raw) &&
+            canComputeApifyResume(adapter) &&
+            isApifyScrapeQuery(effectiveQuery)
+          ) {
+            const plan = await adapter.getRateLimitResumePlan({
+              providerRunId,
+              query: effectiveQuery,
+              status: statusRes,
+              now: new Date(),
+            });
+
+            if (plan.remainingTakePages <= 0) {
+              allowPartialFetch = true;
+              lg.info(
+                {
+                  leadSearchId,
+                  provider,
+                  providerRunId,
+                  datasetItemCount: plan.datasetItemCount,
+                  lastScrapedPage: plan.lastScrapedPage,
+                },
+                "SCRAPER FETCH: rate limited but dataset complete; proceeding",
+              );
+            }
+          }
+
+          if (!allowPartialFetch) {
+            lg.debug(
+              {
+                leadSearchId,
+                provider,
+                runId,
+                providerRunId,
+                status: statusRes.status,
+              },
+              "SCRAPER FETCH: status is not SUCCEEDED, going back to POLL",
+            );
+
+            await this.delayJob(
+              job,
+              token,
+              adapter.pollIntervalMs,
+              {
+                ...job.data,
+                scraper: {
+                  ...fetchState,
+                  step: "POLL",
+                  lastStatus: statusRes.status,
+                },
+              },
+              lg,
+            );
+            return;
+          }
+        }
+
+        const leads = await adapter.fetchLeads({
+          providerRunId,
+          query: effectiveQuery,
+          status: statusRes,
+        });
+
+        const insertedLeadIds = await this.persister.persistLeadsAndRelations({
+          leadSearchId,
+          runId,
+          provider,
+          leads,
+          createdById: job.data.triggeredById ?? undefined,
+          log: lg,
+        });
+
+        const total = await this.leadSearchRepository.countLeads(leadSearchId);
+
+        await this.leadSearchRunRepository.markRunSuccess({
+          runId,
+          leadsCount: insertedLeadIds.length,
+          externalRunId: providerRunId,
+          responseMeta: { lastStatus: "SUCCEEDED" } as Prisma.InputJsonValue,
+        });
+
+        await this.leadSearchRepository.markDone(leadSearchId, total);
+
+        const doneStatus =
+          total > 0 ? LeadSearchStatus.DONE : LeadSearchStatus.DONE_NO_RESULTS;
+
+        const shown = Math.min(total, 100);
+        const previewLimit = 100;
+        const previewLeads = leads.slice(0, shown).map((l, idx) => ({
+          leadId: insertedLeadIds[idx] ?? null,
+          fullName: l.fullName ?? null,
+          title: l.title ?? null,
+          company: l.company ?? null,
+          email: l.email ?? null,
+          linkedinUrl: l.linkedinUrl ?? null,
+          companyDomain: l.companyDomain ?? null,
+          location: l.location ?? null,
+        }));
+
+        await this.notifier.postEvent({
+          threadId: leadSearch.threadId,
+          leadSearchId,
+          text:
+            doneStatus === LeadSearchStatus.DONE_NO_RESULTS
+              ? "No leads found for these filters"
+              : `Lead search completed. Found ${total} leads`,
+          payload: {
+            event: "leadSearch.completed",
+            leadSearchId,
+            status: doneStatus,
+            ...this.notifier.publicParserMeta(provider),
+            kind,
+            totalLeads: total,
+            shownLeads: shown,
+            previewLimit,
+            previewLeads,
+            durationMs: msSince(t0),
+          },
+        });
+
+        lg.info(
+          { leadSearchId, provider, totalLeads: total },
+          "SCRAPER finished",
+        );
+        return;
+      }
+
+      lg.warn(
+        { leadSearchId, state: job.data.scraper },
+        "SCRAPER step-job: no matching step",
+      );
+    } catch (err) {
+      // Do not intercept BullMQ control flow
+      if (err instanceof DelayedError) throw err;
+
+      // If this is the last queue attempt and we didn't already fail + notify, do it here.
+      if (isLastJobAttempt) {
+        const runIdFromState = job.data.scraper?.runId ?? null;
+        const internalMsg = err instanceof Error ? err.message : String(err);
+
+        if (runIdFromState) {
+          await this.leadSearchRunRepository
+            .markRunFailed(runIdFromState, internalMsg)
+            .catch(() => {});
+        }
+
+        await this.leadSearchRepository.markFailed(
+          leadSearchId,
+          userFinalMessage,
+        );
+
+        await this.notifier.postEvent({
+          threadId: leadSearch.threadId,
+          leadSearchId,
+          text: userFinalMessage,
+          payload: {
+            event: "leadSearch.failed",
+            leadSearchId,
+            status: LeadSearchStatus.FAILED,
+            ...this.notifier.publicParserMeta(provider),
+            kind,
+            errorMessage: userFinalMessage,
+            durationMs: msSince(t0),
+            retries: {
+              attemptsMade: jobAttemptsMade + 1,
+              maxAttempts: jobMaxAttempts,
+            },
+          },
+        });
+      }
+
+      throw err;
+    }
+  }
+
+  private async delayJob(
+    job: Job<LeadSearchJobData, void, LeadSearchJobName>,
+    token: string,
+    delayMs: number,
+    nextData: LeadSearchJobData,
+    lg: ReturnType<typeof ensureLogger>,
+  ): Promise<never> {
+    const nextRunAt = Date.now() + delayMs;
+
+    lg.debug(
+      {
+        leadSearchId: job.data.leadSearchId,
+        jobId: job.id,
+        fromStep: job.data.scraper?.step ?? null,
+        toStep: nextData.scraper?.step ?? null,
+        delayMs,
+        nextRunAt: new Date(nextRunAt).toISOString(),
+      },
+      "SCRAPER scheduled next tick (moveToDelayed)",
+    );
+
+    await job.updateData(nextData);
+    await job.moveToDelayed(nextRunAt, token);
+    throw new DelayedError();
+  }
+
+  private async delayAfterUpdate(
+    job: Job<LeadSearchJobData, void, LeadSearchJobName>,
+    token: string,
+    delayMs: number,
+    lg: ReturnType<typeof ensureLogger>,
+  ): Promise<never> {
+    const nextRunAt = Date.now() + delayMs;
+
+    lg.debug(
+      {
+        leadSearchId: job.data.leadSearchId,
+        jobId: job.id,
+        step: job.data.scraper?.step ?? null,
+        delayMs,
+        nextRunAt: new Date(nextRunAt).toISOString(),
+      },
+      "SCRAPER scheduled next tick after update (moveToDelayed)",
+    );
+
+    await job.moveToDelayed(nextRunAt, token);
+    throw new DelayedError();
+  }
 }

@@ -35,9 +35,7 @@
     ],
     "companyWebsite": "https://builder.io",
     "contactInfo": {
-      "emails": [
-        { "email": "bob@builder.io" }
-      ]
+      "emails": [{ "email": "bob@builder.io" }]
     }
   }
 ]

@@ -26,7 +26,10 @@ type PrismaWithUser = {
     create: (args: {
       data: { email: string; passwordHash: string; role: UserRole };
     }) => Promise<DbUser>;
-    update: (args: { where: { id: string }; data: { lastLoginAt: Date } }) => Promise<DbUser>;
+    update: (args: {
+      where: { id: string };
+      data: { lastLoginAt: Date };
+    }) => Promise<DbUser>;
     count: () => Promise<number>;
   };
 };
@@ -34,7 +37,11 @@ type PrismaWithUser = {
 export class AuthService {
   private readonly prisma = getPrisma() as unknown as PrismaWithUser;
 
-  async login(email: string, password: string, env: Env): Promise<{
+  async login(
+    email: string,
+    password: string,
+    env: Env,
+  ): Promise<{
     accessToken: string;
     expiresInSeconds: number;
     user: AuthUser;
@@ -102,7 +109,14 @@ export class AuthService {
     return { user: { id: user.id, email: user.email, role: user.role } };
   }
 
-  async ensureInitialAdmin(env: Env, log?: { info: (o: unknown, m?: string) => void; warn: (o: unknown, m?: string) => void; error: (o: unknown, m?: string) => void; }): Promise<void> {
+  async ensureInitialAdmin(
+    env: Env,
+    log?: {
+      info: (o: unknown, m?: string) => void;
+      warn: (o: unknown, m?: string) => void;
+      error: (o: unknown, m?: string) => void;
+    },
+  ): Promise<void> {
     const count = await this.prisma.user.count();
     if (count > 0) return;
 
@@ -134,4 +148,3 @@ export class AuthService {
     log?.info({ email }, "Auth: initial admin user created");
   }
 }
-

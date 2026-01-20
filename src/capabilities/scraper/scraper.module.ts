@@ -12,33 +12,33 @@ const env = loadEnv();
 const isApifyEnabled = Boolean(env.APIFY_TOKEN);
 
 const isScraperCityEnabled = Boolean(
-	env.SCRAPERCITY_API_KEY && env.SCRAPERCITY_API_URL
+  env.SCRAPERCITY_API_KEY && env.SCRAPERCITY_API_URL,
 );
 
 export function registerScraperModule(container: Container) {
-	container
-		.bind<ScraperOrchestrator>(SCRAPER_TYPES.ScraperOrchestrator)
-		.to(ScraperOrchestrator)
-		.inSingletonScope();
+  container
+    .bind<ScraperOrchestrator>(SCRAPER_TYPES.ScraperOrchestrator)
+    .to(ScraperOrchestrator)
+    .inSingletonScope();
 
-	container
-		.bind<ScraperAdapter>(SCRAPER_TYPES.ScraperAdapter)
-		.toDynamicValue(() => {
-			return new ApifyScraperAdapter(
-				env.APIFY_TOKEN ?? "",
-				isApifyEnabled,
-				env.APIFY_MONGODB_CONNECTION_STRING ?? ""
-			);
-		})
-		.inSingletonScope();
+  container
+    .bind<ScraperAdapter>(SCRAPER_TYPES.ScraperAdapter)
+    .toDynamicValue(() => {
+      return new ApifyScraperAdapter(
+        env.APIFY_TOKEN ?? "",
+        isApifyEnabled,
+        env.APIFY_MONGODB_CONNECTION_STRING ?? "",
+      );
+    })
+    .inSingletonScope();
 
-	container
-		.bind<ScraperAdapter>(SCRAPER_TYPES.ScraperAdapter)
-		.toDynamicValue(() => {
-			return new ScraperCityScraperAdapter(
-				env.SCRAPERCITY_API_KEY ?? "",
-				isScraperCityEnabled
-			);
-		})
-		.inSingletonScope();
+  container
+    .bind<ScraperAdapter>(SCRAPER_TYPES.ScraperAdapter)
+    .toDynamicValue(() => {
+      return new ScraperCityScraperAdapter(
+        env.SCRAPERCITY_API_KEY ?? "",
+        isScraperCityEnabled,
+      );
+    })
+    .inSingletonScope();
 }

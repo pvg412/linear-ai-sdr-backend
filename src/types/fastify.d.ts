@@ -9,4 +9,3 @@ declare module "fastify" {
     };
   }
 }
-

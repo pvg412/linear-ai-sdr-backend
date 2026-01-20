@@ -14,7 +14,12 @@ type PrismaWithUser = {
   user: {
     findUnique: (args: {
       where: { id: string };
-    }) => Promise<{ id: string; email: string; role: string; isActive: boolean } | null>;
+    }) => Promise<{
+      id: string;
+      email: string;
+      role: string;
+      isActive: boolean;
+    } | null>;
   };
 };
 

@@ -24,4 +24,3 @@ export function getUserFacingMessage(error: unknown): string | undefined {
   if (error instanceof UserFacingError) return error.userMessage;
   return undefined;
 }
-

@@ -18,7 +18,10 @@ export function wrapSearchLeadsAxiosError(e: unknown): void {
     return;
   }
 
-  console.error("[SearchLeadsLeadDb] error response", formatAxiosErrorForLog(e));
+  console.error(
+    "[SearchLeadsLeadDb] error response",
+    formatAxiosErrorForLog(e),
+  );
 
   const status = e.response?.status;
   const providerMessage = extractMessage(e.response?.data);

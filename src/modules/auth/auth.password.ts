@@ -81,4 +81,3 @@ export async function verifyPassword(
   if (derivedKey.length !== expected.length) return false;
   return crypto.timingSafeEqual(derivedKey, expected);
 }
-
