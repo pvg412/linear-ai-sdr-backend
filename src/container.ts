@@ -11,12 +11,14 @@ import { registerQueueModule } from "./infra/queue/queue.module";
 import { registerRealtimeModule } from "./infra/realtime/realtime.module";
 import { registerAiGrpcClientModule } from "./infra/ai-grpc-client/ai-grpc-client.module";
 import { registerLeadRagModule } from "./modules/lead-rag/lead-rag.module";
+import { registerObjectStorageModule } from "./infra/object-storage/object-storage.module";
 
 const container = new Container();
 
 registerAiGrpcClientModule(container);
 registerRealtimeModule(container);
 registerQueueModule(container);
+registerObjectStorageModule(container);
 registerLeadRagModule(container);
 registerScraperModule(container);
 registerLeadDbModule(container);

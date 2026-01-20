@@ -9,6 +9,12 @@ const EnvSchema = z.object({
 	REDIS_URL: z.url().optional(),
 	FRONTEND_URL: z.url(),
 
+	MINIO_ENDPOINT: z.string().optional(),
+	MINIO_ACCESS_KEY: z.string().optional(),
+	MINIO_SECRET_KEY: z.string().optional(),
+	MINIO_REGION: z.string().optional(),
+	MINIO_BUCKET_LEAD_SEARCH_RAW: z.string().optional(),
+
 	AI_GRPC_ADDRESS: z.string().optional(),
 	AI_GRPC_INSECURE: z
 		.string()

@@ -3,6 +3,16 @@ import { LeadSearchStatus, Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "@/infra/prisma";
 
+export function buildLeadSearchSelectorWhere(
+	userId: string
+): Prisma.LeadSearchWhereInput {
+	return {
+		createdById: userId,
+		// Exclude LeadSearch records that have 0 leads in the join table
+		leads: { some: {} },
+	};
+}
+
 export type LeadSearchSelectorRow = {
 	id: string;
 	createdAt: Date;
@@ -26,11 +36,7 @@ export class LeadSearchRepository {
 
 	async listForSelector(userId: string): Promise<LeadSearchSelectorRow[]> {
 		const rows = await this.prisma.leadSearch.findMany({
-			where: {
-				createdById: userId,
-				// Exclude LeadSearch records that have 0 leads in the join table
-				leads: { some: { lead: { isVerified: true } } },
-			},
+			where: buildLeadSearchSelectorWhere(userId),
 			orderBy: { createdAt: "desc" },
 			select: {
 				id: true,
@@ -42,11 +48,7 @@ export class LeadSearchRepository {
 				thread: { select: { title: true } },
 				_count: {
 					select: {
-						leads: {
-							where: {
-								lead: { isVerified: true },
-							},
-						},
+						leads: true,
 					},
 				},
 			},

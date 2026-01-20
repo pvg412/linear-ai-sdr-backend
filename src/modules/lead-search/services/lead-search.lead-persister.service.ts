@@ -1,4 +1,4 @@
-import { injectable } from "inversify";
+import { inject, injectable } from "inversify";
 import {
 	type Lead,
 	LeadOrigin,
@@ -17,10 +17,23 @@ import {
 } from "@/infra/observability";
 
 import { NormalizedLead } from "@/capabilities/shared/leadValidate";
+import { OBJECT_STORAGE_TYPES } from "@/infra/object-storage/object-storage.types";
+import type {
+	LeadSearchRawStorage,
+	StoredRawRef,
+} from "@/infra/object-storage/lead-search-raw.storage";
 
 @injectable()
 export class LeadSearchLeadPersisterService {
 	private readonly prisma: PrismaClient = getPrisma();
+
+	constructor(
+		@inject(OBJECT_STORAGE_TYPES.LeadSearchRawStorage)
+		private readonly rawStorage: LeadSearchRawStorage
+	) {}
+
+	private static readonly RAW_FALLBACK_MAX_BYTES = 64 * 1024; // 64 KiB
+	private static readonly RAW_FALLBACK_PREVIEW_CHARS = 16_000;
 
 	async persistLeadsAndRelations(input: {
 		leadSearchId: string;
@@ -32,6 +45,12 @@ export class LeadSearchLeadPersisterService {
 	}): Promise<string[]> {
 		const leadIds: string[] = [];
 		const lg = ensureLogger(input.log);
+
+		const rawItems: Array<{
+			leadId: string;
+			providerExternalId: string | null;
+			raw: unknown;
+		}> = [];
 
 		for (const lead of input.leads) {
 			const leadId = await this.upsertLead({
@@ -57,21 +76,74 @@ export class LeadSearchLeadPersisterService {
 				update: {},
 			});
 
-			if (input.runId) {
-				await this.prisma.leadSearchRunResult.upsert({
-					where: {
-						runId_leadId: { runId: input.runId, leadId },
+			if (input.runId && lead.raw != null) {
+				rawItems.push({
+					leadId,
+					providerExternalId: lead.externalId ?? null,
+					raw: lead.raw,
+				});
+			}
+		}
+
+		// Persist raw for the whole run in one object (best-effort).
+		let storedRaw: StoredRawRef | null = null;
+		if (input.runId && rawItems.length > 0) {
+			try {
+				storedRaw = await this.rawStorage.putLeadRunRawBundle({
+					leadSearchId: input.leadSearchId,
+					runId: input.runId,
+					provider: input.provider,
+					items: rawItems,
+				});
+			} catch (err) {
+				lg.warn(
+					{
+						err: err instanceof Error ? err.message : String(err),
+						leadSearchId: input.leadSearchId,
+						runId: input.runId,
+						provider: input.provider,
+						items: rawItems.length,
 					},
+					"Failed to persist LeadSearchRunResult.raw bundle to object storage"
+				);
+			}
+		}
+
+		// Upsert per-lead run results, using MinIO reference if available, otherwise DB fallback.
+		if (input.runId) {
+			for (let i = 0; i < input.leads.length; i++) {
+				const lead = input.leads[i];
+				const leadId = leadIds[i];
+				if (!leadId) continue;
+
+				const rawDbValue = storedRaw
+					? Prisma.DbNull
+					: this.buildRawFallbackForDb(lead.raw ?? null);
+
+				await this.prisma.leadSearchRunResult.upsert({
+					where: { runId_leadId: { runId: input.runId, leadId } },
 					create: {
 						runId: input.runId,
 						leadId,
 						provider: input.provider,
 						providerExternalId: lead.externalId ?? null,
-						raw: (lead.raw ?? null) as Prisma.InputJsonValue,
+						raw: rawDbValue,
+						rawBucket: storedRaw ? storedRaw.bucket : null,
+						rawObjectKey: storedRaw ? storedRaw.objectKey : null,
+						rawContentType: storedRaw ? storedRaw.contentType : null,
+						rawContentEncoding: storedRaw ? storedRaw.contentEncoding : null,
+						rawSizeBytes: storedRaw ? storedRaw.sizeBytes : null,
+						rawEtag: storedRaw ? storedRaw.etag : null,
 					},
 					update: {
 						providerExternalId: lead.externalId ?? null,
-						raw: (lead.raw ?? null) as Prisma.InputJsonValue,
+						raw: rawDbValue,
+						rawBucket: storedRaw ? storedRaw.bucket : null,
+						rawObjectKey: storedRaw ? storedRaw.objectKey : null,
+						rawContentType: storedRaw ? storedRaw.contentType : null,
+						rawContentEncoding: storedRaw ? storedRaw.contentEncoding : null,
+						rawSizeBytes: storedRaw ? storedRaw.sizeBytes : null,
+						rawEtag: storedRaw ? storedRaw.etag : null,
 					},
 				});
 			}
@@ -303,5 +375,39 @@ export class LeadSearchLeadPersisterService {
 			SET "emailStatus" = COALESCE("emailStatus", CAST(${emailStatus} AS "EmailStatus"))
 			WHERE "id" = ${leadId}
 		`;
+	}
+
+	private buildRawFallbackForDb(
+		raw: unknown
+	): Prisma.InputJsonValue | typeof Prisma.DbNull {
+		if (raw == null) return Prisma.DbNull;
+
+		try {
+			const json = JSON.stringify(raw);
+			const bytes = Buffer.byteLength(json, "utf8");
+
+			if (bytes <= LeadSearchLeadPersisterService.RAW_FALLBACK_MAX_BYTES) {
+				return raw as Prisma.InputJsonValue;
+			}
+
+			const preview = json.slice(
+				0,
+				LeadSearchLeadPersisterService.RAW_FALLBACK_PREVIEW_CHARS
+			);
+
+			return {
+				_hint: "raw_truncated",
+				truncated: true,
+				originalSizeBytes: bytes,
+				previewChars: preview.length,
+				preview,
+			} as Prisma.InputJsonValue;
+		} catch {
+			// Worst-case fallback: store a minimal marker so we don't blow up the DB.
+			return {
+				_hint: "raw_unserializable",
+				truncated: true,
+			} as Prisma.InputJsonValue;
+		}
 	}
 }

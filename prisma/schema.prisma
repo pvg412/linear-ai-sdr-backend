@@ -250,6 +250,12 @@ model LeadSearchRunResult {
   providerExternalId String?
 
   raw Json?
+  rawBucket          String?
+  rawObjectKey       String?
+  rawContentType     String?
+  rawContentEncoding String?
+  rawSizeBytes       Int?
+  rawEtag            String?
 
   @@unique([runId, leadId])
   @@index([runId])
