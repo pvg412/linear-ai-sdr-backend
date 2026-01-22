@@ -12,6 +12,13 @@ export const CompanyResearchQuerySchema = z.object({
 
   // Maximum number of results per category
   maxResults: z.coerce.number().int().min(1).max(20).default(5),
+
+  // Include LinkedIn posts in research (defaults to true)
+  includeLinkedinPosts: z
+    .enum(["true", "false"])
+    .optional()
+    .default("true")
+    .transform((v) => v === "true"),
 });
 
 // Individual research item in response
@@ -19,7 +26,14 @@ export const CompanyResearchItemSchema = z.object({
   date: z.string().nullable(), // ISO date string or null if unknown
   summary: z.string(), // Short summary/extract
   sourceUrl: z.url(), // Source URL
-  category: z.enum(["news", "blog", "activity", "website"]),
+  category: z.enum(["news", "blog", "activity", "website", "linkedin_post"]),
+  engagement: z
+    .object({
+      likes: z.number(),
+      comments: z.number(),
+      shares: z.number(),
+    })
+    .optional(), // LinkedIn engagement metrics
 });
 
 // Full response schema

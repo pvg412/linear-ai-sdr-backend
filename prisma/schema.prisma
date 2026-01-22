@@ -78,6 +78,7 @@ enum CompanyResearchItemCategory {
   BLOG
   ACTIVITY
   WEBSITE
+  LINKEDIN_POST
 }
 
 enum CompanySize {
@@ -505,6 +506,7 @@ model CompanyResearchItem {
   summary   String                      @db.Text
   sourceUrl String
   category  CompanyResearchItemCategory
+  source    String? // 'perplexity' | 'linkedin'
 
   @@index([researchId])
   @@index([category])
