@@ -73,6 +73,13 @@ enum ChatMessageType {
   EVENT
 }
 
+enum CompanyResearchItemCategory {
+  NEWS
+  BLOG
+  ACTIVITY
+  WEBSITE
+}
+
 enum CompanySize {
   SELF_EMPLOYED
   STARTUP_1_10
@@ -119,11 +126,12 @@ model User {
   leadSearchesCreated     LeadSearch[]    @relation("LeadSearchCreatedBy")
   leadSearchRunsTriggered LeadSearchRun[] @relation("LeadSearchRunTriggeredBy")
 
-  leadsCreated    Lead[]           @relation("LeadCreatedBy")
-  leadSearchLeads LeadSearchLead[]
-  chatThreads     ChatThread[]     @relation("ChatThreadOwner")
-  chatMessages    ChatMessage[]    @relation("ChatMessageAuthor")
-  leadDirectories LeadDirectory[]
+  leadsCreated      Lead[]            @relation("LeadCreatedBy")
+  leadSearchLeads   LeadSearchLead[]
+  chatThreads       ChatThread[]      @relation("ChatThreadOwner")
+  chatMessages      ChatMessage[]     @relation("ChatMessageAuthor")
+  leadDirectories   LeadDirectory[]
+  companyResearches CompanyResearch[] @relation("CompanyResearchRequestedBy")
 
   @@index([role])
   @@index([isActive])
@@ -242,6 +250,7 @@ model Lead {
   leadDirectoryLeads LeadDirectoryLead[]
   companyWebsites    LeadCompanyWebsite[]
   emails             LeadEmail[]
+  companyResearches  CompanyResearch[]
 
   @@unique([email])
   @@unique([linkedinUrl])
@@ -456,4 +465,47 @@ model LeadEmail {
   @@index([email])
   @@index([status])
   @@index([isPrimary])
+}
+
+model CompanyResearch {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  requestedById String
+  requestedBy   User   @relation("CompanyResearchRequestedBy", fields: [requestedById], references: [id])
+
+  company       String
+  companyDomain String?
+
+  recency    String? // day, week, month, year
+  maxResults Int     @default(5)
+
+  searchedAt DateTime @default(now())
+
+  items            CompanyResearchItem[]
+  relatedQuestions String[]
+
+  @@index([leadId, createdAt])
+  @@index([requestedById])
+  @@index([company])
+}
+
+model CompanyResearchItem {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  researchId String
+  research   CompanyResearch @relation(fields: [researchId], references: [id], onDelete: Cascade)
+
+  date      String? // ISO date string or null if unknown
+  summary   String                      @db.Text
+  sourceUrl String
+  category  CompanyResearchItemCategory
+
+  @@index([researchId])
+  @@index([category])
 }

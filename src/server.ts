@@ -12,6 +12,7 @@ import { registerChatRoutes } from "./modules/chat/chat.controller";
 import { registerLeadRoutes } from "./modules/lead/lead.controller";
 import { registerLeadDirectoryRoutes } from "./modules/lead-directory/lead-directory.controller";
 import { registerLeadSearchRoutes } from "./modules/lead-search/lead-search.controller";
+import { registerCompanyResearchRoutes } from "./modules/company-research/company-research.controller";
 
 export async function buildServer() {
   const env = loadEnv();
@@ -64,6 +65,7 @@ export async function buildServer() {
   registerLeadRoutes(app);
   registerLeadDirectoryRoutes(app);
   registerLeadSearchRoutes(app);
+  registerCompanyResearchRoutes(app);
 
   return { app, env };
 }

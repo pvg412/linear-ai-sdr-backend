@@ -54,6 +54,8 @@ const EnvSchema = z.object({
 
   SEARCH_LEADS_API_KEY: z.string().optional(),
   SEARCH_LEADS_API_URL: z.url().optional(),
+
+  PERPLEXITY_API_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
