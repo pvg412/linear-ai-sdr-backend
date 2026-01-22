@@ -41,6 +41,8 @@ enum EmailStatus {
   RISKY
   CATCH_ALL
   UNKNOWN
+  VALID
+  INVALID
 }
 
 enum LeadListStatus {
@@ -69,6 +71,38 @@ enum ChatMessageType {
   TEXT
   JSON
   EVENT
+}
+
+enum CompanySize {
+  SELF_EMPLOYED
+  STARTUP_1_10
+  SMALL_11_50
+  MEDIUM_51_200
+  LARGE_201_500
+  ENTERPRISE_501_1000
+  CORPORATE_1001_5000
+  MEGA_5001_10000
+  GIANT_10000_PLUS
+  UNKNOWN
+}
+
+enum SeniorityLevel {
+  INTERN
+  ENTRY_LEVEL
+  JUNIOR
+  MID_LEVEL
+  SENIOR
+  LEAD
+  MANAGER
+  SENIOR_MANAGER
+  DIRECTOR
+  SENIOR_DIRECTOR
+  VP
+  SVP
+  C_LEVEL
+  FOUNDER
+  OWNER
+  UNKNOWN
 }
 
 model User {
@@ -171,17 +205,34 @@ model Lead {
   createdById String?
   createdBy   User?   @relation("LeadCreatedBy", fields: [createdById], references: [id])
 
-  fullName      String?
-  firstName     String?
-  lastName      String?
-  title         String?
-  company       String?
-  companyDomain String?
-  companyUrl    String?
-  linkedinUrl   String?
-  location      String?
-  email         String?
-  emailStatus   EmailStatus?
+  // Basic Info
+  fullName    String?
+  firstName   String?
+  lastName    String?
+  title       String?
+  headline    String?
+  linkedinUrl String?
+  location    String?
+  email       String?
+  emailStatus EmailStatus?
+
+  // Company Info
+  company            String?
+  companyDomain      String?
+  companyUrl         String?
+  companyId          String?
+  companyLinkedinUrl String?
+  companySize        CompanySize?
+  companyIndustry    String?
+  companyLocation    String?
+
+  // Position & Career
+  currentPosition      String?
+  seniorityLevel       SeniorityLevel?
+  department           String?
+  yearsInPosition      Int?
+  yearsInCompany       Int?
+  totalExperienceYears Int?
 
   meta Json?
 
@@ -189,14 +240,19 @@ model Lead {
   searches           LeadSearchLead[]
   runResults         LeadSearchRunResult[]
   leadDirectoryLeads LeadDirectoryLead[]
+  companyWebsites    LeadCompanyWebsite[]
+  emails             LeadEmail[]
 
   @@unique([email])
   @@unique([linkedinUrl])
   @@index([email])
   @@index([linkedinUrl])
   @@index([companyDomain])
+  @@index([companyId])
   @@index([isVerified])
   @@index([emailStatus])
+  @@index([seniorityLevel])
+  @@index([companySize])
 }
 
 model LeadProviderRef {
@@ -249,7 +305,7 @@ model LeadSearchRunResult {
   provider           LeadProvider
   providerExternalId String?
 
-  raw Json?
+  raw                Json?
   rawBucket          String?
   rawObjectKey       String?
   rawContentType     String?
@@ -358,4 +414,46 @@ model LeadDirectoryLead {
   @@unique([directoryId, leadId])
   @@index([directoryId, createdAt])
   @@index([leadId])
+}
+
+model LeadCompanyWebsite {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  url              String
+  domain           String
+  validEmailServer Boolean?
+
+  @@unique([leadId, domain])
+  @@index([leadId])
+  @@index([domain])
+}
+
+model LeadEmail {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  email            String
+  deliverable      Boolean?
+  catchAllDomain   Boolean?
+  validEmailServer Boolean?
+  free             Boolean?
+  status           EmailStatus?
+  qualityScore     Int?
+
+  isPrimary Boolean @default(false)
+
+  @@unique([leadId, email])
+  @@index([leadId])
+  @@index([email])
+  @@index([status])
+  @@index([isPrimary])
 }

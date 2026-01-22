@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "EmailStatus" ADD VALUE 'VALID';
+ALTER TYPE "EmailStatus" ADD VALUE 'INVALID';

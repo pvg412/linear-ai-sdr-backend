@@ -228,6 +228,11 @@ export class LeadSearchLeadPersisterService {
 
       await this.ensureProviderRef(existing.id, input.provider, externalId);
       await this.ensureEmailStatus(existing.id, incoming.emailStatus);
+      await this.upsertLeadEmails(existing.id, incoming.emails);
+      await this.upsertLeadCompanyWebsites(
+        existing.id,
+        incoming.companyWebsites,
+      );
       return existing.id;
     };
 
@@ -273,6 +278,11 @@ export class LeadSearchLeadPersisterService {
 
       await this.ensureProviderRef(created.id, input.provider, externalId);
       await this.ensureEmailStatus(created.id, incoming.emailStatus);
+      await this.upsertLeadEmails(created.id, incoming.emails);
+      await this.upsertLeadCompanyWebsites(
+        created.id,
+        incoming.companyWebsites,
+      );
       return created.id;
     } catch (e) {
       // 3) On unique constraint, try reuse instead of failing whole search
@@ -309,9 +319,21 @@ export class LeadSearchLeadPersisterService {
       firstName: lead.firstName ?? null,
       lastName: lead.lastName ?? null,
       title: lead.title ?? null,
+      headline: lead.headline ?? null,
       company: lead.company ?? null,
       companyDomain: lead.companyDomain ?? null,
       companyUrl: lead.companyUrl ?? null,
+      companyId: lead.companyId ?? null,
+      companyLinkedinUrl: lead.companyLinkedinUrl ?? null,
+      companySize: lead.companySize ?? null,
+      companyIndustry: lead.companyIndustry ?? null,
+      companyLocation: lead.companyLocation ?? null,
+      currentPosition: lead.currentPosition ?? null,
+      seniorityLevel: lead.seniorityLevel ?? null,
+      department: lead.department ?? null,
+      yearsInPosition: lead.yearsInPosition ?? null,
+      yearsInCompany: lead.yearsInCompany ?? null,
+      totalExperienceYears: lead.totalExperienceYears ?? null,
       linkedinUrl: lead.linkedinUrl ?? null,
       location: lead.location ?? null,
       meta: Prisma.DbNull,
@@ -332,9 +354,27 @@ export class LeadSearchLeadPersisterService {
       firstName: pick(existing.firstName, incoming.firstName),
       lastName: pick(existing.lastName, incoming.lastName),
       title: pick(existing.title, incoming.title),
+      headline: pick(existing.headline, incoming.headline),
       company: pick(existing.company, incoming.company),
       companyDomain: pick(existing.companyDomain, incoming.companyDomain),
       companyUrl: pick(existing.companyUrl, incoming.companyUrl),
+      companyId: pick(existing.companyId, incoming.companyId),
+      companyLinkedinUrl: pick(
+        existing.companyLinkedinUrl,
+        incoming.companyLinkedinUrl,
+      ),
+      companySize: pick(existing.companySize, incoming.companySize),
+      companyIndustry: pick(existing.companyIndustry, incoming.companyIndustry),
+      companyLocation: pick(existing.companyLocation, incoming.companyLocation),
+      currentPosition: pick(existing.currentPosition, incoming.currentPosition),
+      seniorityLevel: pick(existing.seniorityLevel, incoming.seniorityLevel),
+      department: pick(existing.department, incoming.department),
+      yearsInPosition: pick(existing.yearsInPosition, incoming.yearsInPosition),
+      yearsInCompany: pick(existing.yearsInCompany, incoming.yearsInCompany),
+      totalExperienceYears: pick(
+        existing.totalExperienceYears,
+        incoming.totalExperienceYears,
+      ),
       linkedinUrl: pick(existing.linkedinUrl, incoming.linkedinUrl),
       location: pick(existing.location, incoming.location),
       email: pick(
@@ -408,6 +448,96 @@ export class LeadSearchLeadPersisterService {
         _hint: "raw_unserializable",
         truncated: true,
       } as Prisma.InputJsonValue;
+    }
+  }
+
+  private async upsertLeadEmails(
+    leadId: string,
+    emails?: NormalizedLead["emails"],
+  ): Promise<void> {
+    if (!emails || emails.length === 0) return;
+
+    for (const emailData of emails) {
+      try {
+        await this.prisma.leadEmail.upsert({
+          where: {
+            leadId_email: {
+              leadId,
+              email: emailData.email.trim().toLowerCase(),
+            },
+          },
+          create: {
+            leadId,
+            email: emailData.email.trim().toLowerCase(),
+            deliverable: emailData.deliverable ?? null,
+            catchAllDomain: emailData.catchAllDomain ?? null,
+            validEmailServer: emailData.validEmailServer ?? null,
+            free: emailData.free ?? null,
+            status: emailData.status ?? null,
+            qualityScore: emailData.qualityScore ?? null,
+            isPrimary: emailData.isPrimary ?? false,
+          },
+          update: {
+            deliverable: emailData.deliverable ?? undefined,
+            catchAllDomain: emailData.catchAllDomain ?? undefined,
+            validEmailServer: emailData.validEmailServer ?? undefined,
+            free: emailData.free ?? undefined,
+            status: emailData.status ?? undefined,
+            qualityScore: emailData.qualityScore ?? undefined,
+            isPrimary: emailData.isPrimary ?? undefined,
+          },
+        });
+      } catch (err) {
+        // Log but don't fail the whole lead import
+        console.warn(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            leadId,
+            email: emailData.email,
+          },
+          "Failed to upsert LeadEmail",
+        );
+      }
+    }
+  }
+
+  private async upsertLeadCompanyWebsites(
+    leadId: string,
+    websites?: NormalizedLead["companyWebsites"],
+  ): Promise<void> {
+    if (!websites || websites.length === 0) return;
+
+    for (const website of websites) {
+      try {
+        await this.prisma.leadCompanyWebsite.upsert({
+          where: {
+            leadId_domain: {
+              leadId,
+              domain: website.domain.trim().toLowerCase(),
+            },
+          },
+          create: {
+            leadId,
+            url: website.url.trim(),
+            domain: website.domain.trim().toLowerCase(),
+            validEmailServer: website.validEmailServer ?? null,
+          },
+          update: {
+            url: website.url.trim(),
+            validEmailServer: website.validEmailServer ?? undefined,
+          },
+        });
+      } catch (err) {
+        // Log but don't fail the whole lead import
+        console.warn(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            leadId,
+            domain: website.domain,
+          },
+          "Failed to upsert LeadCompanyWebsite",
+        );
+      }
     }
   }
 }

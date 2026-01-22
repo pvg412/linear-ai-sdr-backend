@@ -1,6 +1,10 @@
 import { LeadProvider } from "@prisma/client";
 
-import type { NormalizedLead } from "@/capabilities/shared/leadValidate";
+import type {
+  NormalizedLead,
+  NormalizedLeadEmail,
+  NormalizedCompanyWebsite,
+} from "@/capabilities/shared/leadValidate";
 import type { ScraperCityApolloRow } from "./scrapercity.schemas";
 import {
   composeFullName,
@@ -45,6 +49,49 @@ function domainFromUrlMaybe(url: string | undefined): string | undefined {
   }
 }
 
+function extractEmails(row: ScraperCityApolloRow): NormalizedLeadEmail[] {
+  const emails: NormalizedLeadEmail[] = [];
+
+  const email = pickFirstEmail(
+    pickString(row.workEmail, row.work_email),
+    pickString(row.email),
+  );
+
+  if (!email) return emails;
+
+  emails.push({
+    email,
+    status: normalizeScraperCityEmailResult(
+      pickString(row.emailResult, row.email_result),
+    ),
+    isPrimary: true,
+  });
+
+  return emails;
+}
+
+function extractCompanyWebsites(
+  row: ScraperCityApolloRow,
+): NormalizedCompanyWebsite[] {
+  const websites: NormalizedCompanyWebsite[] = [];
+
+  const companyUrl = pickString(row.orgWebsite, row.company_website);
+  const domainCandidate = pickString(row.orgDomain, row.company_domain);
+  const companyDomain =
+    normalizeDomain(domainCandidate) ??
+    normalizeDomain(domainFromUrlMaybe(companyUrl)) ??
+    normalizeDomain(companyUrl);
+
+  if (companyUrl && companyDomain) {
+    websites.push({
+      url: companyUrl,
+      domain: companyDomain,
+    });
+  }
+
+  return websites;
+}
+
 export function mapScraperCityRowsToLeads(
   rows: ScraperCityApolloRow[],
 ): NormalizedLead[] {
@@ -78,6 +125,9 @@ export function mapScraperCityRowsToLeads(
 
     const location = buildLocation(row);
 
+    const extractedEmails = extractEmails(row);
+    const extractedWebsites = extractCompanyWebsites(row);
+
     return {
       source: LeadProvider.SCRAPER_CITY,
       externalId: pickString(row.id),
@@ -95,10 +145,17 @@ export function mapScraperCityRowsToLeads(
       linkedinUrl: linkedinUrl ?? undefined,
       location: location ?? undefined,
 
+      // Legacy single email (for backward compatibility)
       email: email ?? undefined,
       emailStatus: normalizeScraperCityEmailResult(
         pickString(row.emailResult, row.email_result),
       ),
+
+      // New: multiple emails with metadata
+      emails: extractedEmails.length > 0 ? extractedEmails : undefined,
+      // New: multiple company websites
+      companyWebsites:
+        extractedWebsites.length > 0 ? extractedWebsites : undefined,
 
       // keep provider row for debugging
       raw: row,

@@ -50,6 +50,28 @@ export type ApifyLinkedinProfileExperience = z.infer<
   typeof ApifyLinkedinProfileExperienceSchema
 >;
 
+// Schema for email with metadata from Apify
+export const ApifyEmailSchema = z.looseObject({
+  email: z.string(),
+  deliverable: z.boolean().optional().nullable(),
+  catchAllDomain: z.boolean().optional().nullable(),
+  validEmailServer: z.boolean().optional().nullable(),
+  free: z.boolean().optional().nullable(),
+  status: z.string().optional().nullable(),
+  qualityScore: z.number().optional().nullable(),
+});
+
+export type ApifyEmail = z.infer<typeof ApifyEmailSchema>;
+
+// Schema for company website from Apify
+export const ApifyCompanyWebsiteSchema = z.looseObject({
+  url: z.string(),
+  domain: z.string(),
+  validEmailServer: z.boolean().optional().nullable(),
+});
+
+export type ApifyCompanyWebsite = z.infer<typeof ApifyCompanyWebsiteSchema>;
+
 export const ApifyLinkedinProfileRowSchema = z.looseObject({
   id: z.string().optional().nullable(),
   publicIdentifier: z.string().optional().nullable(),
@@ -78,6 +100,9 @@ export const ApifyLinkedinProfileRowSchema = z.looseObject({
   companyWebsite: z.string().optional().nullable(),
   companyUrl: z.string().optional().nullable(),
   companyLinkedinUrl: z.string().optional().nullable(),
+
+  // Multiple company websites with metadata
+  companyWebsites: z.array(ApifyCompanyWebsiteSchema).optional().nullable(),
 
   email: z.string().optional().nullable(),
   // Apify sometimes returns objects inside emails[]; keep it permissive and normalize later.

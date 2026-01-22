@@ -1,5 +1,35 @@
 import { z } from "zod";
-import { EmailStatus, LeadProvider } from "@prisma/client";
+import {
+  EmailStatus,
+  LeadProvider,
+  CompanySize,
+  SeniorityLevel,
+} from "@prisma/client";
+
+// Schema for multiple emails with metadata
+export const NormalizedLeadEmailSchema = z.object({
+  email: z.email(),
+  deliverable: z.boolean().optional(),
+  catchAllDomain: z.boolean().optional(),
+  validEmailServer: z.boolean().optional(),
+  free: z.boolean().optional(),
+  status: z.enum(EmailStatus).optional(),
+  qualityScore: z.number().int().min(0).max(100).optional(),
+  isPrimary: z.boolean().optional(),
+});
+
+export type NormalizedLeadEmail = z.infer<typeof NormalizedLeadEmailSchema>;
+
+// Schema for multiple company websites
+export const NormalizedCompanyWebsiteSchema = z.object({
+  url: z.string().min(1),
+  domain: z.string().min(1),
+  validEmailServer: z.boolean().optional(),
+});
+
+export type NormalizedCompanyWebsite = z.infer<
+  typeof NormalizedCompanyWebsiteSchema
+>;
 
 export const NormalizedLeadSchema = z
   .object({
@@ -12,19 +42,35 @@ export const NormalizedLeadSchema = z
     lastName: z.string().min(1).optional(),
 
     title: z.string().min(1).optional(),
+    headline: z.string().min(1).optional(),
 
     company: z.string().min(1).optional(),
     companyDomain: z.string().min(1).optional(),
     companyUrl: z.string().min(1).optional(),
+    companyId: z.string().min(1).optional(),
+    companyLinkedinUrl: z.string().min(1).optional(),
+    companySize: z.enum(CompanySize).optional(),
+    companyIndustry: z.string().min(1).optional(),
+    companyLocation: z.string().min(1).optional(),
+
+    currentPosition: z.string().min(1).optional(),
+    seniorityLevel: z.enum(SeniorityLevel).optional(),
+    department: z.string().min(1).optional(),
+    yearsInPosition: z.number().int().min(0).optional(),
+    yearsInCompany: z.number().int().min(0).optional(),
+    totalExperienceYears: z.number().int().min(0).optional(),
 
     linkedinUrl: z.string().min(1).optional(),
     location: z.string().min(1).optional(),
 
-    // This is strict; if you have lots of non-RFC emails, consider relaxing to z.string().min(3)
+    // Legacy single email (for backward compatibility)
     email: z.email().optional(),
-
-    // Normalized deliverability; optional because not all providers return it.
     emailStatus: z.enum(EmailStatus).optional(),
+
+    // New: multiple emails with metadata
+    emails: z.array(NormalizedLeadEmailSchema).optional(),
+    // New: multiple company websites
+    companyWebsites: z.array(NormalizedCompanyWebsiteSchema).optional(),
 
     raw: z.unknown().optional(),
   })

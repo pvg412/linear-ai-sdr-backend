@@ -1,6 +1,10 @@
-import { LeadProvider } from "@prisma/client";
+import { LeadProvider, EmailStatus } from "@prisma/client";
 
-import type { NormalizedLead } from "@/capabilities/shared/leadValidate";
+import type {
+  NormalizedLead,
+  NormalizedLeadEmail,
+  NormalizedCompanyWebsite,
+} from "@/capabilities/shared/leadValidate";
 import {
   composeFullName,
   joinLocationParts,
@@ -135,6 +139,101 @@ function readStringArray(values: unknown): string[] {
   return out;
 }
 
+function normalizeEmailStatus(
+  status: string | null | undefined,
+): EmailStatus | undefined {
+  if (!status) return undefined;
+  const lower = status.toLowerCase().trim();
+
+  if (lower === "valid" || lower === "deliverable") return EmailStatus.VALID;
+  if (lower === "invalid" || lower === "undeliverable")
+    return EmailStatus.INVALID;
+  if (lower === "risky") return EmailStatus.RISKY;
+  if (lower === "catch_all" || lower === "catchall")
+    return EmailStatus.CATCH_ALL;
+
+  return EmailStatus.UNKNOWN;
+}
+
+function extractEmails(row: ApifyLinkedinProfileRow): NormalizedLeadEmail[] {
+  const emails: NormalizedLeadEmail[] = [];
+
+  if (!Array.isArray(row.emails)) return emails;
+
+  for (const item of row.emails) {
+    // Try to parse as ApifyEmail object
+    if (isRecord(item) && item.email) {
+      const emailStr = cleanValue(item.email);
+      if (!emailStr) continue;
+
+      emails.push({
+        email: emailStr,
+        deliverable:
+          typeof item.deliverable === "boolean" ? item.deliverable : undefined,
+        catchAllDomain:
+          typeof item.catchAllDomain === "boolean"
+            ? item.catchAllDomain
+            : undefined,
+        validEmailServer:
+          typeof item.validEmailServer === "boolean"
+            ? item.validEmailServer
+            : undefined,
+        free: typeof item.free === "boolean" ? item.free : undefined,
+        status: normalizeEmailStatus(item.status as string),
+        qualityScore:
+          typeof item.qualityScore === "number"
+            ? Math.round(item.qualityScore)
+            : undefined,
+        isPrimary: false,
+      });
+    } else {
+      // Fallback: treat as plain string
+      const emailStr = extractEmailLike(item);
+      if (emailStr) {
+        emails.push({
+          email: emailStr,
+          isPrimary: false,
+        });
+      }
+    }
+  }
+
+  // Mark first email as primary if we have any
+  if (emails.length > 0) {
+    emails[0].isPrimary = true;
+  }
+
+  return emails;
+}
+
+function extractCompanyWebsites(
+  row: ApifyLinkedinProfileRow,
+): NormalizedCompanyWebsite[] {
+  const websites: NormalizedCompanyWebsite[] = [];
+
+  if (!Array.isArray(row.companyWebsites)) return websites;
+
+  for (const item of row.companyWebsites) {
+    if (!isRecord(item)) continue;
+
+    const url = cleanValue(item.url);
+    const domain = cleanValue(item.domain);
+
+    if (!url || !domain) continue;
+
+    websites.push({
+      url,
+      domain,
+      validEmailServer:
+        typeof item.validEmailServer === "boolean"
+          ? item.validEmailServer
+          : undefined,
+    });
+  }
+
+  return websites;
+}
+
 export function mapApifyLinkedinRowsToLeads(
   rows: ApifyLinkedinProfileRow[],
 ): NormalizedLead[] {
@@ -191,6 +290,13 @@ export function mapApifyLinkedinRowsToLeads(
         ? `public:${row.publicIdentifier}`
         : undefined);
 
+    // Extract new data: multiple emails and company websites
+    const extractedEmails = extractEmails(row);
+    const extractedWebsites = extractCompanyWebsites(row);
+
+    // Extract companyId from currentPosition or experience
+    const companyId = pickString(companyEntry?.companyId);
+
     return {
       source: LeadProvider.APIFY,
       externalId: externalId,
@@ -200,14 +306,20 @@ export function mapApifyLinkedinRowsToLeads(
       lastName: lastName ? trimOrUndefined(lastName) : undefined,
 
       title: title ? trimOrUndefined(title) : undefined,
+      headline: pickString(row.headline),
 
       company: company ? trimOrUndefined(company) : undefined,
       companyDomain: companyDomain ?? undefined,
       companyUrl: companyUrl ? trimOrUndefined(companyUrl) : undefined,
+      companyId: companyId,
+      companyLinkedinUrl: companyLinkedinUrl
+        ? trimOrUndefined(companyLinkedinUrl)
+        : undefined,
 
       linkedinUrl: linkedinUrl ?? undefined,
       location: location ?? undefined,
 
+      // Legacy single email (for backward compatibility)
       email: email ?? undefined,
       emailStatus: normalizeApifyEmailStatus({
         selectedEmail: email ?? undefined,
@@ -215,6 +327,12 @@ export function mapApifyLinkedinRowsToLeads(
         contactEmails: row.contactInfo?.emails,
         legacyEmailResult: pickString(row.emailResult, row.email_result),
       }),
+
+      // New: multiple emails with metadata
+      emails: extractedEmails.length > 0 ? extractedEmails : undefined,
+      // New: multiple company websites
+      companyWebsites:
+        extractedWebsites.length > 0 ? extractedWebsites : undefined,
 
       raw: row,
     };
