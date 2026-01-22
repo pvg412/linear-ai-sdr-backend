@@ -11,7 +11,7 @@ export class LeadQueryService {
   constructor(
     @inject(LEAD_TYPES.LeadRepository)
     private readonly leadRepository: LeadRepository,
-  ) {}
+  ) { }
 
   private async assertUserExists(userId: string): Promise<void> {
     const prisma = getPrisma();
@@ -68,5 +68,32 @@ export class LeadQueryService {
       filters: { leadSearchId: input.leadSearchId },
       includeUnverified: true,
     });
+  }
+
+  async getLeadDetail(userId: string, leadId: string) {
+    await this.assertUserExists(userId);
+
+    const prisma = getPrisma();
+
+    const lead = await prisma.lead.findUnique({
+      where: { id: leadId },
+      include: {
+        emails: {
+          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+        },
+        companyWebsites: {
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+
+    if (!lead) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "Lead not found",
+      });
+    }
+
+    return lead;
   }
 }

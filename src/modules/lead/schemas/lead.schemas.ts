@@ -61,3 +61,7 @@ export const LeadSearchLeadsVerifySchema = z
       .max(500),
   })
   .strict();
+
+export const LeadIdParamsSchema = z.object({
+  leadId: z.cuid(),
+});

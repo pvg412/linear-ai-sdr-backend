@@ -11,6 +11,7 @@ import {
   LeadSearchIdParamsSchema,
   LeadSearchLeadsPaginationSchema,
   LeadSearchLeadsVerifySchema,
+  LeadIdParamsSchema,
 } from "./schemas/lead.schemas";
 
 const leadQueryService = container.get<LeadQueryService>(
@@ -60,5 +61,13 @@ export function registerLeadRoutes(app: FastifyInstance): void {
       leadSearchId: params.leadSearchId,
       items: body.items,
     });
+  });
+
+  app.get("/leads/:leadId", async (req) => {
+    const user = requireRequestUser(req);
+
+    const params = LeadIdParamsSchema.parse(req.params);
+
+    return await leadQueryService.getLeadDetail(user.id, params.leadId);
   });
 }
