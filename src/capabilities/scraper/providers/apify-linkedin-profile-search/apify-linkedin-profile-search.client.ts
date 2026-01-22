@@ -5,7 +5,7 @@ import {
   ApifyLinkedinProfileRowSchema,
   type ApifyActorRun,
   type ApifyLinkedinProfileRow,
-} from "./apify.schemas";
+} from "./apify-linkedin-profile-search.schemas";
 
 const DEFAULT_ACTOR_ID = "harvestapi/linkedin-profile-search";
 const DATASET_PAGE_LIMIT = 1000;

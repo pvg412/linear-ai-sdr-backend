@@ -17,8 +17,8 @@ import type {
   ApifyLinkedinProfileCompany,
   ApifyLinkedinProfileExperience,
   ApifyLinkedinProfileRow,
-} from "./apify.schemas";
-import { normalizeApifyEmailStatus } from "./apify.emailStatus";
+} from "./apify-linkedin-profile-search.schemas";
+import { normalizeApifyEmailStatus } from "./apify-linkedin-profile-search.emailStatus";
 
 type UnknownRecord = Record<string, unknown>;
 

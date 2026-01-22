@@ -4,7 +4,7 @@ import { loadEnv } from "@/config/env";
 import { SCRAPER_TYPES } from "./scraper.types";
 import { ScraperAdapter } from "./scraper.dto";
 import { ScraperOrchestrator } from "./scraper.orchestrator";
-import { ApifyScraperAdapter } from "./providers/apify/apify.adapter";
+import { ApifyLinkedinProfileSearchScraperAdapter } from "./providers/apify-linkedin-profile-search/apify-linkedin-profile-search.adapter";
 import { ScraperCityScraperAdapter } from "./providers/scrapercity/scrapercity.adapter";
 
 const env = loadEnv();
@@ -24,7 +24,7 @@ export function registerScraperModule(container: Container) {
   container
     .bind<ScraperAdapter>(SCRAPER_TYPES.ScraperAdapter)
     .toDynamicValue(() => {
-      return new ApifyScraperAdapter(
+      return new ApifyLinkedinProfileSearchScraperAdapter(
         env.APIFY_TOKEN ?? "",
         isApifyEnabled,
         env.APIFY_MONGODB_CONNECTION_STRING ?? "",

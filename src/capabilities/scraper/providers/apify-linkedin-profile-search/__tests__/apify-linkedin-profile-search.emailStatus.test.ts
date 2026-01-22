@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { normalizeApifyEmailStatus } from "../apify.emailStatus";
+import { normalizeApifyEmailStatus } from "../apify-linkedin-profile-search.emailStatus";
 
 describe("normalizeApifyEmailStatus()", () => {
   test("maps emails[].status=valid to DELIVERABLE", () => {

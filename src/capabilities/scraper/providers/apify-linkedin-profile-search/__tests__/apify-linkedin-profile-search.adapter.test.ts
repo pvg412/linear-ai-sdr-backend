@@ -5,7 +5,7 @@ const startMock = vi.fn();
 const getDatasetItemCountMock = vi.fn();
 const getDatasetLastItemMock = vi.fn();
 
-vi.mock("../apify.client", () => {
+vi.mock("../apify-linkedin-profile-search.client", () => {
   return {
     // Must be constructible: ApifyScraperAdapter does `new ApifyLinkedinProfileSearchClient(...)`.
     ApifyLinkedinProfileSearchClient: class ApifyLinkedinProfileSearchClient {
@@ -31,8 +31,9 @@ describe("ApifyScraperAdapter.checkStatus()", () => {
       defaultDatasetId: "ds_1",
     });
 
-    const { ApifyScraperAdapter } = await import("../apify.adapter");
-    const adapter = new ApifyScraperAdapter(
+    const { ApifyLinkedinProfileSearchScraperAdapter } =
+      await import("../apify-linkedin-profile-search.adapter");
+    const adapter = new ApifyLinkedinProfileSearchScraperAdapter(
       "token",
       true,
       "mongodb://localhost:27017",
@@ -53,8 +54,9 @@ describe("ApifyScraperAdapter.checkStatus()", () => {
       defaultDatasetId: "ds_2",
     });
 
-    const { ApifyScraperAdapter } = await import("../apify.adapter");
-    const adapter = new ApifyScraperAdapter(
+    const { ApifyLinkedinProfileSearchScraperAdapter } =
+      await import("../apify-linkedin-profile-search.adapter");
+    const adapter = new ApifyLinkedinProfileSearchScraperAdapter(
       "token",
       true,
       "mongodb://localhost:27017",
@@ -72,8 +74,9 @@ describe("ApifyScraperAdapter.checkStatus()", () => {
       defaultDatasetId: "ds_3",
     });
 
-    const { ApifyScraperAdapter } = await import("../apify.adapter");
-    const adapter = new ApifyScraperAdapter(
+    const { ApifyLinkedinProfileSearchScraperAdapter } =
+      await import("../apify-linkedin-profile-search.adapter");
+    const adapter = new ApifyLinkedinProfileSearchScraperAdapter(
       "token",
       true,
       "mongodb://localhost:27017",
@@ -99,9 +102,9 @@ describe("ApifyScraperAdapter.getRateLimitResumePlan()", () => {
       _meta: { pagination: { pageNumber: 3 } },
     });
 
-    const { ApifyScraperAdapter, msUntilNextHour } =
-      await import("../apify.adapter");
-    const adapter = new ApifyScraperAdapter(
+    const { ApifyLinkedinProfileSearchScraperAdapter, msUntilNextHour } =
+      await import("../apify-linkedin-profile-search.adapter");
+    const adapter = new ApifyLinkedinProfileSearchScraperAdapter(
       "token",
       true,
       "mongodb://localhost:27017",

@@ -17,13 +17,13 @@ import { UserFacingError } from "@/infra/userFacingError";
 import {
   ApifyLinkedinProfileSearchClient,
   type ApifyLinkedinProfileSearchInput,
-} from "./apify.client";
-import { mapApifyLinkedinRowsToLeads } from "./apify.leadMapper";
-import { wrapApifyError } from "./apify.errors";
-import { ApifyActorRunSchema } from "./apify.schemas";
+} from "./apify-linkedin-profile-search.client";
+import { mapApifyLinkedinRowsToLeads } from "./apify-linkedin-profile-search.leadMapper";
+import { wrapApifyError } from "./apify-linkedin-profile-search.errors";
+import { ApifyActorRunSchema } from "./apify-linkedin-profile-search.schemas";
 
 @injectable()
-export class ApifyScraperAdapter implements ScraperAdapter {
+export class ApifyLinkedinProfileSearchScraperAdapter implements ScraperAdapter {
   public readonly provider = LeadProvider.APIFY;
 
   // 1 minute
