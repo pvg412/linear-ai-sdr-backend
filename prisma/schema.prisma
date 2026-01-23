@@ -113,6 +113,20 @@ enum SeniorityLevel {
   UNKNOWN
 }
 
+enum LeadEnrichmentStatus {
+  PENDING
+  PROCESSING
+  AWAITING_REVIEW
+  COMPLETED
+  FAILED
+}
+
+enum EnrichmentFieldStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model User {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -133,6 +147,9 @@ model User {
   chatMessages      ChatMessage[]     @relation("ChatMessageAuthor")
   leadDirectories   LeadDirectory[]
   companyResearches CompanyResearch[] @relation("CompanyResearchRequestedBy")
+
+  enrichmentRequestsCreated LeadEnrichmentRequest[]     @relation("EnrichmentRequestedBy")
+  enrichmentFieldsReviewed  LeadEnrichmentFieldChange[] @relation("EnrichmentFieldReviewedBy")
 
   @@index([role])
   @@index([isActive])
@@ -208,22 +225,24 @@ model Lead {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  origin     LeadOrigin @default(PROVIDER)
-  isVerified Boolean    @default(false)
+  origin               LeadOrigin @default(PROVIDER)
+  isVerified           Boolean    @default(false)
+  hasPendingEnrichment Boolean    @default(false)
 
   createdById String?
   createdBy   User?   @relation("LeadCreatedBy", fields: [createdById], references: [id])
 
   // Basic Info
-  fullName    String?
-  firstName   String?
-  lastName    String?
-  title       String?
-  headline    String?
-  linkedinUrl String?
-  location    String?
-  email       String?
-  emailStatus EmailStatus?
+  fullName     String?
+  firstName    String?
+  lastName     String?
+  title        String?
+  headline     String?
+  linkedinUrl  String?
+  location     String?
+  email        String?
+  emailStatus  EmailStatus?
+  mobileNumber String?
 
   // Company Info
   company            String?
@@ -253,6 +272,8 @@ model Lead {
   emails             LeadEmail[]
   companyResearches  CompanyResearch[]
 
+  enrichmentRequests LeadEnrichmentRequest[]
+
   @@unique([email])
   @@unique([linkedinUrl])
   @@index([email])
@@ -260,6 +281,7 @@ model Lead {
   @@index([companyDomain])
   @@index([companyId])
   @@index([isVerified])
+  @@index([hasPendingEnrichment])
   @@index([emailStatus])
   @@index([seniorityLevel])
   @@index([companySize])
@@ -510,4 +532,55 @@ model CompanyResearchItem {
 
   @@index([researchId])
   @@index([category])
+}
+
+model LeadEnrichmentRequest {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  requestedById String
+  requestedBy   User   @relation("EnrichmentRequestedBy", fields: [requestedById], references: [id])
+
+  status LeadEnrichmentStatus @default(PENDING)
+
+  apifyRunId     String?
+  apifyDatasetId String?
+
+  rawResponse  Json?
+  errorMessage String?
+
+  fieldChanges LeadEnrichmentFieldChange[]
+
+  @@index([leadId, status])
+  @@index([requestedById])
+  @@index([status, createdAt])
+}
+
+model LeadEnrichmentFieldChange {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  requestId String
+  request   LeadEnrichmentRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  fieldName   String
+  displayName String
+
+  oldValue String?
+  newValue String?
+
+  status EnrichmentFieldStatus @default(PENDING)
+
+  reviewedById String?
+  reviewedBy   User?     @relation("EnrichmentFieldReviewedBy", fields: [reviewedById], references: [id])
+  reviewedAt   DateTime?
+
+  @@unique([requestId, fieldName])
+  @@index([requestId])
+  @@index([status])
 }

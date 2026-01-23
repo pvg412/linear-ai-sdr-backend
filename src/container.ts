@@ -13,6 +13,7 @@ import { registerAiGrpcClientModule } from "./infra/ai-grpc-client/ai-grpc-clien
 import { registerLeadRagModule } from "./modules/lead-rag/lead-rag.module";
 import { registerObjectStorageModule } from "./infra/object-storage/object-storage.module";
 import { registerCompanyResearchModule } from "./modules/company-research/company-research.module";
+import { registerProfileEnrichmentModule } from "./modules/profile-enrichment/profile-enrichment.module";
 
 const container = new Container();
 
@@ -28,5 +29,6 @@ registerChatModule(container);
 registerLeadSearchModule(container);
 registerLeadDirectoryModule(container);
 registerCompanyResearchModule(container);
+registerProfileEnrichmentModule(container);
 
 export { container };

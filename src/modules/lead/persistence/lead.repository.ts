@@ -132,7 +132,11 @@ export class LeadRepository {
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.lead.findMany({
         where,
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        orderBy: [
+          { hasPendingEnrichment: "desc" }, // Pending enrichment first
+          { createdAt: "desc" },
+          { id: "desc" },
+        ],
         take: opts.perPage + 1,
         skip: (opts.page - 1) * opts.perPage,
         include: {
@@ -169,6 +173,7 @@ export class LeadRepository {
       items: rows.map((item) => ({
         id: item.id,
         isVerified: item.isVerified,
+        hasPendingEnrichment: item.hasPendingEnrichment,
         createdById: item.createdById ?? null,
         fullName: item.fullName ?? null,
         firstName: item.firstName ?? null,

@@ -14,6 +14,11 @@ import {
   LeadRagIndexJobData,
   LeadRagIndexJobName,
 } from "./lead-rag/lead-rag-index.queue";
+import {
+  createProfileEnrichmentQueue,
+  ProfileEnrichmentJobData,
+  ProfileEnrichmentJobName,
+} from "./profile-enrichment/profile-enrichment.queue";
 
 const redis = tryCreateRedisClient();
 
@@ -35,6 +40,14 @@ export function registerQueueModule(container: Container) {
         Queue<LeadRagIndexJobData, void, LeadRagIndexJobName>
       >(QUEUE_TYPES.LeadRagIndexQueue)
       .toConstantValue(leadRagIndexQueue);
+
+    const profileEnrichmentQueue = createProfileEnrichmentQueue(redis);
+
+    container
+      .bind<
+        Queue<ProfileEnrichmentJobData, void, ProfileEnrichmentJobName>
+      >(QUEUE_TYPES.ProfileEnrichmentQueue)
+      .toConstantValue(profileEnrichmentQueue);
   } else {
     console.warn("[queue] REDIS_URL not set; LeadSearch will run inline");
   }

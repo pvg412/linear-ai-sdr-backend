@@ -13,6 +13,7 @@ import { registerLeadRoutes } from "./modules/lead/lead.controller";
 import { registerLeadDirectoryRoutes } from "./modules/lead-directory/lead-directory.controller";
 import { registerLeadSearchRoutes } from "./modules/lead-search/lead-search.controller";
 import { registerCompanyResearchRoutes } from "./modules/company-research/company-research.controller";
+import { registerProfileEnrichmentRoutes } from "./modules/profile-enrichment/profile-enrichment.controller";
 
 export async function buildServer() {
   const env = loadEnv();
@@ -66,6 +67,7 @@ export async function buildServer() {
   registerLeadDirectoryRoutes(app);
   registerLeadSearchRoutes(app);
   registerCompanyResearchRoutes(app);
+  registerProfileEnrichmentRoutes(app);
 
   return { app, env };
 }
