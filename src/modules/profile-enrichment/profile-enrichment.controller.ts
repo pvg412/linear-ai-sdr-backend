@@ -8,6 +8,7 @@ import { ProfileEnrichmentCommandService } from "./services/profile-enrichment.c
 import { ProfileEnrichmentQueryService } from "./services/profile-enrichment.query.service";
 import {
   ProfileEnrichmentParamsSchema,
+  ProfileEnrichmentStatusParamsSchema,
   RequestEnrichmentBodySchema,
   ReviewEnrichmentBodySchema,
   EnrichmentHistoryQuerySchema,
@@ -37,6 +38,22 @@ export function registerProfileEnrichmentRoutes(app: FastifyInstance): void {
     reply.code(202);
     return result;
   });
+
+  // GET /leads/:leadId/enrichment/status/:enrichmentRequestId - Get enrichment status
+  app.get(
+    "/leads/:leadId/enrichment/status/:enrichmentRequestId",
+    async (req) => {
+      const user = requireRequestUser(req);
+
+      const params = ProfileEnrichmentStatusParamsSchema.parse(req.params);
+
+      return await queryService.getEnrichmentStatus(
+        user.id,
+        params.leadId,
+        params.enrichmentRequestId,
+      );
+    },
+  );
 
   // GET /leads/:leadId/enrichment/pending - Get pending enrichment changes
   app.get("/leads/:leadId/enrichment/pending", async (req) => {

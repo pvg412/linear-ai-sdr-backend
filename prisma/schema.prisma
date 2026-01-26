@@ -81,6 +81,13 @@ enum CompanyResearchItemCategory {
   LINKEDIN_POST
 }
 
+enum CompanyResearchStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 enum CompanySize {
   SELF_EMPLOYED
   STARTUP_1_10
@@ -507,6 +514,9 @@ model CompanyResearch {
   recency    String? // day, week, month, year
   maxResults Int     @default(5)
 
+  status       CompanyResearchStatus @default(PENDING)
+  errorMessage String?
+
   searchedAt DateTime @default(now())
 
   items            CompanyResearchItem[]
@@ -515,6 +525,7 @@ model CompanyResearch {
   @@index([leadId, createdAt])
   @@index([requestedById])
   @@index([company])
+  @@index([status])
 }
 
 model CompanyResearchItem {

@@ -45,7 +45,7 @@ export class ProfileEnrichmentQueryService {
   constructor(
     @inject(PROFILE_ENRICHMENT_TYPES.ProfileEnrichmentRepository)
     private readonly repository: ProfileEnrichmentRepository,
-  ) {}
+  ) { }
 
   async getPendingEnrichment(
     userId: string,
@@ -141,6 +141,51 @@ export class ProfileEnrichmentQueryService {
         summary: item.fieldChangesSummary,
       })),
       total: result.total,
+    };
+  }
+
+  async getEnrichmentStatus(
+    userId: string,
+    leadId: string,
+    enrichmentRequestId: string,
+  ): Promise<{
+    id: string;
+    status: LeadEnrichmentStatus;
+    errorMessage: string | null;
+    fieldChangesCount: number;
+  }> {
+    // Verify lead exists
+    const lead = await this.repository.findLeadById(leadId);
+
+    if (!lead) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "Lead not found",
+      });
+    }
+
+    const enrichmentRequest =
+      await this.repository.findEnrichmentRequestById(enrichmentRequestId);
+
+    if (!enrichmentRequest) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "Enrichment request not found",
+      });
+    }
+
+    if (enrichmentRequest.leadId !== leadId) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "Enrichment request not found for this lead",
+      });
+    }
+
+    return {
+      id: enrichmentRequest.id,
+      status: enrichmentRequest.status,
+      errorMessage: enrichmentRequest.errorMessage,
+      fieldChangesCount: enrichmentRequest.fieldChanges.length,
     };
   }
 }

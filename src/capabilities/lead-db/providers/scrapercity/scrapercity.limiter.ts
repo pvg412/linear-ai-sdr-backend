@@ -28,7 +28,7 @@ export class ScraperCityLimiter {
   private inMemoryReqWindowId: number | null = null;
   private inMemoryReqCount = 0;
 
-  constructor(private readonly redis: Redis | null) {}
+  constructor(private readonly redis: Redis | null) { }
 
   private notify(reason: ThrottleReason, retryAfterMs: number): void {
     const ctx = getLeadSearchAsyncContext();
@@ -37,11 +37,11 @@ export class ScraperCityLimiter {
     const message =
       reason === "RATE_LIMIT"
         ? `Service temporarily limits request processing speed. We'll retry in ${formatRetryMinutes(
-            retryAfterMs,
-          )}.`
+          retryAfterMs,
+        )}.`
         : `Service overloaded. Request queued, will continue in ${formatRetryMinutes(
-            retryAfterMs,
-          )}.`;
+          retryAfterMs,
+        )}.`;
 
     ctx.onThrottle({ reason, retryAfterMs, message });
   }
@@ -86,7 +86,7 @@ export class ScraperCityLimiter {
     }
 
     if (n > SCRAPERCITY_LIMITS.maxConcurrentTasks) {
-      await this.redis.decr(SCRAPERCITY_REDIS_KEYS.activeTasks).catch(() => {});
+      await this.redis.decr(SCRAPERCITY_REDIS_KEYS.activeTasks).catch(() => { });
       return false;
     }
 
@@ -99,7 +99,7 @@ export class ScraperCityLimiter {
       return;
     }
 
-    await this.redis.decr(SCRAPERCITY_REDIS_KEYS.activeTasks).catch(() => {});
+    await this.redis.decr(SCRAPERCITY_REDIS_KEYS.activeTasks).catch(() => { });
   }
 
   /**
@@ -123,12 +123,12 @@ export class ScraperCityLimiter {
     const windowId = Math.floor(t / 60_000);
 
     if (!this.redis) {
-      if (this.inMemoryReqWindowId !== windowId) {
-        this.inMemoryReqWindowId = windowId;
-        this.inMemoryReqCount = 0;
-      }
-      this.inMemoryReqCount += 1;
-      return this.inMemoryReqCount <= SCRAPERCITY_LIMITS.maxRequestsPerMinute;
+      // Redis is required for rate limiting in production.
+      // Without Redis, rate limits cannot be enforced across processes.
+      throw new Error(
+        "ScraperCity rate limiter requires Redis connection. " +
+        "Set REDIS_URL environment variable.",
+      );
     }
 
     const key = `${SCRAPERCITY_REDIS_KEYS.requestsPerMinutePrefix}${windowId}`;

@@ -27,7 +27,7 @@ function formatRetryMinutes(ms: number): string {
 export class SearchLeadsLimiter {
   private inMemoryActiveTasks = 0;
 
-  constructor(private readonly redis: Redis | null) {}
+  constructor(private readonly redis: Redis | null) { }
 
   private notify(reason: ThrottleReason, retryAfterMs: number): void {
     const ctx = getLeadSearchAsyncContext();
@@ -84,7 +84,7 @@ export class SearchLeadsLimiter {
     }
 
     if (n > SEARCHLEADS_LIMITS.maxConcurrentTasks) {
-      await this.redis.decr(SEARCHLEADS_REDIS_KEYS.activeTasks).catch(() => {});
+      await this.redis.decr(SEARCHLEADS_REDIS_KEYS.activeTasks).catch(() => { });
       return false;
     }
 
@@ -97,7 +97,7 @@ export class SearchLeadsLimiter {
       return;
     }
 
-    await this.redis.decr(SEARCHLEADS_REDIS_KEYS.activeTasks).catch(() => {});
+    await this.redis.decr(SEARCHLEADS_REDIS_KEYS.activeTasks).catch(() => { });
   }
 
   /**
@@ -121,9 +121,12 @@ export class SearchLeadsLimiter {
     const windowId = Math.floor(t / 60_000);
 
     if (!this.redis) {
-      // In-memory fallback is per-process; acceptable only for dev.
-      // We'll approximate by always allowing.
-      return true;
+      // Redis is required for rate limiting in production.
+      // Without Redis, rate limits cannot be enforced across processes.
+      throw new Error(
+        "SearchLeads rate limiter requires Redis connection. " +
+        "Set REDIS_URL environment variable.",
+      );
     }
 
     const key = `${SEARCHLEADS_REDIS_KEYS.requestsPerMinutePrefix}${windowId}`;

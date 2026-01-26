@@ -28,35 +28,12 @@ describe("ScraperCityLimiter", () => {
     }
   }
 
-  it("throttles after 100 requests/min and notifies async context", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
-
+  it("throws error when Redis is not available for request slots", async () => {
     const limiter = new ScraperCityLimiter(null);
-    const throttles: Array<{
-      reason: string;
-      retryAfterMs: number;
-      message: string;
-    }> = [];
 
-    await withLeadSearchAsyncContext(
-      { onThrottle: (t) => throttles.push(t) },
-      async () => {
-        for (let i = 0; i < 100; i += 1) {
-          await limiter.waitForRequestSlot();
-        }
-
-        const p = limiter.waitForRequestSlot();
-        await flushMicrotasks();
-
-        expect(throttles.some((t) => t.reason === "RATE_LIMIT")).toBe(true);
-
-        await vi.advanceTimersByTimeAsync(60_000);
-        await expect(p).resolves.toBeUndefined();
-      },
+    await expect(limiter.waitForRequestSlot()).rejects.toThrow(
+      "ScraperCity rate limiter requires Redis connection",
     );
-
-    vi.useRealTimers();
   });
 
   it("limits concurrent tasks to 10 and notifies async context", async () => {

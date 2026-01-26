@@ -3,6 +3,37 @@ import { ApifyClient } from "apify-client";
 import { z } from "zod";
 import { loadEnv } from "@/config/env";
 import { UserFacingError } from "@/infra/userFacingError";
+import { ensureLogger } from "@/infra/observability";
+
+const LINKEDIN_POSTS_MAX_RETRIES = 2;
+const LINKEDIN_POSTS_RETRY_BACKOFF_MS = 2000;
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  options: {
+    maxAttempts: number;
+    backoffMs: number;
+    onRetry?: (attempt: number, error: Error) => void;
+  },
+): Promise<T> {
+  let lastError: Error = new Error("No attempts made");
+  for (let attempt = 1; attempt <= options.maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < options.maxAttempts) {
+        options.onRetry?.(attempt, lastError);
+        await sleep(options.backoffMs * Math.pow(2, attempt - 1));
+      }
+    }
+  }
+  throw lastError;
+}
 
 // Input schema for the LinkedIn Posts actor
 export interface LinkedinPostsApifyInput {
@@ -112,14 +143,37 @@ export class LinkedinPostsApifyClient {
       scrapeComments: false, // Don't need comments
     };
 
+    const lg = ensureLogger();
+
     try {
-      // Run the actor and wait for completion
-      const run = await client.actor(this.actorId).call(input, {
-        waitSecs: 120, // Wait up to 2 minutes
-      });
+      // Run the actor and wait for completion with retry
+      const run = await withRetry(
+        () =>
+          client.actor(this.actorId).call(input, {
+            waitSecs: 120, // Wait up to 2 minutes
+          }),
+        {
+          maxAttempts: LINKEDIN_POSTS_MAX_RETRIES,
+          backoffMs: LINKEDIN_POSTS_RETRY_BACKOFF_MS,
+          onRetry: (attempt, error) => {
+            lg.warn(
+              {
+                attempt,
+                maxAttempts: LINKEDIN_POSTS_MAX_RETRIES,
+                err: error,
+                companyLinkedinUrl,
+              },
+              "LinkedIn Posts Apify call failed, retrying",
+            );
+          },
+        },
+      );
 
       if (!run.defaultDatasetId) {
-        console.warn("LinkedIn posts scraper returned no dataset");
+        lg.warn(
+          { companyLinkedinUrl },
+          "LinkedIn posts scraper returned no dataset",
+        );
         return { items: [] };
       }
 
@@ -128,9 +182,26 @@ export class LinkedinPostsApifyClient {
         limit: options.maxPosts ?? 10,
       });
 
+      // If no items returned, return empty result
+      if (!items || items.length === 0) {
+        lg.info({ companyLinkedinUrl }, "No LinkedIn posts found");
+        return { items: [] };
+      }
+
       // Parse and transform results
       const posts: LinkedinPost[] = [];
       for (const item of items) {
+        // Skip empty/invalid items (Apify returns { message: 'No posts found.' } when no posts)
+        if (!item || typeof item !== "object") {
+          continue;
+        }
+
+        // Check if it's an error/info message from Apify
+        if ("message" in item && !("id" in item) && !("linkedinUrl" in item)) {
+          lg.info({ companyLinkedinUrl, message: item.message }, "Apify message");
+          continue;
+        }
+
         try {
           const parsed = LinkedinPostSchema.parse(item);
           if (parsed.type === "post") {
@@ -138,7 +209,10 @@ export class LinkedinPostsApifyClient {
             posts.push(parsed);
           }
         } catch (e) {
-          console.warn("Failed to parse LinkedIn post:", e);
+          lg.warn(
+            { err: e, companyLinkedinUrl, item },
+            "Failed to parse LinkedIn post",
+          );
         }
       }
 
@@ -151,17 +225,20 @@ export class LinkedinPostsApifyClient {
           category: "linkedin_post" as const,
           engagement: post.engagement
             ? {
-                likes: post.engagement.likes ?? 0,
-                comments: post.engagement.comments ?? 0,
-                shares: post.engagement.shares ?? 0,
-              }
+              likes: post.engagement.likes ?? 0,
+              comments: post.engagement.comments ?? 0,
+              shares: post.engagement.shares ?? 0,
+            }
             : undefined,
         })),
       };
     } catch (error) {
       if (error instanceof UserFacingError) throw error;
 
-      console.error("LinkedIn Posts Apify error:", error);
+      lg.error(
+        { err: error, companyLinkedinUrl },
+        "LinkedIn Posts Apify error after all retries",
+      );
       throw new UserFacingError({
         code: "API_ERROR",
         userMessage: "Failed to fetch LinkedIn posts",

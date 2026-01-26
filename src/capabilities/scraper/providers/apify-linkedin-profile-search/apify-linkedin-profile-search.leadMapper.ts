@@ -269,7 +269,7 @@ export function mapApifyLinkedinRowsToLeads(
       row.companyLinkedinUrl,
     );
 
-    const companyUrl = companyWebsite ?? companyLinkedinUrl;
+    const companyUrl = companyWebsite;
     const companyDomain = normalizeCompanyDomain(companyWebsite ?? companyUrl);
 
     const emailCandidates = [

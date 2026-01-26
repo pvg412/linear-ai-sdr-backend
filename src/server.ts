@@ -5,6 +5,10 @@ import swaggerUi from "@fastify/swagger-ui";
 
 import { websocketPlugin } from "./plugins/websocket";
 import { loadEnv } from "./config/env";
+import { getPrisma } from "./infra/prisma";
+import { container } from "./container";
+import { QUEUE_TYPES } from "./infra/queue/queue.types";
+import type { Redis } from "ioredis";
 import { registerAuthRoutes } from "./modules/auth/auth.controller";
 import { createAuthGuard } from "./modules/auth/auth.guard";
 import { AuthService } from "./modules/auth/services/auth.service";
@@ -51,6 +55,47 @@ export async function buildServer() {
       routePrefix: "/docs",
     });
   }
+
+  // Health check endpoints (no auth required)
+  app.get("/health", async () => {
+    const checks: Record<string, boolean | string | number> = {
+      status: "healthy",
+      uptime: process.uptime(),
+    };
+
+    // Check database
+    try {
+      const prisma = getPrisma();
+      await prisma.$queryRaw`SELECT 1`;
+      checks.database = true;
+    } catch {
+      checks.database = false;
+      checks.status = "unhealthy";
+    }
+
+    // Check Redis
+    try {
+      const redis = container.get<Redis>(QUEUE_TYPES.Redis);
+      await redis.ping();
+      checks.redis = true;
+    } catch {
+      checks.redis = false;
+      // Redis is optional, don't mark as unhealthy
+    }
+
+    return checks;
+  });
+
+  app.get("/ready", async () => {
+    // Check if the service is ready to accept traffic
+    try {
+      const prisma = getPrisma();
+      await prisma.$queryRaw`SELECT 1`;
+      return { status: "ready" };
+    } catch {
+      return { status: "not_ready" };
+    }
+  });
 
   // Auth routes first (login stays public)
   registerAuthRoutes(app, env);

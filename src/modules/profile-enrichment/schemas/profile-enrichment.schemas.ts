@@ -5,6 +5,12 @@ export const ProfileEnrichmentParamsSchema = z.object({
   leadId: z.cuid(),
 });
 
+// Request params with enrichment request ID
+export const ProfileEnrichmentStatusParamsSchema = z.object({
+  leadId: z.cuid(),
+  enrichmentRequestId: z.cuid(),
+});
+
 // POST /leads/:leadId/enrichment - request body
 export const RequestEnrichmentBodySchema = z
   .object({

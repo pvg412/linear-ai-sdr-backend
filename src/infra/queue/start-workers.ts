@@ -7,6 +7,7 @@ import { ensureLogger, type LoggerLike } from "@/infra/observability";
 import { startLeadSearchWorker } from "./lead-search/lead-search.worker";
 import { startLeadRagIndexWorker } from "./lead-rag/lead-rag-index.worker";
 import { startProfileEnrichmentWorker } from "./profile-enrichment/profile-enrichment.worker";
+import { startCompanyResearchWorker } from "./company-research/company-research.worker";
 
 const env = loadEnv();
 
@@ -41,7 +42,12 @@ export function startWorkers(log?: LoggerLike): WorkersHandle | null {
 
   const profileEnrichmentWorker = startProfileEnrichmentWorker({
     redis,
-    concurrency: 2,
+    concurrency: env.PROFILE_ENRICHMENT_QUEUE_CONCURRENCY,
+  });
+
+  const companyResearchWorker = startCompanyResearchWorker({
+    redis,
+    concurrency: env.COMPANY_RESEARCH_QUEUE_CONCURRENCY,
   });
 
   lg.info({}, "Workers started");
@@ -66,6 +72,12 @@ export function startWorkers(log?: LoggerLike): WorkersHandle | null {
         await profileEnrichmentWorker.close();
       } catch (err) {
         lg.error({ err }, "ProfileEnrichment worker close error");
+      }
+
+      try {
+        await companyResearchWorker.close();
+      } catch (err) {
+        lg.error({ err }, "CompanyResearch worker close error");
       }
 
       try {

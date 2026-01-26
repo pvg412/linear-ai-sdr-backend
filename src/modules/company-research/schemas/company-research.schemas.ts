@@ -5,6 +5,17 @@ export const CompanyResearchParamsSchema = z.object({
   leadId: z.cuid(),
 });
 
+// Request params schema with research ID
+export const CompanyResearchStatusParamsSchema = z.object({
+  leadId: z.cuid(),
+  researchId: z.cuid(),
+});
+
+// Request body for POST
+export const RequestCompanyResearchBodySchema = z.object({
+  force: z.boolean().optional().default(false),
+});
+
 // Optional query parameters for filtering
 export const CompanyResearchQuerySchema = z.object({
   // Date range filter (optional)

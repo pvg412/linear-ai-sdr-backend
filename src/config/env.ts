@@ -29,9 +29,12 @@ const EnvSchema = z.object({
   LEAD_RAG_INDEX_QUEUE_ATTEMPTS: z.coerce.number().default(3),
   LEAD_RAG_INDEX_QUEUE_BACKOFF_MS: z.coerce.number().default(5000),
 
+  PROFILE_ENRICHMENT_QUEUE_CONCURRENCY: z.coerce.number().default(2),
+  COMPANY_RESEARCH_QUEUE_CONCURRENCY: z.coerce.number().default(2),
+
   AUTH_JWT_SECRET: z
     .string()
-    .min(16)
+    .min(32, "JWT secret must be at least 32 characters")
     .default("dev-insecure-secret-change-me-please-123456"),
   AUTH_TOKEN_TTL_SECONDS: z.coerce
     .number()
@@ -67,11 +70,18 @@ export const loadEnv = (): Env => {
     throw new Error("Invalid environment variables");
   }
 
-  if (
-    parsed.data.NODE_ENV === "production" &&
-    typeof process.env.AUTH_JWT_SECRET !== "string"
-  ) {
-    throw new Error("AUTH_JWT_SECRET must be set in production");
+  if (parsed.data.NODE_ENV === "production") {
+    if (typeof process.env.AUTH_JWT_SECRET !== "string") {
+      throw new Error("AUTH_JWT_SECRET must be set in production");
+    }
+    if (
+      process.env.AUTH_JWT_SECRET ===
+      "dev-insecure-secret-change-me-please-123456"
+    ) {
+      throw new Error(
+        "AUTH_JWT_SECRET must not use the default value in production",
+      );
+    }
   }
 
   return parsed.data;

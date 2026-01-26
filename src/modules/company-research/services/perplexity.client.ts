@@ -2,6 +2,58 @@ import { injectable } from "inversify";
 import { Perplexity } from "@perplexity-ai/perplexity_ai";
 import { loadEnv } from "@/config/env";
 import { UserFacingError } from "@/infra/userFacingError";
+import { ensureLogger } from "@/infra/observability";
+
+const PERPLEXITY_TIMEOUT_MS = 30000; // 30 seconds
+const PERPLEXITY_MAX_RETRIES = 3;
+const PERPLEXITY_RETRY_BACKOFF_MS = 1000;
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  options: {
+    maxAttempts: number;
+    backoffMs: number;
+    onRetry?: (attempt: number, error: Error) => void;
+  },
+): Promise<T> {
+  let lastError: Error = new Error("No attempts made");
+  for (let attempt = 1; attempt <= options.maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < options.maxAttempts) {
+        options.onRetry?.(attempt, lastError);
+        await sleep(options.backoffMs * Math.pow(2, attempt - 1));
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMessage: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(errorMessage));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId!);
+  }
+}
 
 export interface PerplexitySearchOptions {
   companyName: string;
@@ -119,22 +171,46 @@ Focus on actionable insights for sales outreach.
 
 IMPORTANT: For each item, extract the ACTUAL PUBLICATION DATE from the article (e.g., "Published: October 9, 2025"), NOT today's date.`;
 
+    const lg = ensureLogger();
+
     try {
-      const response = await client.chat.completions.create({
-        model: "sonar-pro",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        search_domain_filter:
-          domainFilter.length > 0 ? domainFilter : undefined,
-        search_recency_filter: options.recency,
-        return_related_questions: false,
-        web_search_options: {
-          search_context_size: "high",
+      const response = await withRetry(
+        () =>
+          withTimeout(
+            client.chat.completions.create({
+              model: "sonar-pro",
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt },
+              ],
+              search_domain_filter:
+                domainFilter.length > 0 ? domainFilter : undefined,
+              search_recency_filter: options.recency,
+              return_related_questions: false,
+              web_search_options: {
+                search_context_size: "high",
+              },
+              temperature: 0.1, // Low temperature for more factual responses
+            }),
+            PERPLEXITY_TIMEOUT_MS,
+            `Perplexity API timeout after ${PERPLEXITY_TIMEOUT_MS}ms`,
+          ),
+        {
+          maxAttempts: PERPLEXITY_MAX_RETRIES,
+          backoffMs: PERPLEXITY_RETRY_BACKOFF_MS,
+          onRetry: (attempt, error) => {
+            lg.warn(
+              {
+                attempt,
+                maxAttempts: PERPLEXITY_MAX_RETRIES,
+                err: error,
+                companyName: options.companyName,
+              },
+              "Perplexity API call failed, retrying",
+            );
+          },
         },
-        temperature: 0.1, // Low temperature for more factual responses
-      });
+      );
 
       const content = response.choices?.[0]?.message?.content;
       if (!content) {
@@ -147,15 +223,16 @@ IMPORTANT: For each item, extract the ACTUAL PUBLICATION DATE from the article (
       // Extract text content if it's an array
       let textContent = Array.isArray(content)
         ? content
-            .filter((chunk) => "text" in chunk)
-            .map((chunk) => ("text" in chunk ? chunk.text : ""))
-            .join("")
+          .filter((chunk) => "text" in chunk)
+          .map((chunk) => ("text" in chunk ? chunk.text : ""))
+          .join("")
         : content;
 
       // Remove markdown code block formatting if present
+      // Also handle case where there's text after the closing ```
       textContent = textContent
         .replace(/^```json\s*/i, "")
-        .replace(/\s*```$/, "")
+        .replace(/\s*```[\s\S]*$/, "") // Remove ``` and everything after it
         .trim();
 
       // Parse JSON response
@@ -171,12 +248,18 @@ IMPORTANT: For each item, extract the ACTUAL PUBLICATION DATE from the article (
         ) {
           parsed = jsonResult as { items: PerplexitySearchResult["items"] };
         } else {
-          console.error("Invalid response structure:", jsonResult);
+          lg.warn(
+            { response: jsonResult, companyName: options.companyName },
+            "Invalid Perplexity response structure",
+          );
           return { items: [], citations: [] };
         }
       } catch {
         // If JSON parsing fails, return empty results
-        console.error("Failed to parse Perplexity response:", content);
+        lg.warn(
+          { response: content, companyName: options.companyName },
+          "Failed to parse Perplexity JSON response",
+        );
         return { items: [], citations: [] };
       }
 
@@ -195,7 +278,10 @@ IMPORTANT: For each item, extract the ACTUAL PUBLICATION DATE from the article (
     } catch (error) {
       if (error instanceof UserFacingError) throw error;
 
-      console.error("Perplexity API error:", error);
+      lg.error(
+        { err: error, companyName: options.companyName },
+        "Perplexity API error after all retries",
+      );
       throw new UserFacingError({
         code: "API_ERROR",
         userMessage: "Failed to search company information",

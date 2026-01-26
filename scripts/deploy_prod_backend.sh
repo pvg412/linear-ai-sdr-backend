@@ -87,7 +87,7 @@ rm -f "${TAR_REMOTE}"
 
 echo "[remote] docker compose up -d ..."
 cd "${REMOTE_DIR}"
-docker compose -f docker-compose.prod.yml up -d --force-recreate
+docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps app
 
 echo "[remote] Pruning dangling images..."
 docker image prune -f >/dev/null || true
