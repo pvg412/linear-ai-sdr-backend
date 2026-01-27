@@ -3,6 +3,7 @@ import { PROFILE_ENRICHMENT_TYPES } from "../profile-enrichment.types";
 import { ProfileEnrichmentRepository } from "../persistence/profile-enrichment.repository";
 import { UserFacingError } from "@/infra/userFacingError";
 import type { LeadEnrichmentStatus, EnrichmentFieldStatus } from "@prisma/client";
+import { getPrisma } from "@/infra/prisma";
 
 export interface PendingEnrichmentResponse {
   request: {
@@ -51,6 +52,17 @@ export class ProfileEnrichmentQueryService {
     userId: string,
     leadId: string,
   ): Promise<PendingEnrichmentResponse> {
+    const prisma = getPrisma();
+
+    // Verify user exists
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "User not found",
+      });
+    }
+
     // Verify lead exists
     const lead = await this.repository.findLeadById(leadId);
 
@@ -117,6 +129,17 @@ export class ProfileEnrichmentQueryService {
     leadId: string,
     pagination: { page: number; perPage: number },
   ): Promise<EnrichmentHistoryResponse> {
+    const prisma = getPrisma();
+
+    // Verify user exists
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "User not found",
+      });
+    }
+
     // Verify lead exists
     const lead = await this.repository.findLeadById(leadId);
 
@@ -154,6 +177,17 @@ export class ProfileEnrichmentQueryService {
     errorMessage: string | null;
     fieldChangesCount: number;
   }> {
+    const prisma = getPrisma();
+
+    // Verify user exists
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "User not found",
+      });
+    }
+
     // Verify lead exists
     const lead = await this.repository.findLeadById(leadId);
 

@@ -173,7 +173,7 @@ export class ChatAiStreamService {
 
     @inject(LEAD_DIRECTORY_TYPES.LeadDirectoryMentionResolver)
     private readonly dirResolver: LeadDirectoryMentionResolver,
-  ) {}
+  ) { }
 
   async streamAssistantReply(input: {
     userId: string;
@@ -206,7 +206,7 @@ export class ChatAiStreamService {
       },
     });
 
-    // 2) @folder => directoryIds (HARD FILTER)
+    // 2) @folder mentions → filter leadIds by directories
     const { cleanedText, mentions } = extractFolderMentions(input.text);
 
     let directoryIds: string[] = input.defaultDirectoryIds ?? [];
@@ -260,6 +260,12 @@ export class ChatAiStreamService {
       directoryIds = resolved.directoryIds;
     }
 
+    // 3) Fetch leadIds from directories (backend filtering)
+    const leadIds = await this.chatRepo.getLeadIdsFromDirectories(
+      input.userId,
+      directoryIds,
+    );
+
     const LIMIT_MESSAGES_FOR_AI = 15;
 
     const history = await this.chatRepo.listRecentMessagesForAi(
@@ -303,16 +309,7 @@ export class ChatAiStreamService {
       history: pbHistory,
 
       context: {
-        directoryIds,
-        leadIds: [],
-        leadSearchId: "",
-      },
-
-      retrieval: {
-        k: 5,
-        minScore: 0,
-        maxChunksPerLead: 3,
-        maxContextChars: 4000,
+        leadIds,
       },
 
       debug: false,

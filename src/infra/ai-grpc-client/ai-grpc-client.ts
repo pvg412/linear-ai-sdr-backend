@@ -1,4 +1,3 @@
-// src/infra/ai-grpc-client.ts
 import * as grpc from "@grpc/grpc-js";
 import { randomUUID } from "crypto";
 
@@ -12,6 +11,8 @@ import type {
   ParseLeadSearchPromptRequest,
   ParseLeadSearchPromptResponse,
   PingResponse,
+  UpsertCompanyResearchRequest,
+  UpsertCompanyResearchResponse,
   UpsertLeadDocumentsRequest,
   UpsertLeadDocumentsResponse,
 } from "../../generated/aisdr/v1/ai_sdr";
@@ -34,6 +35,7 @@ export type UnaryTimeouts = Partial<{
   parseMs: number;
   upsertMs: number;
   deleteMs: number;
+  companyResearchMs: number;
 }>;
 
 export interface AiGrpcClientOptions {
@@ -108,6 +110,7 @@ export class AiGrpcClient {
       parseMs: opts.timeouts?.parseMs ?? 40_000,
       upsertMs: opts.timeouts?.upsertMs ?? 60_000,
       deleteMs: opts.timeouts?.deleteMs ?? 60_000,
+      companyResearchMs: opts.timeouts?.companyResearchMs ?? 60_000,
     };
 
     const insecure = opts.insecure ?? true;
@@ -240,6 +243,18 @@ export class AiGrpcClient {
       (r, md, opt, cb) => this.client.deleteLeadDocuments(r, md, opt, cb),
       normalized,
       this.timeouts.deleteMs,
+    );
+  }
+
+  upsertCompanyResearch(
+    req: UpsertCompanyResearchRequest,
+  ): Promise<UpsertCompanyResearchResponse> {
+    const normalized = withRequestId(req);
+    return this.unary(
+      "upsertCompanyResearch",
+      (r, md, opt, cb) => this.client.upsertCompanyResearch(r, md, opt, cb),
+      normalized,
+      this.timeouts.companyResearchMs,
     );
   }
 

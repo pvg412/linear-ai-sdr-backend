@@ -10,7 +10,9 @@ import type {
 import { profileEnrichmentJobOptions } from "@/infra/queue/profile-enrichment/profile-enrichment.queue";
 import { UserFacingError } from "@/infra/userFacingError";
 import { FIELD_TO_LEAD_PROPERTY } from "./profile-enrichment.mapper";
-import type { LeadEnrichmentStatus } from "@prisma/client";
+import { EnrichmentFieldStatus, LeadEnrichmentStatus } from "@prisma/client";
+import { LEAD_RAG_TYPES } from "@/modules/lead-rag/lead-rag.types";
+import { LeadRagIndexSyncService } from "@/modules/lead-rag/services/lead-rag-index-sync.service";
 
 export interface RequestEnrichmentResult {
   enrichmentRequestId: string;
@@ -41,7 +43,9 @@ export class ProfileEnrichmentCommandService {
       void,
       ProfileEnrichmentJobName
     >,
-  ) {}
+    @inject(LEAD_RAG_TYPES.LeadRagIndexSyncService)
+    private readonly leadRagIndexSync: LeadRagIndexSyncService,
+  ) { }
 
   async requestEnrichment(
     userId: string,
@@ -123,7 +127,7 @@ export class ProfileEnrichmentCommandService {
       });
     }
 
-    if (enrichmentRequest.status !== "AWAITING_REVIEW") {
+    if (enrichmentRequest.status !== LeadEnrichmentStatus.AWAITING_REVIEW) {
       throw new UserFacingError({
         code: "VALIDATION_ERROR",
         userMessage: `Cannot review enrichment in status: ${enrichmentRequest.status}`,
@@ -155,7 +159,7 @@ export class ProfileEnrichmentCommandService {
 
       if (!fieldChange) continue;
 
-      if (fieldChange.status !== "PENDING") {
+      if (fieldChange.status !== EnrichmentFieldStatus.PENDING) {
         // Skip already processed fields
         continue;
       }
@@ -190,7 +194,7 @@ export class ProfileEnrichmentCommandService {
         // Reject
         await this.repository.updateFieldChangeStatus(
           decision.fieldChangeId,
-          "REJECTED",
+          EnrichmentFieldStatus.REJECTED,
           userId,
         );
 
@@ -203,16 +207,16 @@ export class ProfileEnrichmentCommandService {
       enrichmentRequest.id,
     );
 
-    let newStatus: LeadEnrichmentStatus = "AWAITING_REVIEW";
+    let newStatus: LeadEnrichmentStatus = LeadEnrichmentStatus.AWAITING_REVIEW;
 
     if (counts.pending === 0) {
       // All fields have been processed
       if (counts.approved > 0 && counts.rejected > 0) {
-        newStatus = "COMPLETED"; // Mixed decisions
+        newStatus = LeadEnrichmentStatus.COMPLETED; // Mixed decisions
       } else if (counts.approved > 0) {
-        newStatus = "COMPLETED"; // All approved
+        newStatus = LeadEnrichmentStatus.COMPLETED; // All approved
       } else {
-        newStatus = "COMPLETED"; // All rejected
+        newStatus = LeadEnrichmentStatus.COMPLETED; // All rejected
       }
     }
 
@@ -226,6 +230,13 @@ export class ProfileEnrichmentCommandService {
     // If all fields processed, clear the pending enrichment flag
     if (counts.pending === 0) {
       await this.repository.setLeadPendingEnrichmentFlag(leadId, false);
+    }
+
+    // Trigger lead reindexing if any fields were applied
+    if (appliedFields.length > 0) {
+      await this.leadRagIndexSync.enqueueUpsertLead(userId, leadId, {
+        reason: "profile_enrichment_applied",
+      });
     }
 
     return {

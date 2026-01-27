@@ -1,4 +1,5 @@
 import { injectable, inject } from "inversify";
+import { randomUUID } from "crypto";
 import { COMPANY_RESEARCH_TYPES } from "../company-research.types";
 import { CompanyResearchRepository } from "../persistence/company-research.repository";
 import { PerplexityClient } from "./perplexity.client";
@@ -6,6 +7,9 @@ import { LinkedinPostsApifyClient } from "./linkedin-posts-apify.client";
 import type { CompanyResearchJobData } from "@/infra/queue/company-research/company-research.queue";
 import type { LoggerLike } from "@/infra/observability";
 import type { CompanyResearchItemCategory } from "@prisma/client";
+import { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
+import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.types";
+import { mapCategoryToProto } from "../utils/category-mapping";
 
 @injectable()
 export class CompanyResearchRunnerService {
@@ -16,6 +20,8 @@ export class CompanyResearchRunnerService {
     private readonly perplexityClient: PerplexityClient,
     @inject(COMPANY_RESEARCH_TYPES.LinkedinPostsApifyClient)
     private readonly linkedinPostsClient: LinkedinPostsApifyClient,
+    @inject(AI_GRPC_CLIENT_TYPES.AiGrpcClient)
+    private readonly aiClient: AiGrpcClient,
   ) { }
 
   async processJob(
@@ -167,6 +173,21 @@ export class CompanyResearchRunnerService {
       await this.repository.markResearchCompleted(companyResearchId);
 
       lg.info({}, "Company research job completed successfully");
+
+      // 8. Index research in AI module
+      try {
+        await this.indexCompanyResearchInAI(
+          companyResearchId,
+          leadId,
+          jobData.triggeredById,
+          lg,
+        );
+      } catch (error) {
+        lg.error(
+          { err: error },
+          "Failed to index company research in AI module (non-fatal)",
+        );
+      }
     } catch (error) {
       lg.error({ err: error }, "Company research job failed");
 
@@ -181,5 +202,48 @@ export class CompanyResearchRunnerService {
 
       throw error;
     }
+  }
+
+  private async indexCompanyResearchInAI(
+    companyResearchId: string,
+    _leadId: string,
+    userId: string,
+    logger: LoggerLike,
+  ): Promise<void> {
+    // Fetch the completed research with all items
+    const research = await this.repository.findCompanyResearchById(companyResearchId);
+
+    if (!research) {
+      logger.warn({ companyResearchId }, "Research not found for AI indexing");
+      return;
+    }
+
+    // Call AI gRPC client
+    await this.aiClient.upsertCompanyResearch({
+      requestId: randomUUID(),
+      workspaceId: userId,
+      researchId: research.id,
+      leadId: research.leadId,
+      leadName: research.lead.fullName ?? `${research.lead.firstName} ${research.lead.lastName}`,
+      leadTitle: research.lead.title ?? research.lead.headline ?? "",
+      company: research.company,
+      companyDomain: research.companyDomain || "",
+      recency: research.recency || "",
+      searchedAtMs: String(research.searchedAt.getTime()),
+      items: research.items.map((item, idx) => ({
+        index: idx,
+        date: item.date || "",
+        summary: item.summary,
+        sourceUrl: item.sourceUrl,
+        category: mapCategoryToProto(item.category),
+        sourceName: item.source || "unknown",
+      })),
+      invalidatePrevious: true,
+    });
+
+    logger.info(
+      { companyResearchId, itemsCount: research.items.length },
+      "Successfully indexed company research in AI module",
+    );
   }
 }

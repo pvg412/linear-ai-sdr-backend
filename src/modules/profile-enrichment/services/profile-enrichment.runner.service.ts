@@ -5,6 +5,7 @@ import { ProfileEnrichmentApifyClient } from "./profile-enrichment-apify.client"
 import { mapApifyResponseToFieldChanges } from "./profile-enrichment.mapper";
 import type { ProfileEnrichmentJobData } from "@/infra/queue/profile-enrichment/profile-enrichment.queue";
 import type { LoggerLike } from "@/infra/observability";
+import { LeadEnrichmentStatus } from "@prisma/client";
 
 @injectable()
 export class ProfileEnrichmentRunnerService {
@@ -13,7 +14,7 @@ export class ProfileEnrichmentRunnerService {
     private readonly repository: ProfileEnrichmentRepository,
     @inject(PROFILE_ENRICHMENT_TYPES.ProfileEnrichmentApifyClient)
     private readonly apifyClient: ProfileEnrichmentApifyClient,
-  ) {}
+  ) { }
 
   async processJob(
     jobData: ProfileEnrichmentJobData,
@@ -23,10 +24,10 @@ export class ProfileEnrichmentRunnerService {
 
     const lg = logger.child
       ? logger.child({
-          enrichmentRequestId,
-          leadId,
-          linkedinUrl,
-        })
+        enrichmentRequestId,
+        leadId,
+        linkedinUrl,
+      })
       : logger;
 
     lg.info({}, "Starting profile enrichment job");
@@ -58,7 +59,7 @@ export class ProfileEnrichmentRunnerService {
 
         await this.repository.updateEnrichmentRequestStatus(
           enrichmentRequestId,
-          "FAILED",
+          LeadEnrichmentStatus.FAILED,
           {
             errorMessage: apifyResult.error ?? "No enrichment data found",
           },
@@ -71,7 +72,7 @@ export class ProfileEnrichmentRunnerService {
       // 4. Store raw response
       await this.repository.updateEnrichmentRequestStatus(
         enrichmentRequestId,
-        "PROCESSING",
+        LeadEnrichmentStatus.PROCESSING,
         {
           rawResponse: apifyResult.data as object,
         },
@@ -94,7 +95,7 @@ export class ProfileEnrichmentRunnerService {
 
         await this.repository.updateEnrichmentRequestStatus(
           enrichmentRequestId,
-          "COMPLETED",
+          LeadEnrichmentStatus.COMPLETED,
           {
             errorMessage: "Profile is already up to date",
           },
@@ -111,7 +112,7 @@ export class ProfileEnrichmentRunnerService {
       // 7. Update status to AWAITING_REVIEW and set hasPendingEnrichment flag
       await this.repository.updateEnrichmentRequestStatus(
         enrichmentRequestId,
-        "AWAITING_REVIEW",
+        LeadEnrichmentStatus.AWAITING_REVIEW,
       );
 
       await this.repository.setLeadPendingEnrichmentFlag(leadId, true);
@@ -122,7 +123,7 @@ export class ProfileEnrichmentRunnerService {
 
       await this.repository.updateEnrichmentRequestStatus(
         enrichmentRequestId,
-        "FAILED",
+        LeadEnrichmentStatus.FAILED,
         {
           errorMessage:
             error instanceof Error ? error.message : "Unknown error",

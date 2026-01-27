@@ -14,7 +14,6 @@ import type {
 } from "@/generated/aisdr/v1/ai_sdr";
 import { LeadDocumentKind } from "@/generated/aisdr/v1/ai_sdr";
 
-import { UNASSIGNED_DIRECTORY_ID } from "@/modules/lead-directory/lead-directory.unassigned";
 import { buildLeadVisibilityWhere } from "@/modules/lead/lead-visibility";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -78,9 +77,8 @@ function leadToRagText(lead: unknown): string {
 
   if (companyName || companyDomain) {
     lines.push(
-      `Company: ${(companyName ?? "").trim()}${
-        companyDomain ? ` (${companyDomain})` : ""
-      }`.trim(),
+      `Company: ${(companyName ?? "").trim()}${companyDomain ? ` (${companyDomain})` : ""
+        }`.trim(),
     );
   }
 
@@ -101,10 +99,10 @@ export class LeadRagIndexProcessorService {
   constructor(
     @inject(AI_GRPC_CLIENT_TYPES.AiGrpcClient)
     private readonly ai: AiGrpcClient,
-  ) {}
+  ) { }
 
-  private docId(leadId: string, directoryId: string): string {
-    return `lead:${leadId}:${directoryId}`;
+  private docId(leadId: string): string {
+    return `lead:${leadId}`;
   }
 
   /**
@@ -151,71 +149,41 @@ export class LeadRagIndexProcessorService {
       return;
     }
 
-    const directoryRows = await this.prisma.leadDirectoryLead.findMany({
-      where: {
-        leadId: args.leadId,
-        directory: { ownerId: args.ownerId },
-      },
-      select: { directoryId: true },
-    });
-
-    const directoryIdsRaw: string[] = Array.isArray(directoryRows)
-      ? directoryRows
-          .map((r) =>
-            typeof r?.directoryId === "string" ? r.directoryId : null,
-          )
-          .filter((x): x is string => typeof x === "string" && x.length > 0)
-      : [];
-
-    const uniqueDirectoryIds =
-      directoryIdsRaw.length > 0
-        ? Array.from(new Set(directoryIdsRaw))
-        : [UNASSIGNED_DIRECTORY_ID];
-
     const text = leadToRagText(lead);
     const updatedAtMs =
       lead.updatedAt instanceof Date
         ? String(lead.updatedAt.getTime())
         : String(Date.now());
 
-    const documents = uniqueDirectoryIds.map((dirId) => {
-      const contentHash = createHash("sha256")
-        .update(text)
-        .update("\n")
-        .update(dirId)
-        .digest("hex");
-
-      return {
-        documentId: this.docId(args.leadId, dirId),
-        leadId: args.leadId,
-        directoryIds: [dirId],
-        kind: LeadDocumentKind.LEAD_DOCUMENT_KIND_PROFILE,
-        text,
-        metadata: {
-          ownerId: args.ownerId,
-          leadId: args.leadId,
-          directoryId: dirId,
-        },
-        updatedAtMs,
-        contentHash,
-      };
-    });
+    const contentHash = createHash("sha256")
+      .update(text)
+      .update("\n")
+      .digest("hex");
 
     const req: UpsertLeadDocumentsRequest = {
       requestId: "", // AiGrpcClient will set UUID if empty
       workspaceId: args.ownerId,
       allowPartial: false,
-      documents,
+      documents: [
+        {
+          documentId: this.docId(args.leadId),
+          leadId: args.leadId,
+          kind: LeadDocumentKind.LEAD_DOCUMENT_KIND_PROFILE,
+          text,
+          metadata: {
+            ownerId: args.ownerId,
+            leadId: args.leadId,
+          },
+          updatedAtMs,
+          contentHash,
+        },
+      ],
     };
 
     await this.ai.upsertLeadDocuments(req);
 
     lg.info(
-      {
-        ownerId: args.ownerId,
-        leadId: args.leadId,
-        directoryIdsCount: uniqueDirectoryIds.length,
-      },
+      { ownerId: args.ownerId, leadId: args.leadId },
       "RAG: upserted lead doc",
     );
   }

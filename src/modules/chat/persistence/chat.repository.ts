@@ -363,6 +363,31 @@ export class ChatRepository {
     return { id: row.id };
   }
 
+  /**
+   * Fetch leadIds from directories (for ChatContext filtering)
+   */
+  async getLeadIdsFromDirectories(
+    ownerId: string,
+    directoryIds: string[],
+  ): Promise<string[]> {
+    if (directoryIds.length === 0) {
+      // No directories specified - return empty (or all leads - depends on business logic)
+      return [];
+    }
+
+    const rows = await this.prisma.leadDirectoryLead.findMany({
+      where: {
+        directoryId: { in: directoryIds },
+        directory: { ownerId },
+        lead: { isVerified: true }, // Only verified leads
+      },
+      select: { leadId: true },
+      distinct: ["leadId"],
+    });
+
+    return rows.map((r) => r.leadId);
+  }
+
   private async assertThreadOwner(
     ownerId: string,
     threadId: string,

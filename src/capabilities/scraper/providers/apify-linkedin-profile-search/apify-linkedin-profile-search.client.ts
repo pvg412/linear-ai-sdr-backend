@@ -50,10 +50,10 @@ export type ApifyLinkedinProfileSearchInput = {
 
   // dedup across runs via MongoDB (actor input)
   profileDeduplicationMode?:
-    | "off"
-    | "insert_ids"
-    | "insert_profiles"
-    | "read_only";
+  | "off"
+  | "insert_ids"
+  | "insert_profiles"
+  | "read_only";
   mongoDbConnectionString?: string;
 
   // post-filtering (actor input)
@@ -65,7 +65,7 @@ export class ApifyLinkedinProfileSearchClient {
   private readonly client: ApifyClient;
 
   constructor(
-    private readonly token: string,
+    token: string,
     private readonly actorId: string = DEFAULT_ACTOR_ID,
   ) {
     this.client = new ApifyClient({ token });

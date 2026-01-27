@@ -1,5 +1,5 @@
 import { injectable } from "inversify";
-import type {
+import {
   PrismaClient,
   LeadEnrichmentRequest,
   LeadEnrichmentFieldChange,
@@ -42,7 +42,7 @@ export class ProfileEnrichmentRepository {
       where: {
         leadId,
         status: {
-          in: ["PENDING", "PROCESSING", "AWAITING_REVIEW"],
+          in: [LeadEnrichmentStatus.PENDING, LeadEnrichmentStatus.PROCESSING, LeadEnrichmentStatus.AWAITING_REVIEW],
         },
       },
       include: {
@@ -85,7 +85,7 @@ export class ProfileEnrichmentRepository {
       data: {
         leadId: data.leadId,
         requestedById: data.requestedById,
-        status: "PENDING",
+        status: LeadEnrichmentStatus.PENDING,
       },
     });
   }
@@ -122,7 +122,7 @@ export class ProfileEnrichmentRepository {
         displayName: change.displayName,
         oldValue: change.oldValue,
         newValue: change.newValue,
-        status: "PENDING" as EnrichmentFieldStatus,
+        status: EnrichmentFieldStatus.PENDING,
       })),
     });
   }
@@ -265,9 +265,9 @@ export class ProfileEnrichmentRepository {
         requestedBy: item.requestedBy,
         fieldChangesSummary: {
           total: item.fieldChanges.length,
-          approved: item.fieldChanges.filter((fc) => fc.status === "APPROVED")
+          approved: item.fieldChanges.filter((fc) => fc.status === EnrichmentFieldStatus.APPROVED)
             .length,
-          rejected: item.fieldChanges.filter((fc) => fc.status === "REJECTED")
+          rejected: item.fieldChanges.filter((fc) => fc.status === EnrichmentFieldStatus.REJECTED)
             .length,
         },
       })),
@@ -298,9 +298,9 @@ export class ProfileEnrichmentRepository {
 
     return {
       total: fieldChanges.length,
-      pending: fieldChanges.filter((fc) => fc.status === "PENDING").length,
-      approved: fieldChanges.filter((fc) => fc.status === "APPROVED").length,
-      rejected: fieldChanges.filter((fc) => fc.status === "REJECTED").length,
+      pending: fieldChanges.filter((fc) => fc.status === EnrichmentFieldStatus.PENDING).length,
+      approved: fieldChanges.filter((fc) => fc.status === EnrichmentFieldStatus.APPROVED).length,
+      rejected: fieldChanges.filter((fc) => fc.status === EnrichmentFieldStatus.REJECTED).length,
     };
   }
 

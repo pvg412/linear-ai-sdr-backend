@@ -25,8 +25,6 @@ function formatRetryMinutes(ms: number): string {
 
 export class ScraperCityLimiter {
   private inMemoryActiveTasks = 0;
-  private inMemoryReqWindowId: number | null = null;
-  private inMemoryReqCount = 0;
 
   constructor(private readonly redis: Redis | null) { }
 

@@ -1,13 +1,15 @@
 import { injectable } from "inversify";
-import type {
+import {
   PrismaClient,
   CompanyResearch,
   CompanyResearchStatus,
   CompanyResearchItemCategory,
+  Lead,
 } from "@prisma/client";
 import { getPrisma } from "@/infra/prisma";
 
 export interface CompanyResearchWithItems extends CompanyResearch {
+  lead: Lead;
   items: Array<{
     id: string;
     date: string | null;
@@ -57,7 +59,7 @@ export class CompanyResearchRepository {
         companyDomain: data.companyDomain,
         recency: data.recency,
         maxResults: data.maxResults,
-        status: "PENDING",
+        status: CompanyResearchStatus.PENDING,
         relatedQuestions: [],
       },
     });
@@ -101,7 +103,7 @@ export class CompanyResearchRepository {
     await this.prisma.companyResearch.update({
       where: { id: researchId },
       data: {
-        status: "COMPLETED",
+        status: CompanyResearchStatus.COMPLETED,
         searchedAt: new Date(),
       },
     });
@@ -113,6 +115,7 @@ export class CompanyResearchRepository {
     return this.prisma.companyResearch.findUnique({
       where: { id: researchId },
       include: {
+        lead: true,
         items: {
           orderBy: { createdAt: "asc" },
         },
@@ -127,7 +130,7 @@ export class CompanyResearchRepository {
       where: {
         leadId,
         status: {
-          in: ["PENDING", "PROCESSING"],
+          in: [CompanyResearchStatus.PENDING, CompanyResearchStatus.PROCESSING],
         },
       },
       orderBy: {

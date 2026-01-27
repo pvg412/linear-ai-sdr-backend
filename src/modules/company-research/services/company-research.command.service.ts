@@ -12,6 +12,7 @@ import {
   type CompanyResearchJobData,
 } from "@/infra/queue/company-research/company-research.queue";
 import type { CompanyResearchQuery } from "../schemas/company-research.schemas";
+import { CompanyResearchStatus } from "@prisma/client";
 
 @injectable()
 export class CompanyResearchCommandService {
@@ -108,7 +109,7 @@ export class CompanyResearchCommandService {
 
     return {
       companyResearchId: research.id,
-      status: "PENDING",
+      status: CompanyResearchStatus.PENDING,
       message: "Company research job queued",
     };
   }
