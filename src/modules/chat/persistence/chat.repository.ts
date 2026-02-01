@@ -388,6 +388,59 @@ export class ChatRepository {
     return rows.map((r) => r.leadId);
   }
 
+  async getDirectoryWithLeads(
+    ownerId: string,
+    directoryId: string,
+  ): Promise<{
+    id: string;
+    name: string;
+    leadCount: number;
+    firstLeadId: string | null;
+  } | null> {
+    const directory = await this.prisma.leadDirectory.findUnique({
+      where: {
+        id: directoryId,
+        ownerId,
+      },
+      select: {
+        id: true,
+        name: true,
+        _count: {
+          select: {
+            leads: {
+              where: {
+                lead: { isVerified: true },
+              },
+            },
+          },
+        },
+        leads: {
+          where: {
+            lead: { isVerified: true },
+          },
+          select: {
+            leadId: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+          take: 1,
+        },
+      },
+    });
+
+    if (!directory) {
+      return null;
+    }
+
+    return {
+      id: directory.id,
+      name: directory.name,
+      leadCount: directory._count.leads,
+      firstLeadId: directory.leads[0]?.leadId ?? null,
+    };
+  }
+
   private async assertThreadOwner(
     ownerId: string,
     threadId: string,

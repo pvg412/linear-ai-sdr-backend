@@ -71,6 +71,7 @@ enum ChatMessageType {
   TEXT
   JSON
   EVENT
+  OUTREACH
 }
 
 enum CompanyResearchItemCategory {

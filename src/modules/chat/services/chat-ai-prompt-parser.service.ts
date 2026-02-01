@@ -16,11 +16,16 @@ import type { ChatPromptParser } from "@/modules/chat/schemas/chat.dto";
 import {
   CompanySize as ProtoCompanySize,
   LeadProvider as ProtoLeadProvider,
+  LeadResponseType as ProtoLeadResponseType,
   LeadSearchKind as ProtoLeadSearchKind,
+  OutreachChannel as ProtoOutreachChannel,
+  OutreachStage as ProtoOutreachStage,
+  OutreachTactic as ProtoOutreachTactic,
   ParseLeadSearchPromptResponse,
 } from "@/generated/aisdr/v1/ai_sdr";
 import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.types";
 import { ApifyScraperQuerySchema } from "@/capabilities/scraper/scraper.dto";
+import { stripMentions } from "@/modules/chat/utils/folder-mentions";
 
 // -------------------------
 // Local schemas (same as before, to keep Node contract stable)
@@ -162,6 +167,116 @@ function mapKindToProto(kind: PrismaLeadSearchKind): ProtoLeadSearchKind {
   }
 }
 
+function mapLeadResponseTypeToProto(
+  type?: string,
+): ProtoLeadResponseType | undefined {
+  if (!type) return undefined;
+
+  switch (type) {
+    case "NO_RESPONSE":
+      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_NO_RESPONSE;
+    case "POSITIVE":
+      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_POSITIVE;
+    case "QUESTION":
+      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_QUESTION;
+    case "NOT_NOW":
+      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_NOT_NOW;
+    case "NEGATIVE":
+      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_NEGATIVE;
+    case "OOO":
+      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_OOO;
+    default:
+      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_UNSPECIFIED;
+  }
+}
+
+function mapOutreachChannelToProto(
+  channel?: string,
+): ProtoOutreachChannel | undefined {
+  if (!channel) return undefined;
+
+  switch (channel) {
+    case "EMAIL":
+    case "OUTREACH_CHANNEL_EMAIL":
+      return ProtoOutreachChannel.OUTREACH_CHANNEL_EMAIL;
+    case "LINKEDIN":
+    case "OUTREACH_CHANNEL_LINKEDIN":
+      return ProtoOutreachChannel.OUTREACH_CHANNEL_LINKEDIN;
+    default:
+      return ProtoOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED;
+  }
+}
+
+function mapOutreachChannelFromProto(
+  channel: ProtoOutreachChannel,
+): string {
+  switch (channel) {
+    case ProtoOutreachChannel.OUTREACH_CHANNEL_EMAIL:
+      return "EMAIL";
+    case ProtoOutreachChannel.OUTREACH_CHANNEL_LINKEDIN:
+      return "LINKEDIN";
+    case ProtoOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED:
+      return "UNSPECIFIED";
+    default:
+      console.warn(`[mapOutreachChannelFromProto] Unknown channel enum value: ${channel}`);
+      return "UNSPECIFIED";
+  }
+}
+
+function mapOutreachStageFromProto(stage: ProtoOutreachStage): string {
+  switch (stage) {
+    case ProtoOutreachStage.OUTREACH_STAGE_CONNECTION_REQUEST:
+      return "CONNECTION_REQUEST";
+    case ProtoOutreachStage.OUTREACH_STAGE_POST_ACCEPT_FIRST_MESSAGE:
+      return "POST_ACCEPT_FIRST_MESSAGE";
+    case ProtoOutreachStage.OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_1:
+      return "LINKEDIN_FOLLOW_UP_1";
+    case ProtoOutreachStage.OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_2:
+      return "LINKEDIN_FOLLOW_UP_2";
+    case ProtoOutreachStage.OUTREACH_STAGE_LINKEDIN_CLOSE_LOOP:
+      return "LINKEDIN_CLOSE_LOOP";
+    case ProtoOutreachStage.OUTREACH_STAGE_COLD_EMAIL:
+      return "COLD_EMAIL";
+    case ProtoOutreachStage.OUTREACH_STAGE_WARM_EMAIL:
+      return "WARM_EMAIL";
+    case ProtoOutreachStage.OUTREACH_STAGE_INTRODUCTION_EMAIL:
+      return "INTRODUCTION_EMAIL";
+    case ProtoOutreachStage.OUTREACH_STAGE_EMAIL_FOLLOW_UP_1:
+      return "EMAIL_FOLLOW_UP_1";
+    case ProtoOutreachStage.OUTREACH_STAGE_EMAIL_FOLLOW_UP_2:
+      return "EMAIL_FOLLOW_UP_2";
+    case ProtoOutreachStage.OUTREACH_STAGE_EMAIL_CLOSE_LOOP:
+      return "EMAIL_CLOSE_LOOP";
+    case ProtoOutreachStage.OUTREACH_STAGE_FOLLOW_UP_NO_REPLY:
+      return "FOLLOW_UP_NO_REPLY";
+    case ProtoOutreachStage.OUTREACH_STAGE_AFTER_POSITIVE_REPLY:
+      return "AFTER_POSITIVE_REPLY";
+    case ProtoOutreachStage.OUTREACH_STAGE_REPLY_TO_QUESTION:
+      return "REPLY_TO_QUESTION";
+    default:
+      return "UNSPECIFIED";
+  }
+}
+
+function mapOutreachTacticFromProto(tactic: ProtoOutreachTactic): string {
+  switch (tactic) {
+    case ProtoOutreachTactic.OUTREACH_TACTIC_OPTIONS:
+      return "OPTIONS";
+    case ProtoOutreachTactic.OUTREACH_TACTIC_MINI_PLAN:
+      return "MINI_PLAN";
+    case ProtoOutreachTactic.OUTREACH_TACTIC_TEASE:
+      return "TEASE";
+    case ProtoOutreachTactic.OUTREACH_TACTIC_RESOURCE:
+      return "RESOURCE";
+    case ProtoOutreachTactic.OUTREACH_TACTIC_SOCIAL_PROOF:
+      return "SOCIAL_PROOF";
+    case ProtoOutreachTactic.OUTREACH_TACTIC_CLOSE_LOOP:
+      return "CLOSE_LOOP";
+    default:
+      return "UNSPECIFIED";
+  }
+}
+
 type ExtractedQuery =
   | { kind: "leadDb"; value: Record<string, unknown> }
   | { kind: "scraper"; value: Record<string, unknown> };
@@ -296,7 +411,85 @@ export class ChatAiPromptParserService implements ChatPromptParser {
   constructor(
     @inject(AI_GRPC_CLIENT_TYPES.AiGrpcClient)
     private readonly aiGrpcClient: AiGrpcClient,
-  ) {}
+  ) { }
+
+  async parseOutreachContext(input: {
+    text: string;
+    userId: string;
+    threadId: string;
+    leadId: string;
+    hasPreviousMessages?: boolean;
+    previousMessagesCount?: number;
+    lastLeadResponse?: string;
+    suggestedChannel?: string;
+    debug?: boolean;
+  }): Promise<{
+    channel: string;
+    stage: string;
+    dayInSequence: number;
+    followUpNumber: number;
+    suggestedTactic: string;
+    leadId: string;
+    warnings?: Array<{ code: string; message: string }>;
+    usedFallbackJsonMode?: boolean;
+    rawModelOutput?: string;
+  }> {
+    const lastLeadResponse = mapLeadResponseTypeToProto(input.lastLeadResponse);
+    const suggestedChannel = mapOutreachChannelToProto(input.suggestedChannel);
+
+    console.log("[ChatAiPromptParserService] parseOutreachContext - input mapping", {
+      inputSuggestedChannel: input.suggestedChannel,
+      mappedSuggestedChannel: suggestedChannel,
+      inputLastLeadResponse: input.lastLeadResponse,
+      mappedLastLeadResponse: lastLeadResponse,
+    });
+
+    // Strip @mentions before sending to AI
+    const cleanedText = stripMentions(input.text);
+
+    const resp = await this.aiGrpcClient.parseOutreachContext({
+      requestId: "",
+      userId: input.userId,
+      threadId: input.threadId,
+      workspaceId: input.userId, // workspace_id = user_id
+      leadId: input.leadId,
+      text: cleanedText,
+      hasPreviousMessages: input.hasPreviousMessages ?? false,
+      previousMessagesCount: input.previousMessagesCount ?? 0,
+      previousMessages: [], // TODO: Add actual conversation history if needed
+      lastLeadResponse: lastLeadResponse ?? ProtoLeadResponseType.LEAD_RESPONSE_TYPE_UNSPECIFIED,
+      suggestedChannel: suggestedChannel ?? ProtoOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED,
+      debug: input.debug ?? false,
+    });
+
+    console.log("[ChatAiPromptParserService] parseOutreachContext - gRPC response", {
+      rawResponse: resp,
+      channelEnum: resp.channel,
+      stageEnum: resp.stage,
+      tacticEnum: resp.suggestedTactic,
+    });
+
+    const result = {
+      channel: mapOutreachChannelFromProto(resp.channel),
+      stage: mapOutreachStageFromProto(resp.stage),
+      dayInSequence: resp.dayInSequence,
+      followUpNumber: resp.followUpNumber,
+      suggestedTactic: mapOutreachTacticFromProto(resp.suggestedTactic),
+      leadId: resp.leadId,
+      warnings: resp.warnings?.map((w) => ({
+        code: w.code,
+        message: w.message,
+      })),
+      usedFallbackJsonMode: resp.usedFallbackJsonMode,
+      rawModelOutput: resp.rawModelOutput || undefined,
+    };
+
+    console.log("[ChatAiPromptParserService] parseOutreachContext - mapped result", {
+      result,
+    });
+
+    return result;
+  }
 
   async parsePrompt(input: {
     text: string;

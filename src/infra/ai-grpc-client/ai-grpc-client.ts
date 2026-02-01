@@ -10,6 +10,8 @@ import type {
   DeleteLeadDocumentsResponse,
   ParseLeadSearchPromptRequest,
   ParseLeadSearchPromptResponse,
+  ParseOutreachContextRequest,
+  ParseOutreachContextResponse,
   PingResponse,
   UpsertCompanyResearchRequest,
   UpsertCompanyResearchResponse,
@@ -220,6 +222,36 @@ export class AiGrpcClient {
       normalized,
       this.timeouts.parseMs,
     );
+  }
+
+  parseOutreachContext(
+    req: ParseOutreachContextRequest,
+  ): Promise<ParseOutreachContextResponse> {
+    const normalized = withRequestId(req);
+
+    console.log("[AiGrpcClient] parseOutreachContext - request", {
+      requestId: normalized.requestId,
+      suggestedChannel: normalized.suggestedChannel,
+      leadId: normalized.leadId,
+      text: normalized.text?.substring(0, 100),
+    });
+
+    return this.unary<ParseOutreachContextRequest, ParseOutreachContextResponse>(
+      "parseOutreachContext",
+      (r, md, opt, cb) => this.client.parseOutreachContext(r, md, opt, cb),
+      normalized,
+      this.timeouts.parseMs,
+    ).then((response: ParseOutreachContextResponse) => {
+      console.log("[AiGrpcClient] parseOutreachContext - response", {
+        requestId: normalized.requestId,
+        channel: response.channel,
+        stage: response.stage,
+        suggestedTactic: response.suggestedTactic,
+        dayInSequence: response.dayInSequence,
+        followUpNumber: response.followUpNumber,
+      });
+      return response;
+    });
   }
 
   upsertLeadDocuments(

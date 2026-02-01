@@ -9,7 +9,7 @@ import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.type
 import { ChatRepository } from "../persistence/chat.repository";
 import { CHAT_TYPES } from "../chat.types";
 
-import { extractFolderMentions } from "../utils/folder-mentions";
+import { extractFolderMentions, stripMentions } from "../utils/folder-mentions";
 import { sanitizeMessageToPublic } from "../parsers/chat.parsers";
 
 import { RealtimeHub } from "@/infra/realtime/realtimeHub";
@@ -18,10 +18,19 @@ import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";
 import type {
   ChatStreamEvent,
   ChatStreamRequest,
+  OutreachMessage as PbOutreachMessage,
+  OutreachContext as PbOutreachContext,
 } from "@/generated/aisdr/v1/ai_sdr";
 import {
   ChatMessageRole as PbRole,
   ChatMessageType as PbType,
+  ChatMode,
+  LeadResponseType as PbLeadResponseType,
+  OutreachChannel as PbOutreachChannel,
+  OutreachStage as PbOutreachStage,
+  OutreachTactic as PbOutreachTactic,
+  outreachChannelToJSON,
+  outreachStageToJSON,
 } from "@/generated/aisdr/v1/ai_sdr";
 
 import { LEAD_DIRECTORY_TYPES } from "@/modules/lead-directory/lead-directory.types";
@@ -84,6 +93,36 @@ function parseCitations(itemsUnknown: unknown): Citation[] {
   return out;
 }
 
+type OutreachMessageJson = {
+  type: "outreach";
+  channel: string;
+  stage: string;
+  subject: string;
+  body: string;
+  variants: string[];
+  characterCount: number;
+  wordCount: number;
+  containsLink: boolean;
+  usageNote?: string;
+};
+
+function parseOutreachMessage(
+  outreach: PbOutreachMessage,
+): OutreachMessageJson {
+  return {
+    type: "outreach",
+    channel: outreachChannelToJSON(outreach.channel),
+    stage: outreachStageToJSON(outreach.stage),
+    subject: outreach.subject || "",
+    body: outreach.body || "",
+    variants: outreach.variants || [],
+    characterCount: outreach.characterCount || 0,
+    wordCount: outreach.wordCount || 0,
+    containsLink: outreach.containsLink || false,
+    usageNote: outreach.usageNote || undefined,
+  };
+}
+
 function isAbortError(err: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true;
 
@@ -96,6 +135,71 @@ function isAbortError(err: unknown, signal?: AbortSignal): boolean {
   }
 
   return err instanceof Error && err.name === "AbortError";
+}
+
+function mapStringToOutreachChannel(channel: string): PbOutreachChannel {
+  switch (channel) {
+    case "EMAIL":
+      return PbOutreachChannel.OUTREACH_CHANNEL_EMAIL;
+    case "LINKEDIN":
+      return PbOutreachChannel.OUTREACH_CHANNEL_LINKEDIN;
+    default:
+      return PbOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED;
+  }
+}
+
+function mapStringToOutreachStage(stage: string): PbOutreachStage {
+  switch (stage) {
+    case "CONNECTION_REQUEST":
+      return PbOutreachStage.OUTREACH_STAGE_CONNECTION_REQUEST;
+    case "POST_ACCEPT_FIRST_MESSAGE":
+      return PbOutreachStage.OUTREACH_STAGE_POST_ACCEPT_FIRST_MESSAGE;
+    case "LINKEDIN_FOLLOW_UP_1":
+      return PbOutreachStage.OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_1;
+    case "LINKEDIN_FOLLOW_UP_2":
+      return PbOutreachStage.OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_2;
+    case "LINKEDIN_CLOSE_LOOP":
+      return PbOutreachStage.OUTREACH_STAGE_LINKEDIN_CLOSE_LOOP;
+    case "COLD_EMAIL":
+      return PbOutreachStage.OUTREACH_STAGE_COLD_EMAIL;
+    case "WARM_EMAIL":
+      return PbOutreachStage.OUTREACH_STAGE_WARM_EMAIL;
+    case "INTRODUCTION_EMAIL":
+      return PbOutreachStage.OUTREACH_STAGE_INTRODUCTION_EMAIL;
+    case "EMAIL_FOLLOW_UP_1":
+      return PbOutreachStage.OUTREACH_STAGE_EMAIL_FOLLOW_UP_1;
+    case "EMAIL_FOLLOW_UP_2":
+      return PbOutreachStage.OUTREACH_STAGE_EMAIL_FOLLOW_UP_2;
+    case "EMAIL_CLOSE_LOOP":
+      return PbOutreachStage.OUTREACH_STAGE_EMAIL_CLOSE_LOOP;
+    case "FOLLOW_UP_NO_REPLY":
+      return PbOutreachStage.OUTREACH_STAGE_FOLLOW_UP_NO_REPLY;
+    case "AFTER_POSITIVE_REPLY":
+      return PbOutreachStage.OUTREACH_STAGE_AFTER_POSITIVE_REPLY;
+    case "REPLY_TO_QUESTION":
+      return PbOutreachStage.OUTREACH_STAGE_REPLY_TO_QUESTION;
+    default:
+      return PbOutreachStage.OUTREACH_STAGE_UNSPECIFIED;
+  }
+}
+
+function mapStringToOutreachTactic(tactic: string): PbOutreachTactic {
+  switch (tactic) {
+    case "OPTIONS":
+      return PbOutreachTactic.OUTREACH_TACTIC_OPTIONS;
+    case "MINI_PLAN":
+      return PbOutreachTactic.OUTREACH_TACTIC_MINI_PLAN;
+    case "TEASE":
+      return PbOutreachTactic.OUTREACH_TACTIC_TEASE;
+    case "RESOURCE":
+      return PbOutreachTactic.OUTREACH_TACTIC_RESOURCE;
+    case "SOCIAL_PROOF":
+      return PbOutreachTactic.OUTREACH_TACTIC_SOCIAL_PROOF;
+    case "CLOSE_LOOP":
+      return PbOutreachTactic.OUTREACH_TACTIC_CLOSE_LOOP;
+    default:
+      return PbOutreachTactic.OUTREACH_TACTIC_UNSPECIFIED;
+  }
 }
 
 function getEventPayload(ev: ChatStreamEvent): {
@@ -182,29 +286,45 @@ export class ChatAiStreamService {
 
     clientMessageId?: string;
     defaultDirectoryIds?: string[];
+    mode?: ChatMode;
+    outreachContext?: {
+      channel: string;
+      stage: string;
+      dayInSequence?: number;
+      followUpNumber?: number;
+      suggestedTactic?: string;
+      leadResponseType?: string;
+      customInstructions?: string;
+      leadId?: string;
+      userPrompt?: string;
+    };
 
     signal?: AbortSignal;
   }): Promise<void> {
     const requestId = randomUUID();
     const workspaceId = input.userId;
 
-    // 1) persist USER message
-    const userMsg = await this.chatRepo.createMessage({
-      ownerId: input.userId,
-      threadId: input.threadId,
-      role: ChatMessageRole.USER,
-      type: ChatMessageType.TEXT,
-      text: input.text,
-      payload: null,
-      authorUserId: input.userId,
-    });
+    // 1) persist USER message (skip if we have outreach context - it already has USER JSON message)
+    let userMsg: { id: string; createdAt: string | Date } | null = null;
 
-    this.realtimeHub.broadcast(input.threadId, {
-      type: "message.created",
-      payload: {
-        message: sanitizeMessageToPublic(userMsg as unknown as UnknownRecord),
-      },
-    });
+    if (input.text.trim().length > 0 && !input.outreachContext) {
+      userMsg = await this.chatRepo.createMessage({
+        ownerId: input.userId,
+        threadId: input.threadId,
+        role: ChatMessageRole.USER,
+        type: ChatMessageType.TEXT,
+        text: input.text,
+        payload: null,
+        authorUserId: input.userId,
+      });
+
+      this.realtimeHub.broadcast(input.threadId, {
+        type: "message.created",
+        payload: {
+          message: sanitizeMessageToPublic(userMsg as unknown as UnknownRecord),
+        },
+      });
+    }
 
     // 2) @folder mentions → filter leadIds by directories
     const { cleanedText, mentions } = extractFolderMentions(input.text);
@@ -261,10 +381,15 @@ export class ChatAiStreamService {
     }
 
     // 3) Fetch leadIds from directories (backend filtering)
-    const leadIds = await this.chatRepo.getLeadIdsFromDirectories(
+    let leadIds = await this.chatRepo.getLeadIdsFromDirectories(
       input.userId,
       directoryIds,
     );
+
+    // If outreach context has a specific leadId, add it to leadIds
+    if (input.outreachContext?.leadId && !leadIds.includes(input.outreachContext.leadId)) {
+      leadIds = [input.outreachContext.leadId, ...leadIds];
+    }
 
     const LIMIT_MESSAGES_FOR_AI = 15;
 
@@ -292,6 +417,32 @@ export class ChatAiStreamService {
         createdAtMs: String(Date.parse(m.createdAt)),
       }));
 
+    // Build outreach context if provided (pre-parsed from outreach.prompt.apply)
+    let outreachContext: PbOutreachContext | undefined;
+
+    if (input.outreachContext) {
+      const ctx = input.outreachContext;
+
+      outreachContext = {
+        channel: mapStringToOutreachChannel(ctx.channel),
+        stage: mapStringToOutreachStage(ctx.stage),
+        dayInSequence: ctx.dayInSequence ?? 0,
+        followUpNumber: ctx.followUpNumber ?? 0,
+        suggestedTactic: ctx.suggestedTactic
+          ? mapStringToOutreachTactic(ctx.suggestedTactic)
+          : PbOutreachTactic.OUTREACH_TACTIC_UNSPECIFIED,
+        leadResponseType: PbLeadResponseType.LEAD_RESPONSE_TYPE_NO_RESPONSE,
+        leadLastReply: "",
+        previousMessages: [],
+        customInstructions: ctx.customInstructions ?? "",
+        assetPermissionGranted: false,
+        assetToSend: "",
+      };
+    }
+
+    // Strip all @mentions before sending to AI
+    const textForAi = stripMentions(cleanedText.length > 0 ? cleanedText : input.text);
+
     const req: ChatStreamRequest = {
       requestId,
       workspaceId,
@@ -299,11 +450,11 @@ export class ChatAiStreamService {
       userId: input.userId,
 
       userMessage: {
-        messageId: userMsg.id,
+        messageId: userMsg?.id ?? `temp-${requestId}`,
         role: PbRole.CHAT_MESSAGE_ROLE_USER,
         type: PbType.CHAT_MESSAGE_TYPE_TEXT,
-        text: cleanedText.length > 0 ? cleanedText : input.text,
-        createdAtMs: String(Date.now()),
+        text: textForAi,
+        createdAtMs: String(userMsg?.createdAt ? Date.parse(String(userMsg.createdAt)) : Date.now()),
       },
 
       history: pbHistory,
@@ -313,6 +464,10 @@ export class ChatAiStreamService {
       },
 
       debug: false,
+
+      mode: input.mode ?? ChatMode.CHAT_MODE_ASSISTANCE,
+
+      outreachContext,
     };
 
     // ✅ notify start
@@ -321,7 +476,7 @@ export class ChatAiStreamService {
       payload: {
         requestId,
         clientMessageId: input.clientMessageId ?? null,
-        userMessageId: userMsg.id,
+        userMessageId: userMsg?.id ?? null,
       },
     });
 
@@ -386,13 +541,32 @@ export class ChatAiStreamService {
           const finalCitations =
             citations.length > 0 ? citations : lastCitations;
 
+          // Check if this is an outreach message
+          const outreachUnknown = p.data["outreach"];
+          const isOutreach = outreachUnknown && isRecord(outreachUnknown);
+
+          let messageType: ChatMessageType = ChatMessageType.TEXT;
+          let messagePayload: Json = { citations: finalCitations } as unknown as Json;
+
+          // If outreach message is present, parse it and set type to OUTREACH
+          if (isOutreach) {
+            messageType = ChatMessageType.OUTREACH;
+            const outreachData = parseOutreachMessage(
+              outreachUnknown as unknown as PbOutreachMessage,
+            );
+            messagePayload = {
+              ...outreachData,
+              citations: finalCitations,
+            } as unknown as Json;
+          }
+
           const assistantMsg = await this.chatRepo.createMessage({
             ownerId: input.userId,
             threadId: input.threadId,
             role: ChatMessageRole.ASSISTANT,
-            type: ChatMessageType.TEXT,
+            type: messageType,
             text,
-            payload: { citations: finalCitations } as unknown as Json,
+            payload: messagePayload,
             authorUserId: null,
           });
 

@@ -12,6 +12,10 @@ import {
   type UnknownRecord,
 } from "./chat.controller.helpers";
 import { sanitizeMessageToPublic } from "../parsers/chat.parsers";
+import {
+  outreachChannelToJSON,
+  outreachStageToJSON,
+} from "@/generated/aisdr/v1/ai_sdr";
 
 type StreamState = {
   abortController: AbortController | null;
@@ -263,6 +267,145 @@ async function dispatchWsCommand(input: {
     return;
   }
 
+  // -------------------------
+  // Outreach: parse prompt -> JSON context
+  // -------------------------
+  if (parsed.type === "outreach.prompt.parse") {
+    const suggestedChannel = parsed.payload.suggestedChannel
+      ? outreachChannelToJSON(parsed.payload.suggestedChannel)
+      : undefined;
+
+    console.log(tag, "outreach.prompt.parse - input", {
+      suggestedChannelRaw: parsed.payload.suggestedChannel,
+      suggestedChannelConverted: suggestedChannel,
+      text: parsed.payload.text,
+      directoryId: parsed.payload.directoryId,
+    });
+
+    const result = await deps.commandService.parseOutreachPrompt(
+      userId,
+      threadId,
+      {
+        text: parsed.payload.text,
+        directoryId: parsed.payload.directoryId,
+        suggestedChannel,
+      },
+    );
+
+    console.log(tag, "outreach.prompt.parse - result", {
+      parsed: result.parsed,
+      assistantMessagePayload: result.assistantMessage.payload,
+    });
+
+    deps.realtimeHub.broadcast(threadId, {
+      type: "message.created",
+      payload: {
+        message: sanitizeMessageToPublic(
+          result.userMessage as unknown as UnknownRecord,
+        ),
+      },
+    });
+
+    deps.realtimeHub.broadcast(threadId, {
+      type: "message.created",
+      payload: {
+        message: sanitizeMessageToPublic(
+          result.assistantMessage as unknown as UnknownRecord,
+        ),
+      },
+    });
+
+    wsSend(socket, {
+      type: "ack",
+      payload: {
+        ok: true,
+        clientMessageId: parsed.payload.clientMessageId ?? undefined,
+      },
+    });
+    return;
+  }
+
+  // -------------------------
+  // Outreach: apply context -> trigger generation
+  // -------------------------
+  if (parsed.type === "outreach.prompt.apply") {
+    const context = {
+      channel: outreachChannelToJSON(parsed.payload.context.channel),
+      stage: outreachStageToJSON(parsed.payload.context.stage),
+      dayInSequence: parsed.payload.context.dayInSequence,
+      followUpNumber: parsed.payload.context.followUpNumber,
+      suggestedTactic: parsed.payload.context.suggestedTactic,
+      leadResponseType: parsed.payload.context.leadResponseType,
+      customInstructions: parsed.payload.context.customInstructions,
+      leadId: parsed.payload.context.leadId,
+      userPrompt: parsed.payload.context.userPrompt,
+    };
+
+    const result = await deps.commandService.applyOutreachContext(
+      userId,
+      threadId,
+      {
+        context,
+        parsedMessageId: parsed.payload.parsedMessageId,
+        defaultDirectoryIds: parsed.payload.defaultDirectoryIds,
+      },
+    );
+
+    deps.realtimeHub.broadcast(threadId, {
+      type: "message.created",
+      payload: {
+        message: sanitizeMessageToPublic(
+          result.userJsonMessage as unknown as UnknownRecord,
+        ),
+      },
+    });
+
+    wsSend(socket, {
+      type: "ack",
+      payload: {
+        ok: true,
+        clientMessageId: parsed.payload.clientMessageId ?? null,
+      },
+    });
+
+    // Now trigger the AI stream with the context
+    const ac = new AbortController();
+    stream.abortController = ac;
+
+    const defaultDirectoryIds = parsed.payload.defaultDirectoryIds ?? [];
+    const userPrompt = parsed.payload.context.userPrompt ?? "";
+
+    void deps.aiStreamService
+      .streamAssistantReply({
+        userId,
+        threadId,
+        text: userPrompt, // Use original user prompt from context
+        clientMessageId: parsed.payload.clientMessageId ?? undefined,
+        defaultDirectoryIds,
+        mode: 2, // ChatMode.CHAT_MODE_OUTREACH
+        outreachContext: context,
+        signal: ac.signal,
+      })
+      .catch((err) => {
+        if (ac.signal.aborted) return;
+
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(tag, "ai stream failed", { message: msg });
+
+        wsSend(socket, {
+          type: "error",
+          payload: { code: "AI_STREAM_FAILED", message: msg },
+        });
+      })
+      .finally(() => {
+        if (stream.abortController === ac) {
+          stream.abortController = null;
+        }
+      });
+
+    return;
+  }
+
   if (parsed.type === "assistant.stream") {
     // ack immediately so UI gets confirmation
     wsSend(socket, {
@@ -288,6 +431,7 @@ async function dispatchWsCommand(input: {
     stream.abortController = ac;
 
     const defaultDirectoryIds = parsed.payload.defaultDirectoryIds ?? [];
+    const mode = parsed.payload.mode;
 
     // fire-and-forget; service itself should broadcast message.created + deltas
     void deps.aiStreamService
@@ -297,6 +441,7 @@ async function dispatchWsCommand(input: {
         text: parsed.payload.text,
         clientMessageId: parsed.payload.clientMessageId ?? undefined,
         defaultDirectoryIds,
+        mode,
         signal: ac.signal,
       })
       .catch((err) => {
