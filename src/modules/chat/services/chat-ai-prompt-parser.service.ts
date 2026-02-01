@@ -1,410 +1,36 @@
 // src/modules/chat/parsers/chat-ai-prompt-parser.ts
 import { inject, injectable } from "inversify";
-import { z } from "zod";
 import {
   LeadProvider as PrismaLeadProvider,
   LeadSearchKind as PrismaLeadSearchKind,
 } from "@prisma/client";
 
 import { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
-import {
-  CompanySizeSchema,
-  LeadDbCanonicalFiltersSchema,
-} from "@/capabilities/lead-db/lead-db.dto";
-import type { ChatPromptParser } from "@/modules/chat/schemas/chat.dto";
-
-import {
-  CompanySize as ProtoCompanySize,
-  LeadProvider as ProtoLeadProvider,
-  LeadResponseType as ProtoLeadResponseType,
-  LeadSearchKind as ProtoLeadSearchKind,
-  OutreachChannel as ProtoOutreachChannel,
-  OutreachStage as ProtoOutreachStage,
-  OutreachTactic as ProtoOutreachTactic,
-  ParseLeadSearchPromptResponse,
-} from "@/generated/aisdr/v1/ai_sdr";
 import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.types";
 import { ApifyScraperQuerySchema } from "@/capabilities/scraper/scraper.dto";
 import { stripMentions } from "@/modules/chat/utils/folder-mentions";
+import type { ChatPromptParser } from "@/modules/chat/schemas/chat.dto";
 
-// -------------------------
-// Local schemas (same as before, to keep Node contract stable)
-// -------------------------
+import {
+  OutreachChannel as ProtoOutreachChannel,
+  LeadResponseType as ProtoLeadResponseType,
+} from "@/generated/aisdr/v1/ai_sdr";
 
-const LimitSchema = z.number().int().min(1).max(50_000);
-
-const ScraperQuerySchema = z
-  .object({
-    industry: z.string().trim().min(1).optional(),
-    titles: z.array(z.string().trim().min(1)).default([]),
-    locations: z.array(z.string().trim().min(1)).default([]),
-    companySize: CompanySizeSchema.optional(),
-    companyKeywords: z.array(z.string().trim().min(1)).optional(),
-  })
-  .strip();
-
-const AiLeadDbOutputSchema = z
-  .object({
-    limit: LimitSchema.optional(),
-    query: LeadDbCanonicalFiltersSchema.default({}),
-  })
-  .strip();
-
-const AiScraperOutputSchema = z
-  .object({
-    limit: LimitSchema.optional(),
-    query: ScraperQuerySchema.default({ titles: [], locations: [] }),
-  })
-  .strip();
-
-type LeadDbQueryOut = z.infer<typeof LeadDbCanonicalFiltersSchema>;
-type ScraperQueryOut = z.infer<typeof ScraperQuerySchema>;
-type CompanySizeStr = z.infer<typeof CompanySizeSchema>;
-
-// -------------------------
-// Helpers (no any, safe runtime access)
-// -------------------------
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
-}
-
-function readNonEmptyString(
-  obj: Record<string, unknown>,
-  key: string,
-): string | undefined {
-  const v = obj[key];
-  if (typeof v !== "string") return undefined;
-  const s = v.trim();
-  return s.length > 0 ? s : undefined;
-}
-
-function readStringArray(obj: Record<string, unknown>, key: string): string[] {
-  const v = obj[key];
-  if (!Array.isArray(v)) return [];
-  const out: string[] = [];
-  for (const item of v) {
-    if (typeof item === "string") {
-      const s = item.trim();
-      if (s) out.push(s);
-    }
-  }
-  return out;
-}
-
-function readOptionalBool(
-  obj: Record<string, unknown>,
-  key: string,
-): boolean | undefined {
-  const v = obj[key];
-  if (typeof v === "boolean") return v;
-  return undefined;
-}
-
-function readOptionalEnumNumber(
-  obj: Record<string, unknown>,
-  key: string,
-): number | undefined {
-  const v = obj[key];
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  return undefined;
-}
-
-function mapCompanySizeEnumToString(
-  size: ProtoCompanySize | number | undefined,
-): CompanySizeStr | undefined {
-  const n = typeof size === "number" ? size : undefined;
-  switch (n) {
-    case ProtoCompanySize.COMPANY_SIZE_1_10:
-      return "1-10";
-    case ProtoCompanySize.COMPANY_SIZE_11_50:
-      return "11-50";
-    case ProtoCompanySize.COMPANY_SIZE_51_200:
-      return "51-200";
-    case ProtoCompanySize.COMPANY_SIZE_201_500:
-      return "201-500";
-    case ProtoCompanySize.COMPANY_SIZE_501_1000:
-      return "501-1000";
-    case ProtoCompanySize.COMPANY_SIZE_1000_PLUS:
-      return "1000+";
-    default:
-      return undefined;
-  }
-}
-
-function mapProviderToProto(provider: PrismaLeadProvider): ProtoLeadProvider {
-  switch (provider) {
-    case PrismaLeadProvider.SCRAPER_CITY:
-      return ProtoLeadProvider.LEAD_PROVIDER_SCRAPER_CITY;
-    case PrismaLeadProvider.SEARCH_LEADS:
-      return ProtoLeadProvider.LEAD_PROVIDER_SEARCH_LEADS;
-    case PrismaLeadProvider.BOOMERANG:
-      return ProtoLeadProvider.LEAD_PROVIDER_BOOMERANG;
-    case PrismaLeadProvider.DADDY_LEADS:
-      return ProtoLeadProvider.LEAD_PROVIDER_DADDY_LEADS;
-    case PrismaLeadProvider.APIFY:
-      return ProtoLeadProvider.LEAD_PROVIDER_APIFY;
-    case PrismaLeadProvider.SCRUPP:
-      return ProtoLeadProvider.LEAD_PROVIDER_SCRUPP;
-
-    // if Apollo appears in Prisma — simply uncomment:
-    // case PrismaLeadProvider.APOLLO:
-    //   return ProtoLeadProvider.LEAD_PROVIDER_APOLLO;
-
-    default:
-      return ProtoLeadProvider.LEAD_PROVIDER_UNSPECIFIED;
-  }
-}
-
-function mapKindToProto(kind: PrismaLeadSearchKind): ProtoLeadSearchKind {
-  switch (kind) {
-    case PrismaLeadSearchKind.LEAD_DB:
-      return ProtoLeadSearchKind.LEAD_SEARCH_KIND_LEAD_DB;
-    case PrismaLeadSearchKind.SCRAPER:
-      return ProtoLeadSearchKind.LEAD_SEARCH_KIND_SCRAPER;
-    default:
-      return ProtoLeadSearchKind.LEAD_SEARCH_KIND_UNSPECIFIED;
-  }
-}
-
-function mapLeadResponseTypeToProto(
-  type?: string,
-): ProtoLeadResponseType | undefined {
-  if (!type) return undefined;
-
-  switch (type) {
-    case "NO_RESPONSE":
-      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_NO_RESPONSE;
-    case "POSITIVE":
-      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_POSITIVE;
-    case "QUESTION":
-      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_QUESTION;
-    case "NOT_NOW":
-      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_NOT_NOW;
-    case "NEGATIVE":
-      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_NEGATIVE;
-    case "OOO":
-      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_OOO;
-    default:
-      return ProtoLeadResponseType.LEAD_RESPONSE_TYPE_UNSPECIFIED;
-  }
-}
-
-function mapOutreachChannelToProto(
-  channel?: string,
-): ProtoOutreachChannel | undefined {
-  if (!channel) return undefined;
-
-  switch (channel) {
-    case "EMAIL":
-    case "OUTREACH_CHANNEL_EMAIL":
-      return ProtoOutreachChannel.OUTREACH_CHANNEL_EMAIL;
-    case "LINKEDIN":
-    case "OUTREACH_CHANNEL_LINKEDIN":
-      return ProtoOutreachChannel.OUTREACH_CHANNEL_LINKEDIN;
-    default:
-      return ProtoOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED;
-  }
-}
-
-function mapOutreachChannelFromProto(
-  channel: ProtoOutreachChannel,
-): string {
-  switch (channel) {
-    case ProtoOutreachChannel.OUTREACH_CHANNEL_EMAIL:
-      return "EMAIL";
-    case ProtoOutreachChannel.OUTREACH_CHANNEL_LINKEDIN:
-      return "LINKEDIN";
-    case ProtoOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED:
-      return "UNSPECIFIED";
-    default:
-      console.warn(`[mapOutreachChannelFromProto] Unknown channel enum value: ${channel}`);
-      return "UNSPECIFIED";
-  }
-}
-
-function mapOutreachStageFromProto(stage: ProtoOutreachStage): string {
-  switch (stage) {
-    case ProtoOutreachStage.OUTREACH_STAGE_CONNECTION_REQUEST:
-      return "CONNECTION_REQUEST";
-    case ProtoOutreachStage.OUTREACH_STAGE_POST_ACCEPT_FIRST_MESSAGE:
-      return "POST_ACCEPT_FIRST_MESSAGE";
-    case ProtoOutreachStage.OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_1:
-      return "LINKEDIN_FOLLOW_UP_1";
-    case ProtoOutreachStage.OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_2:
-      return "LINKEDIN_FOLLOW_UP_2";
-    case ProtoOutreachStage.OUTREACH_STAGE_LINKEDIN_CLOSE_LOOP:
-      return "LINKEDIN_CLOSE_LOOP";
-    case ProtoOutreachStage.OUTREACH_STAGE_COLD_EMAIL:
-      return "COLD_EMAIL";
-    case ProtoOutreachStage.OUTREACH_STAGE_WARM_EMAIL:
-      return "WARM_EMAIL";
-    case ProtoOutreachStage.OUTREACH_STAGE_INTRODUCTION_EMAIL:
-      return "INTRODUCTION_EMAIL";
-    case ProtoOutreachStage.OUTREACH_STAGE_EMAIL_FOLLOW_UP_1:
-      return "EMAIL_FOLLOW_UP_1";
-    case ProtoOutreachStage.OUTREACH_STAGE_EMAIL_FOLLOW_UP_2:
-      return "EMAIL_FOLLOW_UP_2";
-    case ProtoOutreachStage.OUTREACH_STAGE_EMAIL_CLOSE_LOOP:
-      return "EMAIL_CLOSE_LOOP";
-    case ProtoOutreachStage.OUTREACH_STAGE_FOLLOW_UP_NO_REPLY:
-      return "FOLLOW_UP_NO_REPLY";
-    case ProtoOutreachStage.OUTREACH_STAGE_AFTER_POSITIVE_REPLY:
-      return "AFTER_POSITIVE_REPLY";
-    case ProtoOutreachStage.OUTREACH_STAGE_REPLY_TO_QUESTION:
-      return "REPLY_TO_QUESTION";
-    default:
-      return "UNSPECIFIED";
-  }
-}
-
-function mapOutreachTacticFromProto(tactic: ProtoOutreachTactic): string {
-  switch (tactic) {
-    case ProtoOutreachTactic.OUTREACH_TACTIC_OPTIONS:
-      return "OPTIONS";
-    case ProtoOutreachTactic.OUTREACH_TACTIC_MINI_PLAN:
-      return "MINI_PLAN";
-    case ProtoOutreachTactic.OUTREACH_TACTIC_TEASE:
-      return "TEASE";
-    case ProtoOutreachTactic.OUTREACH_TACTIC_RESOURCE:
-      return "RESOURCE";
-    case ProtoOutreachTactic.OUTREACH_TACTIC_SOCIAL_PROOF:
-      return "SOCIAL_PROOF";
-    case ProtoOutreachTactic.OUTREACH_TACTIC_CLOSE_LOOP:
-      return "CLOSE_LOOP";
-    default:
-      return "UNSPECIFIED";
-  }
-}
-
-type ExtractedQuery =
-  | { kind: "leadDb"; value: Record<string, unknown> }
-  | { kind: "scraper"; value: Record<string, unknown> };
-
-function extractQueryFromParseResponse(
-  resp: ParseLeadSearchPromptResponse,
-): ExtractedQuery {
-  // Support both ts-proto modes:
-  // 1) oneof=unions: resp.query = { $case: "leadDbQuery", leadDbQuery: {...} }
-  // 2) oneof=properties: resp.leadDbQuery / resp.scraperQuery
-
-  const u: unknown = resp;
-
-  if (!isRecord(u)) {
-    throw new Error("ParseLeadSearchPromptResponse: invalid response type");
-  }
-
-  const q = u["query"];
-  if (isRecord(q)) {
-    const kase = q["$case"];
-    if (kase === "leadDbQuery") {
-      const v = q["leadDbQuery"];
-      if (isRecord(v)) return { kind: "leadDb", value: v };
-    }
-    if (kase === "scraperQuery") {
-      const v = q["scraperQuery"];
-      if (isRecord(v)) return { kind: "scraper", value: v };
-    }
-  }
-
-  const leadDb = u["leadDbQuery"];
-  if (isRecord(leadDb)) return { kind: "leadDb", value: leadDb };
-
-  const scraper = u["scraperQuery"];
-  if (isRecord(scraper)) return { kind: "scraper", value: scraper };
-
-  throw new Error(
-    "ParseLeadSearchPromptResponse: query is empty (no leadDbQuery/scraperQuery)",
-  );
-}
-
-function toLeadDbQuery(pb: Record<string, unknown>): LeadDbQueryOut {
-  const out: Record<string, unknown> = {
-    // arrays are always present to not break UI/contract
-    personTitles: readStringArray(pb, "personTitles"),
-    personCities: readStringArray(pb, "personCities"),
-    companyCities: readStringArray(pb, "companyCities"),
-    companyDomains: readStringArray(pb, "companyDomains"),
-    companyKeywords: readStringArray(pb, "companyKeywords"),
-  };
-
-  const seniorityLevel = readNonEmptyString(pb, "seniorityLevel");
-  if (seniorityLevel) out.seniorityLevel = seniorityLevel;
-
-  const functionDept = readNonEmptyString(pb, "functionDept");
-  if (functionDept) out.functionDept = functionDept;
-
-  const personCountry = readNonEmptyString(pb, "personCountry");
-  if (personCountry) out.personCountry = personCountry;
-
-  const personState = readNonEmptyString(pb, "personState");
-  if (personState) out.personState = personState;
-
-  const companyIndustry = readNonEmptyString(pb, "companyIndustry");
-  if (companyIndustry) out.companyIndustry = companyIndustry;
-
-  const companyCountry = readNonEmptyString(pb, "companyCountry");
-  if (companyCountry) out.companyCountry = companyCountry;
-
-  const companyState = readNonEmptyString(pb, "companyState");
-  if (companyState) out.companyState = companyState;
-
-  const hasPhone = readOptionalBool(pb, "hasPhone");
-  if (hasPhone !== undefined) out.hasPhone = hasPhone;
-
-  const companySizeEnum = readOptionalEnumNumber(pb, "companySize");
-  const companySize = mapCompanySizeEnumToString(companySizeEnum);
-  if (companySize) out.companySize = companySize;
-
-  const parsed = LeadDbCanonicalFiltersSchema.safeParse(out);
-  if (!parsed.success) {
-    throw new Error(
-      `AI gRPC returned invalid LeadDbCanonicalFilters: ${JSON.stringify(
-        parsed.error.issues.map((i) => ({
-          path: i.path.join("."),
-          message: i.message,
-        })),
-        null,
-        2,
-      )}`,
-    );
-  }
-
-  return parsed.data;
-}
-
-function toScraperQuery(pb: Record<string, unknown>): ScraperQueryOut {
-  const out: Record<string, unknown> = {
-    titles: readStringArray(pb, "titles"),
-    locations: readStringArray(pb, "locations"),
-  };
-
-  const industry = readNonEmptyString(pb, "industry");
-  if (industry) out.industry = industry;
-
-  const companyKeywords = readStringArray(pb, "companyKeywords");
-  if (companyKeywords.length > 0) out.companyKeywords = companyKeywords;
-
-  const companySizeEnum = readOptionalEnumNumber(pb, "companySize");
-  const companySize = mapCompanySizeEnumToString(companySizeEnum);
-  if (companySize) out.companySize = companySize;
-
-  const parsed = ScraperQuerySchema.safeParse(out);
-  if (!parsed.success) {
-    throw new Error(
-      `AI gRPC returned invalid ScraperQuery: ${JSON.stringify(
-        parsed.error.issues.map((i) => ({
-          path: i.path.join("."),
-          message: i.message,
-        })),
-        null,
-        2,
-      )}`,
-    );
-  }
-
-  return parsed.data;
-}
+import {
+  AiLeadDbOutputSchema,
+  AiScraperOutputSchema,
+  extractQueryFromParseResponse,
+  mapKindToProto,
+  mapLeadResponseTypeToProto,
+  mapOutreachChannelFromProto,
+  mapOutreachChannelToProto,
+  mapOutreachStageFromProto,
+  mapOutreachTacticFromProto,
+  mapProviderToProto,
+  toApifyScraperQuery,
+  toLeadDbQuery,
+  toScraperQuery,
+} from "./parsers";
 
 @injectable()
 export class ChatAiPromptParserService implements ChatPromptParser {
@@ -437,12 +63,15 @@ export class ChatAiPromptParserService implements ChatPromptParser {
     const lastLeadResponse = mapLeadResponseTypeToProto(input.lastLeadResponse);
     const suggestedChannel = mapOutreachChannelToProto(input.suggestedChannel);
 
-    console.log("[ChatAiPromptParserService] parseOutreachContext - input mapping", {
-      inputSuggestedChannel: input.suggestedChannel,
-      mappedSuggestedChannel: suggestedChannel,
-      inputLastLeadResponse: input.lastLeadResponse,
-      mappedLastLeadResponse: lastLeadResponse,
-    });
+    console.log(
+      "[ChatAiPromptParserService] parseOutreachContext - input mapping",
+      {
+        inputSuggestedChannel: input.suggestedChannel,
+        mappedSuggestedChannel: suggestedChannel,
+        inputLastLeadResponse: input.lastLeadResponse,
+        mappedLastLeadResponse: lastLeadResponse,
+      },
+    );
 
     // Strip @mentions before sending to AI
     const cleanedText = stripMentions(input.text);
@@ -457,17 +86,23 @@ export class ChatAiPromptParserService implements ChatPromptParser {
       hasPreviousMessages: input.hasPreviousMessages ?? false,
       previousMessagesCount: input.previousMessagesCount ?? 0,
       previousMessages: [], // TODO: Add actual conversation history if needed
-      lastLeadResponse: lastLeadResponse ?? ProtoLeadResponseType.LEAD_RESPONSE_TYPE_UNSPECIFIED,
-      suggestedChannel: suggestedChannel ?? ProtoOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED,
+      lastLeadResponse:
+        lastLeadResponse ??
+        ProtoLeadResponseType.LEAD_RESPONSE_TYPE_UNSPECIFIED,
+      suggestedChannel:
+        suggestedChannel ?? ProtoOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED,
       debug: input.debug ?? false,
     });
 
-    console.log("[ChatAiPromptParserService] parseOutreachContext - gRPC response", {
-      rawResponse: resp,
-      channelEnum: resp.channel,
-      stageEnum: resp.stage,
-      tacticEnum: resp.suggestedTactic,
-    });
+    console.log(
+      "[ChatAiPromptParserService] parseOutreachContext - gRPC response",
+      {
+        rawResponse: resp,
+        channelEnum: resp.channel,
+        stageEnum: resp.stage,
+        tacticEnum: resp.suggestedTactic,
+      },
+    );
 
     const result = {
       channel: mapOutreachChannelFromProto(resp.channel),
@@ -484,9 +119,12 @@ export class ChatAiPromptParserService implements ChatPromptParser {
       rawModelOutput: resp.rawModelOutput || undefined,
     };
 
-    console.log("[ChatAiPromptParserService] parseOutreachContext - mapped result", {
-      result,
-    });
+    console.log(
+      "[ChatAiPromptParserService] parseOutreachContext - mapped result",
+      {
+        result,
+      },
+    );
 
     return result;
   }
@@ -575,123 +213,4 @@ export class ChatAiPromptParserService implements ChatPromptParser {
       suggestedLimit: validated.data.limit,
     };
   }
-}
-
-function toApifyScraperQuery(
-  pb: Record<string, unknown>,
-): Record<string, unknown> {
-  // base fields from normal ScraperQuery (keeps UI stable)
-  const base = toScraperQuery(pb);
-
-  // Apify extended fields come via proto ScraperQuery.extra (google.protobuf.Struct)
-  const extraRaw = pb["extra"];
-  const extraObj = structToJson(extraRaw) ?? {};
-
-  // merge: extra first, base last (base overwrites titles/locations with sanitized arrays)
-  const merged: Record<string, unknown> = { ...extraObj, ...base };
-
-  // normalize ISO2 countries if present
-  const countries = merged["autoQuerySegmentationTargetCountries"];
-  if (Array.isArray(countries)) {
-    const norm = countries
-      .map((c) => (typeof c === "string" ? c.trim().toUpperCase() : ""))
-      .filter(Boolean);
-    if (norm.length > 0) merged["autoQuerySegmentationTargetCountries"] = norm;
-  }
-
-  return merged;
-}
-
-// -------------------------
-// google.protobuf.Struct -> plain JSON helpers
-// Supports common ts-proto shapes.
-// -------------------------
-
-function valueToJson(v: unknown): unknown {
-  if (v === null) return null;
-  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean")
-    return v;
-  if (!isRecord(v)) return undefined;
-
-  // ts-proto can encode oneof either as:
-  // 1) { kind: { $case: "stringValue", stringValue: "x" } }
-  // 2) { $case: "stringValue", stringValue: "x" }
-  const kind = v["kind"];
-  const union = isRecord(kind) && typeof kind["$case"] === "string" ? kind : v;
-  const kase = union["$case"];
-
-  if (typeof kase === "string") {
-    switch (kase) {
-      case "nullValue":
-        return null;
-      case "stringValue":
-        return typeof union["stringValue"] === "string"
-          ? union["stringValue"]
-          : undefined;
-      case "numberValue":
-        return typeof union["numberValue"] === "number"
-          ? union["numberValue"]
-          : undefined;
-      case "boolValue":
-        return typeof union["boolValue"] === "boolean"
-          ? union["boolValue"]
-          : undefined;
-      case "structValue":
-        return structToJson(union["structValue"]) ?? {};
-      case "listValue":
-        return listValueToJson(union["listValue"]);
-      default:
-        return undefined;
-    }
-  }
-
-  // some generators expose direct fields without $case
-  if (typeof v["stringValue"] === "string") return v["stringValue"];
-  if (typeof v["numberValue"] === "number") return v["numberValue"];
-  if (typeof v["boolValue"] === "boolean") return v["boolValue"];
-  if ("nullValue" in v) return null;
-
-  if (v["structValue"]) return structToJson(v["structValue"]) ?? {};
-  if (v["listValue"]) return listValueToJson(v["listValue"]);
-
-  return undefined;
-}
-
-function listValueToJson(lv: unknown): unknown[] {
-  if (!isRecord(lv)) return [];
-  const values = lv["values"];
-  if (!Array.isArray(values)) return [];
-  const out: unknown[] = [];
-  for (const item of values) {
-    const j = valueToJson(item);
-    if (j !== undefined) out.push(j);
-  }
-  return out;
-}
-
-function structToJson(st: unknown): Record<string, unknown> | undefined {
-  if (!isRecord(st)) return undefined;
-
-  // ts-proto Struct: { fields: { [k]: Value } }
-  const fields = st["fields"];
-  if (isRecord(fields)) {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(fields)) {
-      const j = valueToJson(v);
-      if (j !== undefined) out[k] = j;
-    }
-    return out;
-  }
-
-  // fallback: if generator already gave a plain object
-  // (we avoid copying proto metadata keys)
-  const out: Record<string, unknown> = {};
-  let hasAny = false;
-  for (const [k, v] of Object.entries(st)) {
-    if (k === "$type") continue;
-    if (k === "fields") continue;
-    out[k] = v;
-    hasAny = true;
-  }
-  return hasAny ? out : undefined;
 }

@@ -18,7 +18,7 @@ import { ScraperCityClient } from "./scrapercity.client";
 import { mapScraperCityRowsToLeads } from "./scrapercity.leadMapper";
 import { wrapScraperCityAxiosError } from "./scrapercity.errors";
 import { ScraperCityStatusResponseSchema } from "./scrapercity.schemas";
-import { normalizeScraperCityEmailResult } from "./scrapercity.emailStatus";
+import { normalizeScraperCityEmailResult } from "@/capabilities/shared/emailStatus";
 
 @injectable()
 export class ScraperCityScraperAdapter implements ScraperAdapter {

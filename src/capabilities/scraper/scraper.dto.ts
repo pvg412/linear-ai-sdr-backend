@@ -105,15 +105,32 @@ export type ScraperCityScraperQuery = z.infer<
   typeof ScraperCityScrapeQuerySchema
 >;
 
-export function getScrapeQuerySchemaForProvider(provider: LeadProvider) {
-  switch (provider) {
-    case LeadProvider.SCRAPER_CITY:
-      return ScraperCityScrapeQuerySchema;
-    case LeadProvider.APIFY:
-      return ApifyScraperQuerySchema;
-    default:
-      return ScraperCityScrapeQuerySchema;
-  }
+// Schema registry for provider-specific scrape query schemas
+// Open for extension (add new providers), closed for modification
+const scraperQuerySchemaRegistry = new Map<LeadProvider, z.ZodType>([
+  [LeadProvider.SCRAPER_CITY, ScraperCityScrapeQuerySchema],
+  [LeadProvider.APIFY, ApifyScraperQuerySchema],
+]);
+
+/**
+ * Register a scrape query schema for a provider.
+ * Use this to extend the registry without modifying existing code.
+ */
+export function registerScrapeQuerySchema(
+  provider: LeadProvider,
+  schema: z.ZodType,
+): void {
+  scraperQuerySchemaRegistry.set(provider, schema);
+}
+
+/**
+ * Get the scrape query schema for a provider.
+ * Returns ScraperCityScrapeQuerySchema as default for unknown providers.
+ */
+export function getScrapeQuerySchemaForProvider(
+  provider: LeadProvider,
+): z.ZodType {
+  return scraperQuerySchemaRegistry.get(provider) ?? ScraperCityScrapeQuerySchema;
 }
 
 export type ScrapeQuery = ApifyScraperQuery | ScraperCityScraperQuery;

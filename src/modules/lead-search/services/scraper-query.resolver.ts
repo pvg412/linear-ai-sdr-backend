@@ -21,8 +21,8 @@ export async function resolveScrapeQuery(input: {
 }): Promise<ResolveScrapeQueryResult> {
   const queryObj =
     input.storedQueryJson &&
-    typeof input.storedQueryJson === "object" &&
-    !Array.isArray(input.storedQueryJson)
+      typeof input.storedQueryJson === "object" &&
+      !Array.isArray(input.storedQueryJson)
       ? (input.storedQueryJson as Record<string, unknown>)
       : {};
 
@@ -63,5 +63,5 @@ export async function resolveScrapeQuery(input: {
     return { ok: false, issues };
   }
 
-  return { ok: true, scrapeQuery: parsed.data };
+  return { ok: true, scrapeQuery: parsed.data as ScrapeQuery };
 }

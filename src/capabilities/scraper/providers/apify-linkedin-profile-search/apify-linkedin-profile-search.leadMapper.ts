@@ -6,41 +6,22 @@ import type {
   NormalizedCompanyWebsite,
 } from "@/capabilities/shared/leadValidate";
 import {
+  cleanValue,
   composeFullName,
   joinLocationParts,
   normalizeDomain,
   normalizeLinkedinUrl,
   pickFirstEmail,
+  pickString,
   trimOrUndefined,
 } from "@/capabilities/shared/leadNormalize";
+import { isRecord } from "@/capabilities/shared/typeGuards";
 import type {
   ApifyLinkedinProfileCompany,
   ApifyLinkedinProfileExperience,
   ApifyLinkedinProfileRow,
 } from "./apify-linkedin-profile-search.schemas";
-import { normalizeApifyEmailStatus } from "./apify-linkedin-profile-search.emailStatus";
-
-type UnknownRecord = Record<string, unknown>;
-
-function isRecord(v: unknown): v is UnknownRecord {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function cleanValue(value: unknown): string | undefined {
-  const trimmed = trimOrUndefined(value);
-  if (!trimmed) return undefined;
-  const lower = trimmed.toLowerCase();
-  if (lower === "undefined" || lower === "null") return undefined;
-  return trimmed;
-}
-
-function pickString(...vals: unknown[]): string | undefined {
-  for (const v of vals) {
-    const t = cleanValue(v);
-    if (t) return t;
-  }
-  return undefined;
-}
+import { normalizeApifyEmailStatus } from "@/capabilities/shared/emailStatus";
 
 function extractEmailLike(value: unknown): string | undefined {
   // Common case: already a string.

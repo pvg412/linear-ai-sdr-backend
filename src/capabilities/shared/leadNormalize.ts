@@ -6,6 +6,45 @@ export function trimOrUndefined(v: unknown): string | undefined {
   return t.length ? t : undefined;
 }
 
+/**
+ * Clean a value by trimming and filtering out "undefined" / "null" strings.
+ */
+export function cleanValue(value: unknown): string | undefined {
+  const trimmed = trimOrUndefined(value);
+  if (!trimmed) return undefined;
+  const lower = trimmed.toLowerCase();
+  if (lower === "undefined" || lower === "null") return undefined;
+  return trimmed;
+}
+
+/**
+ * Pick the first non-empty string from a list of candidates.
+ * Useful for extracting values from objects with multiple field naming conventions.
+ */
+export function pickString(...vals: unknown[]): string | undefined {
+  for (const v of vals) {
+    const t = cleanValue(v);
+    if (t) return t;
+  }
+  return undefined;
+}
+
+/**
+ * Extract domain from URL, returning undefined if not parseable.
+ */
+export function domainFromUrl(url: string | undefined): string | undefined {
+  const u = trimOrUndefined(url);
+  if (!u) return undefined;
+
+  try {
+    const withScheme = /^https?:\/\//i.test(u) ? u : `https://${u}`;
+    const parsed = new URL(withScheme);
+    return parsed.hostname || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function composeFullName(input: {
   name?: unknown;
   firstName?: unknown;

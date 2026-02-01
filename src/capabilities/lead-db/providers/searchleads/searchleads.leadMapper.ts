@@ -14,7 +14,7 @@ import {
   pickFirstEmail,
   trimOrUndefined,
 } from "@/capabilities/shared/leadNormalize";
-import { normalizeSearchLeadsEmailStatus } from "./searchleads.emailStatus";
+import { normalizeSearchLeadsEmailStatus } from "@/capabilities/shared/emailStatus";
 
 function extractEmails(row: SearchLeadsLeadRow): NormalizedLeadEmail[] {
   const emails: NormalizedLeadEmail[] = [];

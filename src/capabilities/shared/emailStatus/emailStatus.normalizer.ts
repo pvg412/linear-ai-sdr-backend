@@ -1,66 +1,59 @@
-// English comments by request
+// Centralized email status normalization logic
 
-import type { NormalizedLead } from "@/capabilities/shared/leadValidate";
+import type {
+  EmailStatus,
+  RawEmailStatus,
+  ApifyEmailEntry,
+  ApifyEmailStatusInput,
+} from "./emailStatus.types";
+import {
+  isRecord,
+  readBool,
+  readNumber,
+  readString,
+} from "@/capabilities/shared/typeGuards";
 
-type EmailStatus = NormalizedLead["emailStatus"];
-
-type UnknownRecord = Record<string, unknown>;
-
-function isRecord(v: unknown): v is UnknownRecord {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function readBool(v: unknown): boolean | undefined {
-  return typeof v === "boolean" ? v : undefined;
-}
-
-function readNumber(v: unknown): number | undefined {
-  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
-}
-
-function readString(v: unknown): string | undefined {
-  if (typeof v !== "string") return undefined;
-  const t = v.trim();
-  return t.length ? t : undefined;
-}
-
-function normalizeLegacyStatus(result: unknown): EmailStatus {
-  const s = readString(result)?.toLowerCase();
+/**
+ * Normalize a simple string-based email status.
+ * Used by ScraperCity, SearchLeads, and legacy formats.
+ */
+export function normalizeSimpleEmailStatus(result: RawEmailStatus): EmailStatus {
+  if (typeof result !== "string") return "UNKNOWN";
+  const s = result.trim().toLowerCase();
   if (!s) return "UNKNOWN";
 
   switch (s) {
-    // Common providers
+    // Deliverable variants
     case "deliverable":
     case "ok":
     case "valid":
       return "DELIVERABLE";
+
+    // Undeliverable variants
     case "undeliverable":
     case "invalid":
       return "UNDELIVERABLE";
+
+    // Catch-all variants
     case "catch_all":
     case "catch-all":
     case "accept_all":
     case "accept-all":
     case "acceptall":
       return "CATCH_ALL";
+
+    // Risky
     case "risky":
       return "RISKY";
+
+    // Unknown
     case "unknown":
-      return "UNKNOWN";
     default:
       return "UNKNOWN";
   }
 }
 
-type ApifyEmailEntry = {
-  email?: string;
-  status?: string;
-  deliverable?: boolean;
-  catchAllDomain?: boolean;
-  validEmailServer?: boolean;
-  qualityScore?: number;
-};
-
+// Apify-specific parsing logic
 function parseApifyEmailEntry(v: unknown): ApifyEmailEntry | null {
   if (!isRecord(v)) return null;
 
@@ -134,12 +127,13 @@ function normalizeApifyEmailEntry(entry: ApifyEmailEntry): EmailStatus {
   return "UNKNOWN";
 }
 
-export function normalizeApifyEmailStatus(input: {
-  selectedEmail: string | undefined;
-  emails?: unknown;
-  contactEmails?: unknown;
-  legacyEmailResult?: unknown;
-}): EmailStatus {
+/**
+ * Normalize Apify email status from complex nested structures.
+ * Handles emails array, contactEmails, and legacy emailResult fields.
+ */
+export function normalizeApifyEmailStatus(
+  input: ApifyEmailStatusInput,
+): EmailStatus {
   const selected = readString(input.selectedEmail);
   if (!selected) return "UNKNOWN";
 
@@ -152,8 +146,12 @@ export function normalizeApifyEmailStatus(input: {
 
   // Back-compat: some datasets might still include email_result/emailResult strings.
   if (input.legacyEmailResult !== undefined) {
-    return normalizeLegacyStatus(input.legacyEmailResult);
+    return normalizeSimpleEmailStatus(input.legacyEmailResult as string);
   }
 
   return "UNKNOWN";
 }
+
+// Provider-specific aliases for backward compatibility
+export const normalizeScraperCityEmailResult = normalizeSimpleEmailStatus;
+export const normalizeSearchLeadsEmailStatus = normalizeSimpleEmailStatus;
