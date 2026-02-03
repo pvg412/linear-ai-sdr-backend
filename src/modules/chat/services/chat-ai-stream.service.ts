@@ -702,6 +702,7 @@ export class ChatAiStreamService {
     console.log("[ChatAiStreamService] continueOutreach - calling streamAssistantReply", {
       hasContextFromFrontend: !!input.outreachContext,
       contextFields: input.outreachContext ? Object.keys(input.outreachContext) : [],
+      receivedContext: input.outreachContext,
     });
 
     // Trigger AI stream for this lead with outreach context

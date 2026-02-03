@@ -48,7 +48,20 @@ export function parseOutreachMessage(
   return parseOutreachVariants([outreach]);
 }
 
-export function mapStringToOutreachChannel(channel: string): PbOutreachChannel {
+export function mapStringToOutreachChannel(channel: string | number): PbOutreachChannel {
+  // Handle numeric enum values (already transformed by zod schema)
+  if (typeof channel === "number") {
+    const channelEnum = channel as PbOutreachChannel;
+    if (channelEnum === PbOutreachChannel.OUTREACH_CHANNEL_EMAIL) {
+      return PbOutreachChannel.OUTREACH_CHANNEL_EMAIL;
+    }
+    if (channelEnum === PbOutreachChannel.OUTREACH_CHANNEL_LINKEDIN) {
+      return PbOutreachChannel.OUTREACH_CHANNEL_LINKEDIN;
+    }
+    return PbOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED;
+  }
+
+  // Handle string values
   switch (channel) {
     case "EMAIL":
     case "OUTREACH_CHANNEL_EMAIL":
@@ -61,7 +74,17 @@ export function mapStringToOutreachChannel(channel: string): PbOutreachChannel {
   }
 }
 
-export function mapStringToOutreachStage(stage: string): PbOutreachStage {
+export function mapStringToOutreachStage(stage: string | number): PbOutreachStage {
+  // Handle numeric enum values (already transformed by zod schema)
+  if (typeof stage === "number") {
+    // Validate it's a known stage value
+    if (Object.values(PbOutreachStage).includes(stage)) {
+      return stage as PbOutreachStage;
+    }
+    return PbOutreachStage.OUTREACH_STAGE_UNSPECIFIED;
+  }
+
+  // Handle string values
   switch (stage) {
     case "CONNECTION_REQUEST":
     case "OUTREACH_STAGE_CONNECTION_REQUEST":
