@@ -14,8 +14,7 @@ export interface Citation {
   snippet?: string;
 }
 
-export interface OutreachMessageJson {
-  type: "outreach";
+export interface OutreachVariantJson {
   channel: string;
   stage: string;
   subject: string;
@@ -25,18 +24,27 @@ export interface OutreachMessageJson {
   wordCount: number;
   containsLink: boolean;
   usageNote?: string;
+  tacticUsed?: string;
+  warnings?: string[];
+}
+
+export interface OutreachMessageJson {
+  type: "outreach";
+  outreachVariants: OutreachVariantJson[];
 }
 
 export interface OutreachContextInput {
-  channel: string;
-  stage: string;
+  channel?: string;
+  stage?: string;
   dayInSequence?: number;
   followUpNumber?: number;
   suggestedTactic?: string;
   leadResponseType?: string;
   customInstructions?: string;
   leadId?: string;
+  directoryId?: string;
   userPrompt?: string;
+  directoryIds?: string[];
 }
 
 export interface StreamAssistantInput {

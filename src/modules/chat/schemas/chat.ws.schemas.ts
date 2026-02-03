@@ -95,8 +95,21 @@ const OutreachContextSchema = z.object({
   leadResponseType: z.string().optional(),
   customInstructions: z.string().optional(),
   leadId: z.string().optional(),
+  directoryId: z.string().optional(),
   userPrompt: z.string().optional(),
 });
+
+// Partial context for outreach.continue (all fields optional)
+const PartialOutreachContextSchema = z.object({
+  channel: OutreachChannelSchema.optional(),
+  stage: OutreachStageSchema.optional(),
+  dayInSequence: z.number().int().min(0).optional(),
+  followUpNumber: z.number().int().min(0).optional(),
+  suggestedTactic: z.string().optional(),
+  customInstructions: z.string().optional(),
+  directoryId: z.string().optional(),
+  userPrompt: z.string().optional(),
+}).optional();
 
 export const ChatWsClientCommandSchema = z.discriminatedUnion("type", [
   z.object({
@@ -145,6 +158,16 @@ export const ChatWsClientCommandSchema = z.discriminatedUnion("type", [
       context: OutreachContextSchema,
       parsedMessageId: z.string().optional(),
       defaultDirectoryIds: z.array(z.string().min(1)).optional(),
+    }),
+  }),
+
+  z.object({
+    type: z.literal("outreach.continue"),
+    payload: z.object({
+      directoryId: z.string().min(1),
+      currentLeadId: z.string().optional(),
+      clientMessageId: ClientMessageIdSchema.optional(),
+      context: PartialOutreachContextSchema, // Saved context from first apply
     }),
   }),
 
@@ -209,5 +232,28 @@ export type ChatWsServerEvent =
       code: string;
       message: string;
       retryable?: boolean;
+    };
+  }
+  | {
+    type: "outreach.lead_completed";
+    payload: {
+      leadId: string;
+      assistantMessageId: string;
+      hasVariants: boolean;
+    };
+  }
+  | {
+    type: "outreach.continuing";
+    payload: {
+      nextLeadId: string;
+      remainingLeads: number;
+      directoryId: string;
+    };
+  }
+  | {
+    type: "outreach.completed";
+    payload: {
+      message: string;
+      directoryId: string;
     };
   };

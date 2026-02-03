@@ -24,12 +24,17 @@ import {
   ChatMessageType as PbType,
   ChatMode,
   LeadResponseType as PbLeadResponseType,
+  OutreachChannel as PbOutreachChannel,
+  OutreachStage as PbOutreachStage,
   OutreachTactic as PbOutreachTactic,
 } from "@/generated/aisdr/v1/ai_sdr";
 
 import { LEAD_DIRECTORY_TYPES } from "@/modules/lead-directory/lead-directory.types";
 import type { LeadDirectoryMentionResolver } from "@/modules/lead-directory/services/lead-directory-mention-resolver.service";
 import { CHAT_CONSTANTS } from "@/config/constants";
+import { LEAD_CONVERSATIONS_TYPES } from "@/modules/lead-conversations/lead-conversations.types";
+import type { LeadConversationsRepository } from "@/modules/lead-conversations/persistence/lead-conversations.repository";
+import type { OutreachCadenceService } from "@/modules/lead-conversations/services/outreach-cadence.service";
 
 import {
   type Citation,
@@ -40,9 +45,12 @@ import {
   readString,
   parseCitations,
   parseOutreachMessage,
+  parseOutreachVariants,
   mapStringToOutreachChannel,
   mapStringToOutreachStage,
   mapStringToOutreachTactic,
+  mapPrismaChannelToProtobuf,
+  mapPrismaStageToProtobuf,
   getEventPayload,
   createDeltaBuffer,
   appendDelta,
@@ -66,6 +74,12 @@ export class ChatAiStreamService {
 
     @inject(LEAD_DIRECTORY_TYPES.LeadDirectoryMentionResolver)
     private readonly dirResolver: LeadDirectoryMentionResolver,
+
+    @inject(LEAD_CONVERSATIONS_TYPES.LeadConversationsRepository)
+    private readonly conversationsRepo: LeadConversationsRepository,
+
+    @inject(LEAD_CONVERSATIONS_TYPES.OutreachCadenceService)
+    private readonly cadenceService: OutreachCadenceService,
   ) { }
 
   async streamAssistantReply(input: StreamAssistantInput): Promise<void> {
@@ -98,6 +112,15 @@ export class ChatAiStreamService {
     const { cleanedText, mentions } = extractFolderMentions(input.text);
 
     let directoryIds: string[] = input.defaultDirectoryIds ?? [];
+
+    // If outreach context has directoryId, use it
+    if (input.outreachContext?.directoryId) {
+      directoryIds = [input.outreachContext.directoryId];
+    }
+    // If outreach context has directoryIds array, use it
+    else if (input.outreachContext?.directoryIds && input.outreachContext.directoryIds.length > 0) {
+      directoryIds = input.outreachContext.directoryIds;
+    }
 
     if (mentions.length > 0) {
       const resolved = await this.dirResolver.resolve(input.userId, mentions);
@@ -154,13 +177,106 @@ export class ChatAiStreamService {
       directoryIds,
     );
 
-    // If outreach context has a specific leadId, add it to leadIds
-    if (
-      input.outreachContext?.leadId &&
-      !leadIds.includes(input.outreachContext.leadId)
-    ) {
-      leadIds = [input.outreachContext.leadId, ...leadIds];
+    // Track the actual leadId we're working with for outreach
+    let actualOutreachLeadId: string | undefined;
+
+    // For outreach mode, filter leads based on minimum message count
+    // Only leads with the minimum number of messages should be included
+    if (input.outreachContext && input.mode === ChatMode.CHAT_MODE_OUTREACH) {
+      // Get leads with minimum message count (those that need the next message)
+      const { leadIds: leadsAtMinCount, minMessageCount } =
+        await this.conversationsRepo.filterLeadsWithMinMessageCount(leadIds);
+
+      console.log('[ChatAiStreamService] Outreach lead filtering (min message count):', {
+        requestedLeadId: input.outreachContext.leadId,
+        totalLeadsInDirectory: leadIds.length,
+        minMessageCount,
+        leadsAtMinCount: leadsAtMinCount.length,
+        leadsAtMinCountPreview: leadsAtMinCount.slice(0, 5),
+      });
+
+      // Check cadence timing - if all leads have at least one message,
+      // we need to check if enough days have passed for the next follow-up
+      if (minMessageCount > 0) {
+        // Get the earliest last message date among leads at minimum count
+        const earliestLastMessageDate = await this.conversationsRepo.getEarliestLastMessageDate(leadIds);
+
+        // Validate cadence timing
+        const cadenceValidation = this.cadenceService.validateCadenceTiming(
+          minMessageCount,
+          earliestLastMessageDate,
+        );
+
+        console.log('[ChatAiStreamService] Cadence timing validation:', {
+          minMessageCount,
+          earliestLastMessageDate,
+          cadenceValidation,
+        });
+
+        if (!cadenceValidation.canProceed) {
+          // Not enough days have passed - send waiting event
+          this.realtimeHub.broadcast(input.threadId, {
+            type: "outreach.cadence_wait",
+            payload: {
+              message: `Next follow-up (${cadenceValidation.followUpNumber}) available in ${cadenceValidation.daysRemaining} day(s)`,
+              daysRemaining: cadenceValidation.daysRemaining,
+              nextAvailableDate: cadenceValidation.nextAvailableDate?.toISOString() ?? null,
+              followUpNumber: cadenceValidation.followUpNumber,
+              dayInSequence: cadenceValidation.dayInSequence,
+              directoryId: directoryIds[0],
+            },
+          });
+          return;
+        }
+      }
+
+      if (leadsAtMinCount.length === 0) {
+        // This shouldn't happen if leadIds has items, but handle edge case
+        console.warn('[ChatAiStreamService] No leads found at minimum count', {
+          directoryIds,
+          totalLeadsChecked: leadIds.length,
+        });
+
+        this.realtimeHub.broadcast(input.threadId, {
+          type: "outreach.completed",
+          payload: {
+            message: "All leads in the directory have been contacted",
+            directoryId: directoryIds[0],
+          },
+        });
+        return;
+      }
+
+      // Use first lead at minimum message count
+      actualOutreachLeadId = leadsAtMinCount[0];
+
+      // Update leadIds to only include leads at minimum count
+      leadIds = leadsAtMinCount;
+    } else if (input.outreachContext?.leadId) {
+      // Non-outreach mode or legacy: use the requested leadId if in directory
+      const requestedLeadId = input.outreachContext.leadId;
+
+      if (leadIds.includes(requestedLeadId)) {
+        actualOutreachLeadId = requestedLeadId;
+        leadIds = [
+          requestedLeadId,
+          ...leadIds.filter(id => id !== requestedLeadId)
+        ];
+      } else {
+        actualOutreachLeadId = leadIds[0];
+      }
+    } else if (leadIds.length > 0) {
+      // No specific leadId requested, use first from directory
+      actualOutreachLeadId = leadIds[0];
     }
+
+    console.log('[ChatAiStreamService] Final lead resolution:', {
+      actualOutreachLeadId,
+      directoryIds,
+      totalLeads: leadIds.length,
+      leadIdsPreview: leadIds.slice(0, 3),
+      mode: input.mode,
+    });
 
     const history = await this.chatRepo.listRecentMessagesForAi(
       input.userId,
@@ -192,9 +308,32 @@ export class ChatAiStreamService {
     if (input.outreachContext) {
       const ctx = input.outreachContext;
 
+      // Load previous messages from conversation history using the actual lead ID
+      let previousMessages: PbOutreachContext["previousMessages"] = [];
+      if (actualOutreachLeadId) {
+        const conversationHistory = await this.conversationsRepo.findByLeadId({
+          leadId: actualOutreachLeadId,
+          limit: 10, // Last 10 messages
+          offset: 0,
+        });
+
+        previousMessages = conversationHistory.messages.map((msg) => ({
+          channel: mapPrismaChannelToProtobuf(msg.channel),
+          stage: mapPrismaStageToProtobuf(msg.stage),
+          body: msg.body,
+          sentAtMs: msg.sentAt ? String(msg.sentAt.getTime()) : "0",
+          responseType: PbLeadResponseType.LEAD_RESPONSE_TYPE_NO_RESPONSE,
+          leadReply: "",
+        }));
+      }
+
       outreachContext = {
-        channel: mapStringToOutreachChannel(ctx.channel),
-        stage: mapStringToOutreachStage(ctx.stage),
+        channel: ctx.channel
+          ? mapStringToOutreachChannel(ctx.channel)
+          : PbOutreachChannel.OUTREACH_CHANNEL_EMAIL, // Default to email if not specified
+        stage: ctx.stage
+          ? mapStringToOutreachStage(ctx.stage)
+          : PbOutreachStage.OUTREACH_STAGE_COLD_EMAIL, // Default to cold email if not specified
         dayInSequence: ctx.dayInSequence ?? 0,
         followUpNumber: ctx.followUpNumber ?? 0,
         suggestedTactic: ctx.suggestedTactic
@@ -202,7 +341,7 @@ export class ChatAiStreamService {
           : PbOutreachTactic.OUTREACH_TACTIC_UNSPECIFIED,
         leadResponseType: PbLeadResponseType.LEAD_RESPONSE_TYPE_NO_RESPONSE,
         leadLastReply: "",
-        previousMessages: [],
+        previousMessages,
         customInstructions: ctx.customInstructions ?? "",
         assetPermissionGranted: false,
         assetToSend: "",
@@ -310,17 +449,33 @@ export class ChatAiStreamService {
           const finalCitations =
             citations.length > 0 ? citations : lastCitations;
 
-          // Check if this is an outreach message
+          // Check if this is an outreach message (new format with variants array)
+          const outreachVariantsUnknown = p.data["outreachVariants"];
+          const hasOutreachVariants =
+            Array.isArray(outreachVariantsUnknown) && outreachVariantsUnknown.length > 0;
+
+          // Legacy support: check for single outreach message
           const outreachUnknown = p.data["outreach"];
-          const isOutreach = outreachUnknown && isRecord(outreachUnknown);
+          const hasLegacyOutreach = outreachUnknown && isRecord(outreachUnknown);
 
           let messageType: ChatMessageType = ChatMessageType.TEXT;
           let messagePayload: Json = {
             citations: finalCitations,
           } as unknown as Json;
 
-          // If outreach message is present, parse it and set type to OUTREACH
-          if (isOutreach) {
+          // If outreach variants are present (new format), parse them
+          if (hasOutreachVariants) {
+            messageType = ChatMessageType.OUTREACH;
+            const outreachData = parseOutreachVariants(
+              outreachVariantsUnknown as unknown as PbOutreachMessage[],
+            );
+            messagePayload = {
+              ...outreachData,
+              citations: finalCitations,
+            } as unknown as Json;
+          }
+          // Legacy support: if single outreach message is present
+          else if (hasLegacyOutreach) {
             messageType = ChatMessageType.OUTREACH;
             const outreachData = parseOutreachMessage(
               outreachUnknown as unknown as PbOutreachMessage,
@@ -339,6 +494,7 @@ export class ChatAiStreamService {
             text,
             payload: messagePayload,
             authorUserId: null,
+            leadId: messageType === ChatMessageType.OUTREACH ? actualOutreachLeadId : null,
           });
 
           this.realtimeHub.broadcast(input.threadId, {
@@ -358,6 +514,18 @@ export class ChatAiStreamService {
               assistantMessageId: assistantMsg.id,
             },
           });
+
+          // If this was an outreach message, send completion event for this lead
+          if (messageType === ChatMessageType.OUTREACH && actualOutreachLeadId) {
+            this.realtimeHub.broadcast(input.threadId, {
+              type: "outreach.lead_completed",
+              payload: {
+                leadId: actualOutreachLeadId,
+                assistantMessageId: assistantMsg.id,
+                hasVariants: hasOutreachVariants || hasLegacyOutreach,
+              },
+            });
+          }
 
           continue;
         }
@@ -449,5 +617,108 @@ export class ChatAiStreamService {
         },
       });
     }
+  }
+
+  /**
+   * Continue outreach to the next lead without messages
+   */
+  async continueOutreach(input: {
+    userId: string;
+    threadId: string;
+    directoryId: string;
+    currentLeadId?: string;
+    outreachContext?: {
+      channel?: string;
+      stage?: string;
+      dayInSequence?: number;
+      followUpNumber?: number;
+      suggestedTactic?: string;
+      customInstructions?: string;
+      userPrompt?: string;
+    };
+  }): Promise<void> {
+    console.log("[ChatAiStreamService] continueOutreach - start", {
+      userId: input.userId,
+      threadId: input.threadId,
+      directoryId: input.directoryId,
+      currentLeadId: input.currentLeadId,
+    });
+
+    // Get leads without messages from the directory
+    const leadIds = await this.chatRepo.getLeadIdsFromDirectories(
+      input.userId,
+      [input.directoryId],
+      { excludeWithMessages: true },
+    );
+
+    console.log("[ChatAiStreamService] continueOutreach - found leads", {
+      leadCount: leadIds.length,
+      leadIds: leadIds.slice(0, 5), // Log first 5 for debugging
+    });
+
+    if (leadIds.length === 0) {
+      // No more leads without messages - send completion event
+      console.log("[ChatAiStreamService] continueOutreach - no more leads, sending completion event");
+      this.realtimeHub.broadcast(input.threadId, {
+        type: "outreach.completed",
+        payload: {
+          message: "All leads in the directory have been contacted",
+          directoryId: input.directoryId,
+        },
+      });
+      return;
+    }
+
+    // Get the first lead (the next one to contact)
+    const nextLeadId = leadIds[0];
+
+    if (!nextLeadId) {
+      console.log("[ChatAiStreamService] continueOutreach - no nextLeadId found");
+      return;
+    }
+
+    console.log("[ChatAiStreamService] continueOutreach - processing next lead", {
+      nextLeadId,
+      remainingLeads: leadIds.length - 1,
+    });
+
+    // Notify that we're continuing to next lead
+    this.realtimeHub.broadcast(input.threadId, {
+      type: "outreach.continuing",
+      payload: {
+        nextLeadId,
+        remainingLeads: leadIds.length - 1,
+        directoryId: input.directoryId,
+      },
+    });
+
+    console.log("[ChatAiStreamService] continueOutreach - calling streamAssistantReply", {
+      hasContextFromFrontend: !!input.outreachContext,
+      contextFields: input.outreachContext ? Object.keys(input.outreachContext) : [],
+    });
+
+    // Trigger AI stream for this lead with outreach context
+    // Use context from frontend (first apply) or defaults
+    await this.streamAssistantReply({
+      userId: input.userId,
+      threadId: input.threadId,
+      text: input.outreachContext?.userPrompt ?? "", // Use saved userPrompt or empty
+      clientMessageId: undefined,
+      mode: ChatMode.CHAT_MODE_OUTREACH,
+      outreachContext: {
+        leadId: nextLeadId,
+        directoryIds: [input.directoryId],
+        // Preserve context from first apply:
+        channel: input.outreachContext?.channel,
+        stage: input.outreachContext?.stage,
+        dayInSequence: input.outreachContext?.dayInSequence,
+        followUpNumber: input.outreachContext?.followUpNumber,
+        suggestedTactic: input.outreachContext?.suggestedTactic,
+        customInstructions: input.outreachContext?.customInstructions,
+        userPrompt: input.outreachContext?.userPrompt,
+      },
+    });
+
+    console.log("[ChatAiStreamService] continueOutreach - completed");
   }
 }

@@ -14,6 +14,7 @@ import { registerLeadRagModule } from "./modules/lead-rag/lead-rag.module";
 import { registerObjectStorageModule } from "./infra/object-storage/object-storage.module";
 import { registerCompanyResearchModule } from "./modules/company-research/company-research.module";
 import { registerProfileEnrichmentModule } from "./modules/profile-enrichment/profile-enrichment.module";
+import { registerLeadConversationsModule } from "./modules/lead-conversations/lead-conversations.module";
 
 const container = new Container();
 
@@ -30,5 +31,6 @@ registerLeadSearchModule(container);
 registerLeadDirectoryModule(container);
 registerCompanyResearchModule(container);
 registerProfileEnrichmentModule(container);
+registerLeadConversationsModule(container);
 
 export { container };

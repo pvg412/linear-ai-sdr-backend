@@ -31,6 +31,9 @@ import {
   type ChatParserId,
 } from "../parsers/chat.parsers";
 import { stripMentions } from "../utils/folder-mentions";
+import { LEAD_CONVERSATIONS_TYPES } from "@/modules/lead-conversations/lead-conversations.types";
+import type { LeadConversationsRepository } from "@/modules/lead-conversations/persistence/lead-conversations.repository";
+import type { OutreachCadenceService } from "@/modules/lead-conversations/services/outreach-cadence.service";
 
 type Json = Prisma.InputJsonValue;
 
@@ -62,6 +65,12 @@ export class ChatCommandService {
 
     @inject(LEAD_SEARCH_TYPES.LeadSearchRunnerService)
     private readonly leadSearchRunnerService: LeadSearchRunnerService,
+
+    @inject(LEAD_CONVERSATIONS_TYPES.LeadConversationsRepository)
+    private readonly leadConversationsRepository: LeadConversationsRepository,
+
+    @inject(LEAD_CONVERSATIONS_TYPES.OutreachCadenceService)
+    private readonly outreachCadenceService: OutreachCadenceService,
   ) { }
 
   async createThread(
@@ -442,6 +451,7 @@ export class ChatCommandService {
       userId,
       threadId,
       leadId: directory.firstLeadId,
+      directoryId: dto.directoryId,
       suggestedChannel: dto.suggestedChannel,
       debug: false,
     });
@@ -450,13 +460,29 @@ export class ChatCommandService {
       parsed,
     });
 
+    // Calculate cadence parameters based on minimum message count in directory
+    const minMessageCount = await this.leadConversationsRepository.getMinMessageCountInDirectory(
+      dto.directoryId,
+    );
+    const cadenceParams = this.outreachCadenceService.calculateCadenceParameters(minMessageCount);
+
+    console.log("[parseOutreachPrompt] calculated cadence parameters", {
+      minMessageCount,
+      calculatedFollowUpNumber: cadenceParams.followUpNumber,
+      calculatedDayInSequence: cadenceParams.dayInSequence,
+      parsedFollowUpNumber: parsed.followUpNumber,
+      parsedDayInSequence: parsed.dayInSequence,
+    });
+
     const context: OutreachContext = {
       channel: parsed.channel,
       stage: parsed.stage,
-      dayInSequence: parsed.dayInSequence,
-      followUpNumber: parsed.followUpNumber,
+      // Use calculated values based on minimum message count instead of AI-parsed values
+      dayInSequence: cadenceParams.dayInSequence,
+      followUpNumber: cadenceParams.followUpNumber,
       suggestedTactic: parsed.suggestedTactic,
       leadId: parsed.leadId,
+      directoryId: parsed.directoryId,
       userPrompt: stripMentions(dto.text), // Save user prompt without @mentions
     };
 

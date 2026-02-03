@@ -7,6 +7,7 @@ import { LeadSearchPromptParseCommandHandler } from "./leadSearchPromptParse.com
 import { LeadSearchPromptApplyCommandHandler } from "./leadSearchPromptApply.command";
 import { OutreachPromptParseCommandHandler } from "./outreachPromptParse.command";
 import { OutreachPromptApplyCommandHandler } from "./outreachPromptApply.command";
+import { OutreachContinueCommandHandler } from "./outreachContinue.command";
 import { AssistantStreamCommandHandler } from "./assistantStream.command";
 
 class WsCommandRegistry {
@@ -47,6 +48,7 @@ registry.register(new LeadSearchPromptParseCommandHandler());
 registry.register(new LeadSearchPromptApplyCommandHandler());
 registry.register(new OutreachPromptParseCommandHandler());
 registry.register(new OutreachPromptApplyCommandHandler());
+registry.register(new OutreachContinueCommandHandler());
 registry.register(new AssistantStreamCommandHandler());
 
 export { registry as wsCommandRegistry };

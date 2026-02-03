@@ -44,6 +44,7 @@ export class ChatAiPromptParserService implements ChatPromptParser {
     userId: string;
     threadId: string;
     leadId: string;
+    directoryId?: string;
     hasPreviousMessages?: boolean;
     previousMessagesCount?: number;
     lastLeadResponse?: string;
@@ -56,6 +57,7 @@ export class ChatAiPromptParserService implements ChatPromptParser {
     followUpNumber: number;
     suggestedTactic: string;
     leadId: string;
+    directoryId?: string;
     warnings?: Array<{ code: string; message: string }>;
     usedFallbackJsonMode?: boolean;
     rawModelOutput?: string;
@@ -82,6 +84,7 @@ export class ChatAiPromptParserService implements ChatPromptParser {
       threadId: input.threadId,
       workspaceId: input.userId, // workspace_id = user_id
       leadId: input.leadId,
+      directoryId: input.directoryId ?? "",
       text: cleanedText,
       hasPreviousMessages: input.hasPreviousMessages ?? false,
       previousMessagesCount: input.previousMessagesCount ?? 0,
@@ -111,6 +114,7 @@ export class ChatAiPromptParserService implements ChatPromptParser {
       followUpNumber: resp.followUpNumber,
       suggestedTactic: mapOutreachTacticFromProto(resp.suggestedTactic),
       leadId: resp.leadId,
+      directoryId: resp.directoryId || undefined,
       warnings: resp.warnings?.map((w) => ({
         code: w.code,
         message: w.message,

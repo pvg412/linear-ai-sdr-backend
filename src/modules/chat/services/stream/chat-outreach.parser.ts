@@ -3,29 +3,49 @@
 import {
   outreachChannelToJSON,
   outreachStageToJSON,
+  outreachTacticToJSON,
   OutreachChannel as PbOutreachChannel,
   OutreachStage as PbOutreachStage,
   OutreachTactic as PbOutreachTactic,
   type OutreachMessage as PbOutreachMessage,
 } from "@/generated/aisdr/v1/ai_sdr";
+import {
+  OutreachChannel as PrismaOutreachChannel,
+  OutreachStage as PrismaOutreachStage,
+} from "@prisma/client";
 
-import type { OutreachMessageJson } from "./chat-stream.types";
+import type { OutreachMessageJson, OutreachVariantJson } from "./chat-stream.types";
 
+export function parseOutreachVariants(
+  variants: PbOutreachMessage[],
+): OutreachMessageJson {
+  const parsedVariants: OutreachVariantJson[] = variants.map((variant) => ({
+    channel: outreachChannelToJSON(variant.channel),
+    stage: outreachStageToJSON(variant.stage),
+    subject: variant.subject || "",
+    body: variant.body || "",
+    variants: variant.variants || [],
+    characterCount: variant.characterCount || 0,
+    wordCount: variant.wordCount || 0,
+    containsLink: variant.containsLink || false,
+    usageNote: variant.usageNote || undefined,
+    tacticUsed: variant.tacticUsed
+      ? outreachTacticToJSON(variant.tacticUsed)
+      : undefined,
+    warnings: variant.warnings || [],
+  }));
+
+  return {
+    type: "outreach",
+    outreachVariants: parsedVariants,
+  };
+}
+
+// Legacy function for backward compatibility (if single outreach message is provided)
 export function parseOutreachMessage(
   outreach: PbOutreachMessage,
 ): OutreachMessageJson {
-  return {
-    type: "outreach",
-    channel: outreachChannelToJSON(outreach.channel),
-    stage: outreachStageToJSON(outreach.stage),
-    subject: outreach.subject || "",
-    body: outreach.body || "",
-    variants: outreach.variants || [],
-    characterCount: outreach.characterCount || 0,
-    wordCount: outreach.wordCount || 0,
-    containsLink: outreach.containsLink || false,
-    usageNote: outreach.usageNote || undefined,
-  };
+  return parseOutreachVariants([outreach]);
 }
 
 export function mapStringToOutreachChannel(channel: string): PbOutreachChannel {
@@ -90,5 +110,63 @@ export function mapStringToOutreachTactic(tactic: string): PbOutreachTactic {
       return PbOutreachTactic.OUTREACH_TACTIC_CLOSE_LOOP;
     default:
       return PbOutreachTactic.OUTREACH_TACTIC_UNSPECIFIED;
+  }
+}
+
+// Map Prisma enum to protobuf enum
+export function mapPrismaChannelToProtobuf(
+  channel: PrismaOutreachChannel,
+): PbOutreachChannel {
+  switch (channel) {
+    case PrismaOutreachChannel.EMAIL:
+      return PbOutreachChannel.OUTREACH_CHANNEL_EMAIL;
+    case PrismaOutreachChannel.LINKEDIN:
+      return PbOutreachChannel.OUTREACH_CHANNEL_LINKEDIN;
+    default:
+      return PbOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED;
+  }
+}
+
+// Map Prisma enum to protobuf enum
+export function mapPrismaStageToProtobuf(
+  stage: PrismaOutreachStage | null,
+): PbOutreachStage {
+  if (stage === null) {
+    return PbOutreachStage.OUTREACH_STAGE_UNSPECIFIED;
+  }
+
+  switch (stage) {
+    case PrismaOutreachStage.CONNECTION_REQUEST:
+      return PbOutreachStage.OUTREACH_STAGE_CONNECTION_REQUEST;
+    case PrismaOutreachStage.POST_ACCEPT_FIRST_MESSAGE:
+      return PbOutreachStage.OUTREACH_STAGE_POST_ACCEPT_FIRST_MESSAGE;
+    case PrismaOutreachStage.LINKEDIN_FOLLOW_UP_1:
+      return PbOutreachStage.OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_1;
+    case PrismaOutreachStage.LINKEDIN_FOLLOW_UP_2:
+      return PbOutreachStage.OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_2;
+    case PrismaOutreachStage.LINKEDIN_CLOSE_LOOP:
+      return PbOutreachStage.OUTREACH_STAGE_LINKEDIN_CLOSE_LOOP;
+    case PrismaOutreachStage.COLD_EMAIL:
+      return PbOutreachStage.OUTREACH_STAGE_COLD_EMAIL;
+    case PrismaOutreachStage.WARM_EMAIL:
+      return PbOutreachStage.OUTREACH_STAGE_WARM_EMAIL;
+    case PrismaOutreachStage.INTRODUCTION_EMAIL:
+      return PbOutreachStage.OUTREACH_STAGE_INTRODUCTION_EMAIL;
+    case PrismaOutreachStage.EMAIL_FOLLOW_UP_1:
+      return PbOutreachStage.OUTREACH_STAGE_EMAIL_FOLLOW_UP_1;
+    case PrismaOutreachStage.EMAIL_FOLLOW_UP_2:
+      return PbOutreachStage.OUTREACH_STAGE_EMAIL_FOLLOW_UP_2;
+    case PrismaOutreachStage.EMAIL_CLOSE_LOOP:
+      return PbOutreachStage.OUTREACH_STAGE_EMAIL_CLOSE_LOOP;
+    case PrismaOutreachStage.FOLLOW_UP_NO_REPLY:
+      return PbOutreachStage.OUTREACH_STAGE_FOLLOW_UP_NO_REPLY;
+    case PrismaOutreachStage.AFTER_POSITIVE_REPLY:
+      return PbOutreachStage.OUTREACH_STAGE_AFTER_POSITIVE_REPLY;
+    case PrismaOutreachStage.REPLY_TO_QUESTION:
+      return PbOutreachStage.OUTREACH_STAGE_REPLY_TO_QUESTION;
+    case PrismaOutreachStage.UNSPECIFIED:
+      return PbOutreachStage.OUTREACH_STAGE_UNSPECIFIED;
+    default:
+      return PbOutreachStage.OUTREACH_STAGE_UNSPECIFIED;
   }
 }

@@ -1,6 +1,7 @@
 // Outreach Prompt Apply command handler
 
 import {
+  ChatMode,
   outreachChannelToJSON,
   outreachStageToJSON,
 } from "@/generated/aisdr/v1/ai_sdr";
@@ -17,6 +18,7 @@ interface OutreachContext {
   leadResponseType?: string;
   customInstructions?: string;
   leadId?: string;
+  directoryId?: string;
   userPrompt?: string;
 }
 
@@ -43,6 +45,7 @@ export class OutreachPromptApplyCommandHandler implements WsCommandHandler {
       leadResponseType: typedPayload.context.leadResponseType,
       customInstructions: typedPayload.context.customInstructions,
       leadId: typedPayload.context.leadId,
+      directoryId: typedPayload.context.directoryId,
       userPrompt: typedPayload.context.userPrompt,
     };
 
@@ -87,7 +90,7 @@ export class OutreachPromptApplyCommandHandler implements WsCommandHandler {
         text: userPrompt,
         clientMessageId: typedPayload.clientMessageId ?? undefined,
         defaultDirectoryIds,
-        mode: 2, // ChatMode.CHAT_MODE_OUTREACH
+        mode: ChatMode.CHAT_MODE_OUTREACH,
         outreachContext,
         signal: ac.signal,
       })

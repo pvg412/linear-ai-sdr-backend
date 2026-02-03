@@ -29,6 +29,7 @@ export interface OutreachContext {
   leadResponseType?: string;
   customInstructions?: string;
   leadId?: string;
+  directoryId?: string;
   userPrompt?: string;
 }
 
@@ -66,6 +67,7 @@ export interface ChatPromptParser {
     userId: string;
     threadId: string;
     leadId: string;
+    directoryId?: string;
     hasPreviousMessages?: boolean;
     previousMessagesCount?: number;
     lastLeadResponse?: string;
@@ -78,6 +80,7 @@ export interface ChatPromptParser {
     followUpNumber: number;
     suggestedTactic: string;
     leadId: string;
+    directoryId?: string;
     warnings?: Array<{ code: string; message: string }>;
     usedFallbackJsonMode?: boolean;
     rawModelOutput?: string;

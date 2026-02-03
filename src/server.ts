@@ -18,12 +18,47 @@ import { registerLeadDirectoryRoutes } from "./modules/lead-directory/lead-direc
 import { registerLeadSearchRoutes } from "./modules/lead-search/lead-search.controller";
 import { registerCompanyResearchRoutes } from "./modules/company-research/company-research.controller";
 import { registerProfileEnrichmentRoutes } from "./modules/profile-enrichment/profile-enrichment.controller";
+import { registerLeadConversationsRoutes } from "./modules/lead-conversations/controller/lead-conversations.controller";
+import { UserFacingError } from "./infra/userFacingError";
+
+function getStatusCodeFromErrorCode(code: string): number {
+  const codeMap: Record<string, number> = {
+    BAD_REQUEST: 400,
+    UNAUTHORIZED: 401,
+    FORBIDDEN: 403,
+    NOT_FOUND: 404,
+    CONFLICT: 409,
+    UNPROCESSABLE_ENTITY: 422,
+    TOO_MANY_REQUESTS: 429,
+  };
+
+  return codeMap[code] ?? 500;
+}
 
 export async function buildServer() {
   const env = loadEnv();
 
   const app = Fastify({
     logger: true,
+  });
+
+  // Global error handler for UserFacingError
+  app.setErrorHandler((error, request, reply) => {
+    if (error instanceof UserFacingError) {
+      const statusCode = getStatusCodeFromErrorCode(error.code);
+      return reply.status(statusCode).send({
+        error: error.code,
+        message: error.userMessage,
+        ...(error.details && { details: error.details }),
+      });
+    }
+
+    // Default error handling
+    request.log.error(error);
+    return reply.status(500).send({
+      error: "INTERNAL_SERVER_ERROR",
+      message: "An unexpected error occurred",
+    });
   });
 
   await app.register(websocketPlugin);
@@ -113,6 +148,7 @@ export async function buildServer() {
   registerLeadSearchRoutes(app);
   registerCompanyResearchRoutes(app);
   registerProfileEnrichmentRoutes(app);
+  registerLeadConversationsRoutes(app);
 
   return { app, env };
 }

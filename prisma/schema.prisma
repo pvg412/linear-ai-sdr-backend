@@ -135,6 +135,34 @@ enum EnrichmentFieldStatus {
   REJECTED
 }
 
+enum OutreachChannel {
+  EMAIL
+  LINKEDIN
+}
+
+enum OutreachStage {
+  UNSPECIFIED
+  CONNECTION_REQUEST
+  POST_ACCEPT_FIRST_MESSAGE
+  LINKEDIN_FOLLOW_UP_1
+  LINKEDIN_FOLLOW_UP_2
+  LINKEDIN_CLOSE_LOOP
+  COLD_EMAIL
+  WARM_EMAIL
+  INTRODUCTION_EMAIL
+  EMAIL_FOLLOW_UP_1
+  EMAIL_FOLLOW_UP_2
+  EMAIL_CLOSE_LOOP
+  FOLLOW_UP_NO_REPLY
+  AFTER_POSITIVE_REPLY
+  REPLY_TO_QUESTION
+}
+
+enum MessageSender {
+  SALE_MANAGER
+  LEAD
+}
+
 model User {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -158,6 +186,8 @@ model User {
 
   enrichmentRequestsCreated LeadEnrichmentRequest[]     @relation("EnrichmentRequestedBy")
   enrichmentFieldsReviewed  LeadEnrichmentFieldChange[] @relation("EnrichmentFieldReviewedBy")
+
+  conversationMessagesCreated LeadConversationMessage[] @relation("ConversationMessageCreator")
 
   @@index([role])
   @@index([isActive])
@@ -281,6 +311,9 @@ model Lead {
   companyResearches  CompanyResearch[]
 
   enrichmentRequests LeadEnrichmentRequest[]
+
+  conversationMessages LeadConversationMessage[] @relation("ConversationLead")
+  chatMessages         ChatMessage[]
 
   @@unique([email])
   @@unique([linkedinUrl])
@@ -412,9 +445,15 @@ model ChatMessage {
   leadSearchId String?
   leadSearch   LeadSearch? @relation(fields: [leadSearchId], references: [id], onDelete: SetNull)
 
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  leadConversationMessages LeadConversationMessage[]
+
   @@index([threadId, createdAt])
   @@index([authorUserId])
   @@index([leadSearchId])
+  @@index([leadId])
 }
 
 model LeadDirectory {
@@ -595,4 +634,45 @@ model LeadEnrichmentFieldChange {
   @@unique([requestId, fieldName])
   @@index([requestId])
   @@index([status])
+}
+
+model LeadConversationMessage {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leadId String
+  lead   Lead   @relation("ConversationLead", fields: [leadId], references: [id], onDelete: Cascade)
+
+  createdBy String?
+  creator   User?   @relation("ConversationMessageCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  senderType MessageSender // SALE_MANAGER or LEAD
+
+  channel OutreachChannel // EMAIL or LINKEDIN
+  stage   OutreachStage?
+
+  subject String? // For email messages
+  body    String  @db.Text
+
+  // Metadata from AI generation (if applicable)
+  characterCount Int?
+  wordCount      Int?
+  usageNote      String? @db.Text
+  tacticUsed     String?
+
+  // Tracking
+  sentAt    DateTime?
+  repliedAt DateTime?
+
+  // Reference to original outreach message if came from chat
+  chatMessageId String?
+  chatMessage   ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, createdAt])
+  @@index([createdBy])
+  @@index([channel])
+  @@index([stage])
+  @@index([sentAt])
+  @@index([chatMessageId])
 }

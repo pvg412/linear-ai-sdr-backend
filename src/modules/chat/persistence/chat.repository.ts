@@ -225,6 +225,17 @@ export class ChatRepository {
         text: true,
         payload: true,
         leadSearchId: true,
+        leadId: true,
+        lead: {
+          select: {
+            leadDirectoryLeads: {
+              select: {
+                directoryId: true,
+              },
+              take: 1,
+            },
+          },
+        },
         createdAt: true,
         updatedAt: true,
       },
@@ -244,6 +255,8 @@ export class ChatRepository {
         text: m.text ?? null,
         payload: (m.payload ?? null) as Json | null,
         leadSearchId: m.leadSearchId ?? null,
+        leadId: m.leadId ?? null,
+        directoryId: m.lead?.leadDirectoryLeads?.[0]?.directoryId ?? null,
         createdAt: toIso(m.createdAt),
         updatedAt: toIso(m.updatedAt),
       })),
@@ -260,6 +273,7 @@ export class ChatRepository {
     payload?: Json | null;
     authorUserId?: string | null;
     leadSearchId?: string | null;
+    leadId?: string | null;
   }) {
     await this.assertThreadOwner(input.ownerId, input.threadId);
 
@@ -284,6 +298,7 @@ export class ChatRepository {
         payload,
         authorUserId: input.authorUserId ?? null,
         leadSearchId: input.leadSearchId ?? null,
+        leadId: input.leadId ?? null,
       },
       select: {
         id: true,
@@ -293,6 +308,7 @@ export class ChatRepository {
         text: true,
         payload: true,
         leadSearchId: true,
+        leadId: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -369,6 +385,7 @@ export class ChatRepository {
   async getLeadIdsFromDirectories(
     ownerId: string,
     directoryIds: string[],
+    opts?: { excludeWithMessages?: boolean },
   ): Promise<string[]> {
     if (directoryIds.length === 0) {
       // No directories specified - return empty (or all leads - depends on business logic)
@@ -379,7 +396,16 @@ export class ChatRepository {
       where: {
         directoryId: { in: directoryIds },
         directory: { ownerId },
-        lead: { isVerified: true }, // Only verified leads
+        lead: {
+          isVerified: true, // Only verified leads
+          ...(opts?.excludeWithMessages
+            ? {
+              conversationMessages: {
+                none: {},
+              },
+            }
+            : {}),
+        },
       },
       select: { leadId: true },
       distinct: ["leadId"],
