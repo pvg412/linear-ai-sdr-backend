@@ -51,8 +51,10 @@ export function parseOutreachMessage(
 export function mapStringToOutreachChannel(channel: string): PbOutreachChannel {
   switch (channel) {
     case "EMAIL":
+    case "OUTREACH_CHANNEL_EMAIL":
       return PbOutreachChannel.OUTREACH_CHANNEL_EMAIL;
     case "LINKEDIN":
+    case "OUTREACH_CHANNEL_LINKEDIN":
       return PbOutreachChannel.OUTREACH_CHANNEL_LINKEDIN;
     default:
       return PbOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED;
@@ -62,32 +64,46 @@ export function mapStringToOutreachChannel(channel: string): PbOutreachChannel {
 export function mapStringToOutreachStage(stage: string): PbOutreachStage {
   switch (stage) {
     case "CONNECTION_REQUEST":
+    case "OUTREACH_STAGE_CONNECTION_REQUEST":
       return PbOutreachStage.OUTREACH_STAGE_CONNECTION_REQUEST;
     case "POST_ACCEPT_FIRST_MESSAGE":
+    case "OUTREACH_STAGE_POST_ACCEPT_FIRST_MESSAGE":
       return PbOutreachStage.OUTREACH_STAGE_POST_ACCEPT_FIRST_MESSAGE;
     case "LINKEDIN_FOLLOW_UP_1":
+    case "OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_1":
       return PbOutreachStage.OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_1;
     case "LINKEDIN_FOLLOW_UP_2":
+    case "OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_2":
       return PbOutreachStage.OUTREACH_STAGE_LINKEDIN_FOLLOW_UP_2;
     case "LINKEDIN_CLOSE_LOOP":
+    case "OUTREACH_STAGE_LINKEDIN_CLOSE_LOOP":
       return PbOutreachStage.OUTREACH_STAGE_LINKEDIN_CLOSE_LOOP;
     case "COLD_EMAIL":
+    case "OUTREACH_STAGE_COLD_EMAIL":
       return PbOutreachStage.OUTREACH_STAGE_COLD_EMAIL;
     case "WARM_EMAIL":
+    case "OUTREACH_STAGE_WARM_EMAIL":
       return PbOutreachStage.OUTREACH_STAGE_WARM_EMAIL;
     case "INTRODUCTION_EMAIL":
+    case "OUTREACH_STAGE_INTRODUCTION_EMAIL":
       return PbOutreachStage.OUTREACH_STAGE_INTRODUCTION_EMAIL;
     case "EMAIL_FOLLOW_UP_1":
+    case "OUTREACH_STAGE_EMAIL_FOLLOW_UP_1":
       return PbOutreachStage.OUTREACH_STAGE_EMAIL_FOLLOW_UP_1;
     case "EMAIL_FOLLOW_UP_2":
+    case "OUTREACH_STAGE_EMAIL_FOLLOW_UP_2":
       return PbOutreachStage.OUTREACH_STAGE_EMAIL_FOLLOW_UP_2;
     case "EMAIL_CLOSE_LOOP":
+    case "OUTREACH_STAGE_EMAIL_CLOSE_LOOP":
       return PbOutreachStage.OUTREACH_STAGE_EMAIL_CLOSE_LOOP;
     case "FOLLOW_UP_NO_REPLY":
+    case "OUTREACH_STAGE_FOLLOW_UP_NO_REPLY":
       return PbOutreachStage.OUTREACH_STAGE_FOLLOW_UP_NO_REPLY;
     case "AFTER_POSITIVE_REPLY":
+    case "OUTREACH_STAGE_AFTER_POSITIVE_REPLY":
       return PbOutreachStage.OUTREACH_STAGE_AFTER_POSITIVE_REPLY;
     case "REPLY_TO_QUESTION":
+    case "OUTREACH_STAGE_REPLY_TO_QUESTION":
       return PbOutreachStage.OUTREACH_STAGE_REPLY_TO_QUESTION;
     default:
       return PbOutreachStage.OUTREACH_STAGE_UNSPECIFIED;
@@ -97,16 +113,22 @@ export function mapStringToOutreachStage(stage: string): PbOutreachStage {
 export function mapStringToOutreachTactic(tactic: string): PbOutreachTactic {
   switch (tactic) {
     case "OPTIONS":
+    case "OUTREACH_TACTIC_OPTIONS":
       return PbOutreachTactic.OUTREACH_TACTIC_OPTIONS;
     case "MINI_PLAN":
+    case "OUTREACH_TACTIC_MINI_PLAN":
       return PbOutreachTactic.OUTREACH_TACTIC_MINI_PLAN;
     case "TEASE":
+    case "OUTREACH_TACTIC_TEASE":
       return PbOutreachTactic.OUTREACH_TACTIC_TEASE;
     case "RESOURCE":
+    case "OUTREACH_TACTIC_RESOURCE":
       return PbOutreachTactic.OUTREACH_TACTIC_RESOURCE;
     case "SOCIAL_PROOF":
+    case "OUTREACH_TACTIC_SOCIAL_PROOF":
       return PbOutreachTactic.OUTREACH_TACTIC_SOCIAL_PROOF;
     case "CLOSE_LOOP":
+    case "OUTREACH_TACTIC_CLOSE_LOOP":
       return PbOutreachTactic.OUTREACH_TACTIC_CLOSE_LOOP;
     default:
       return PbOutreachTactic.OUTREACH_TACTIC_UNSPECIFIED;

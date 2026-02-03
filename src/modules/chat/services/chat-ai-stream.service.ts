@@ -270,10 +270,17 @@ export class ChatAiStreamService {
       actualOutreachLeadId = leadIds[0];
     }
 
+    // For outreach mode, only send the actual target lead to AI
+    // This ensures AI generates content for the correct lead
+    const leadIdsForAi = (input.mode === ChatMode.CHAT_MODE_OUTREACH && actualOutreachLeadId)
+      ? [actualOutreachLeadId]
+      : leadIds;
+
     console.log('[ChatAiStreamService] Final lead resolution:', {
       actualOutreachLeadId,
       directoryIds,
       totalLeads: leadIds.length,
+      leadIdsForAi,
       leadIdsPreview: leadIds.slice(0, 3),
       mode: input.mode,
     });
@@ -372,7 +379,7 @@ export class ChatAiStreamService {
       history: pbHistory,
 
       context: {
-        leadIds,
+        leadIds: leadIdsForAi,
       },
 
       debug: false,
