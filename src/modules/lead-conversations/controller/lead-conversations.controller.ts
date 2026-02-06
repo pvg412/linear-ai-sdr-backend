@@ -9,6 +9,7 @@ import { LeadConversationsService } from "../services/lead-conversations.service
 
 import {
   CreateConversationMessageSchema,
+  SaveCustomMessageSchema,
   CreateLeadMessageSchema,
   GetConversationHistoryQuerySchema,
   DeleteConversationMessageParamsSchema,
@@ -46,6 +47,22 @@ export function registerLeadConversationsRoutes(app: FastifyInstance): void {
     const body = CreateConversationMessageSchema.parse(req.body);
 
     const message = await leadConversationsService.saveAcceptedMessage({
+      ...body,
+      userId: user.id,
+    });
+
+    return reply.status(201).send(message);
+  });
+
+  /**
+   * POST /lead-conversations/messages/custom
+   * Save custom (edited) outreach message from sale manager
+   */
+  app.post("/lead-conversations/messages/custom", async (req, reply) => {
+    const user = requireRequestUser(req);
+    const body = SaveCustomMessageSchema.parse(req.body);
+
+    const message = await leadConversationsService.saveCustomMessage({
       ...body,
       userId: user.id,
     });

@@ -23,6 +23,18 @@ export type CreateConversationMessageDto = z.infer<
   typeof CreateConversationMessageSchema
 >;
 
+export const SaveCustomMessageSchema = z.object({
+  leadId: z.string().min(1),
+  channel: z.enum(OutreachChannel),
+  stage: z.enum(OutreachStage).optional(),
+  subject: z.string().optional(),
+  body: z.string().min(1),
+  chatMessageId: z.string().min(1),
+  sentAt: z.coerce.date().optional(),
+});
+
+export type SaveCustomMessageDto = z.infer<typeof SaveCustomMessageSchema>;
+
 export const CreateLeadMessageSchema = z.object({
   leadId: z.string().min(1),
   channel: z.enum(OutreachChannel),

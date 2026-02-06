@@ -7,6 +7,7 @@ import type { LeadConversationsRepository } from "../persistence/lead-conversati
 import type {
   CreateConversationMessageDto,
   CreateLeadMessageDto,
+  SaveCustomMessageDto,
   GetConversationHistoryQueryDto,
   ConversationHistoryResponse,
   ConversationMessageResponse,
@@ -17,6 +18,10 @@ import { RealtimeHub } from "@/infra/realtime/realtimeHub";
 import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";
 
 export interface SaveAcceptedMessageInput extends CreateConversationMessageDto {
+  userId: string;
+}
+
+export interface SaveCustomMessageInput extends SaveCustomMessageDto {
   userId: string;
 }
 
@@ -81,6 +86,41 @@ export class LeadConversationsService {
         });
       }
     }
+
+    return message;
+  }
+
+  /**
+   * Save custom (edited) outreach message from sale manager
+   */
+  async saveCustomMessage(
+    input: SaveCustomMessageInput,
+  ): Promise<ConversationMessageResponse> {
+    const existing = await this.repository.findByChatMessageId(
+      input.chatMessageId,
+    );
+    if (existing) {
+      throw new UserFacingError({
+        userMessage: "Custom message already saved",
+        code: "CONFLICT",
+      });
+    }
+
+    const message = await this.repository.createMessage({
+      leadId: input.leadId,
+      createdBy: input.userId,
+      senderType: MessageSender.SALE_MANAGER,
+      channel: input.channel,
+      stage: input.stage,
+      subject: input.subject,
+      body: input.body,
+      chatMessageId: input.chatMessageId,
+      sentAt: input.sentAt,
+      characterCount: undefined,
+      wordCount: undefined,
+      usageNote: undefined,
+      tacticUsed: undefined,
+    });
 
     return message;
   }
