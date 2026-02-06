@@ -19,6 +19,7 @@ type PrismaWithUser = {
       email: string;
       role: string;
       isActive: boolean;
+      companyId: string | null;
     } | null>;
   };
 };
@@ -122,6 +123,7 @@ export function createAuthGuard(env: Env) {
         id: user.id,
         email: user.email,
         role: user.role,
+        companyId: user.companyId,
       };
     } catch (e) {
       request.log.warn({ err: e }, "Auth failed");

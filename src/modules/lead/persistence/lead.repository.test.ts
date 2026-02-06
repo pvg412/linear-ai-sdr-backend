@@ -13,6 +13,32 @@ describe("buildLeadWhere", () => {
     ],
   };
 
+  const companyId = "company_1";
+  const companyVisibility = {
+    OR: [
+      { createdById: ownerId },
+      { createdBy: { companyId } },
+      {
+        searches: {
+          some: {
+            leadSearch: {
+              OR: [
+                { createdById: ownerId },
+                { createdBy: { companyId } },
+              ],
+            },
+          },
+        },
+      },
+      { leadDirectoryLeads: { some: { directory: { ownerId } } } },
+      {
+        leadDirectoryLeads: {
+          some: { directory: { owner: { companyId } } },
+        },
+      },
+    ],
+  };
+
   it("adds isVerified=true by default", () => {
     const where = buildLeadWhere({ ownerId });
     const andFilters = (where as { AND: unknown[] }).AND;
@@ -111,6 +137,53 @@ describe("buildLeadWhere", () => {
               },
             },
           ],
+        },
+      ]),
+    );
+  });
+
+  it("uses company-wide visibility when companyId is provided", () => {
+    const where = buildLeadWhere({ ownerId, companyId });
+    const andFilters = (where as { AND: unknown[] }).AND;
+    expect(andFilters).toEqual(
+      expect.arrayContaining([companyVisibility, { isVerified: true }]),
+    );
+  });
+
+  it("uses owner-only visibility when companyId is not provided", () => {
+    const where = buildLeadWhere({ ownerId });
+    const andFilters = (where as { AND: unknown[] }).AND;
+    expect(andFilters).toEqual(
+      expect.arrayContaining([ownerVisibility]),
+    );
+    // Should NOT contain company visibility
+    expect(andFilters).not.toEqual(
+      expect.arrayContaining([companyVisibility]),
+    );
+  });
+
+  it("expands directory filter to company members when companyId is provided", () => {
+    const where = buildLeadWhere({
+      ownerId,
+      companyId,
+      filters: { directoryIds: ["dir_a"] },
+    });
+
+    const andFilters = (where as { AND: unknown[] }).AND;
+    expect(andFilters).toEqual(
+      expect.arrayContaining([
+        companyVisibility,
+        {
+          leadDirectoryLeads: {
+            some: {
+              directoryId: { in: ["dir_a"] },
+              directory: {
+                owner: {
+                  OR: [{ id: ownerId }, { companyId }],
+                },
+              },
+            },
+          },
         },
       ]),
     );

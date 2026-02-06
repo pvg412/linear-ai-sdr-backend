@@ -24,19 +24,25 @@ export class LeadQueryService {
     }
   }
 
-  private async assertLeadSearchOwned(
+  private async assertLeadSearchAccessible(
     userId: string,
     leadSearchId: string,
+    companyId?: string | null,
   ): Promise<void> {
     const prisma = getPrisma();
-    const owned = await prisma.leadSearch.findFirst({
-      where: { id: leadSearchId, createdById: userId },
+    const accessible = await prisma.leadSearch.findFirst({
+      where: {
+        id: leadSearchId,
+        OR: companyId
+          ? [{ createdById: userId }, { createdBy: { companyId } }]
+          : [{ createdById: userId }],
+      },
       select: { id: true },
     });
-    if (!owned) {
+    if (!accessible) {
       throw new UserFacingError({
         code: "FORBIDDEN",
-        userMessage: "LeadSearch not found or not owned by user",
+        userMessage: "LeadSearch not found or not accessible",
       });
     }
   }
@@ -44,6 +50,7 @@ export class LeadQueryService {
   async listLeads(
     userId: string,
     opts: {
+      companyId?: string | null;
       page?: number;
       perPage?: number;
       filters?: LeadPaginationFilters;
@@ -51,18 +58,30 @@ export class LeadQueryService {
   ) {
     await this.assertUserExists(userId);
 
-    return this.leadRepository.listLeads({ ownerId: userId, ...opts });
+    return this.leadRepository.listLeads({
+      ownerId: userId,
+      companyId: opts.companyId,
+      page: opts.page,
+      perPage: opts.perPage,
+      filters: opts.filters,
+    });
   }
 
   async listLeadsForLeadSearchIncludingUnverified(
     userId: string,
-    input: { leadSearchId: string; page: number; perPage: number },
+    input: {
+      leadSearchId: string;
+      companyId?: string | null;
+      page: number;
+      perPage: number;
+    },
   ) {
     await this.assertUserExists(userId);
-    await this.assertLeadSearchOwned(userId, input.leadSearchId);
+    await this.assertLeadSearchAccessible(userId, input.leadSearchId, input.companyId);
 
     return this.leadRepository.listLeads({
       ownerId: userId,
+      companyId: input.companyId,
       page: input.page,
       perPage: input.perPage,
       filters: { leadSearchId: input.leadSearchId },

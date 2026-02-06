@@ -17,20 +17,35 @@ type DbUser = {
   passwordHash: string;
   role: UserRole;
   isActive: boolean;
+  companyId: string | null;
 };
 
 type PrismaWithUser = {
   user: {
-    findUnique: (args: { where: { email: string } }) => Promise<DbUser | null>;
+    findUnique: (args: {
+      where: { email: string } | { id: string };
+    }) => Promise<DbUser | null>;
     findUniqueOrThrow?: unknown;
     create: (args: {
-      data: { email: string; passwordHash: string; role: UserRole };
+      data: {
+        email: string;
+        passwordHash: string;
+        role: UserRole;
+        companyId?: string;
+      };
     }) => Promise<DbUser>;
     update: (args: {
       where: { id: string };
-      data: { lastLoginAt: Date };
+      data: Partial<{ lastLoginAt: Date; isActive: boolean }>;
     }) => Promise<DbUser>;
-    count: () => Promise<number>;
+    count: (args?: { where?: Record<string, unknown> }) => Promise<number>;
+    findMany: (args: {
+      where: Record<string, unknown>;
+      skip?: number;
+      take?: number;
+      orderBy?: Record<string, string>;
+      select?: Record<string, boolean>;
+    }) => Promise<Array<Record<string, unknown>>>;
   };
 };
 
@@ -97,6 +112,7 @@ export class AuthService {
   async createSaleManager(
     email: string,
     password: string,
+    companyId?: string,
   ): Promise<{ user: AuthUser }> {
     const passwordHash = await hashPassword(password);
     const user = await this.prisma.user.create({
@@ -104,9 +120,86 @@ export class AuthService {
         email,
         passwordHash,
         role: UserRole.SALE_MANAGER,
+        ...(companyId && { companyId }),
       },
     });
     return { user: { id: user.id, email: user.email, role: user.role } };
+  }
+
+  async createCompany(
+    email: string,
+    password: string,
+  ): Promise<{ user: AuthUser }> {
+    const passwordHash = await hashPassword(password);
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        role: UserRole.COMPANY,
+      },
+    });
+    return { user: { id: user.id, email: user.email, role: user.role } };
+  }
+
+  async listCompanySaleManagers(
+    companyId: string,
+    page: number,
+    perPage: number,
+  ): Promise<{
+    users: Array<{ id: string; email: string; role: string; createdAt: unknown }>;
+    total: number;
+    page: number;
+    perPage: number;
+  }> {
+    const where = {
+      companyId,
+      role: UserRole.SALE_MANAGER,
+      isActive: true,
+    };
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        skip: (page - 1) * perPage,
+        take: perPage,
+        orderBy: { createdAt: "desc" },
+        select: { id: true, email: true, role: true, createdAt: true },
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      users: users as Array<{
+        id: string;
+        email: string;
+        role: string;
+        createdAt: unknown;
+      }>,
+      total,
+      page,
+      perPage,
+    };
+  }
+
+  async removeCompanySaleManager(
+    companyId: string,
+    saleManagerId: string,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: saleManagerId },
+    });
+
+    if (
+      !user ||
+      user.companyId !== companyId ||
+      user.role !== UserRole.SALE_MANAGER
+    ) {
+      throw new Error("Sale manager not found in this company");
+    }
+
+    await this.prisma.user.update({
+      where: { id: saleManagerId },
+      data: { isActive: false },
+    });
   }
 
   async ensureInitialAdmin(

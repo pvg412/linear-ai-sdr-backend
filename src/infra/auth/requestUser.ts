@@ -6,6 +6,7 @@ export type RequestUserInfo = {
   id: string;
   email?: string;
   role: string;
+  companyId?: string | null;
 };
 
 export function requireRequestUser(req: FastifyRequest): RequestUserInfo {
@@ -22,6 +23,7 @@ export function requireRequestUser(req: FastifyRequest): RequestUserInfo {
       id: user.id,
       email: user.email,
       role: user.role,
+      companyId: user.companyId,
     };
   }
 

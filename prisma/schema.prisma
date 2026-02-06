@@ -54,6 +54,7 @@ enum LeadListStatus {
 enum UserRole {
   ADMIN
   SALE_MANAGER
+  COMPANY
 }
 
 enum LeadSearchKind {
@@ -174,6 +175,11 @@ model User {
   isActive     Boolean   @default(true)
   lastLoginAt  DateTime?
 
+  // Company association (self-referencing)
+  companyId String?
+  company   User?   @relation("CompanyMembers", fields: [companyId], references: [id])
+  members   User[]  @relation("CompanyMembers")
+
   leadSearchesCreated     LeadSearch[]    @relation("LeadSearchCreatedBy")
   leadSearchRunsTriggered LeadSearchRun[] @relation("LeadSearchRunTriggeredBy")
 
@@ -191,6 +197,7 @@ model User {
 
   @@index([role])
   @@index([isActive])
+  @@index([companyId])
 }
 
 model LeadSearch {

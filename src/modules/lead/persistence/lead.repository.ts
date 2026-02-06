@@ -13,12 +13,13 @@ function toIso(d: Date): string {
 
 export function buildLeadWhere(opts: {
   ownerId: string;
+  companyId?: string | null;
   filters?: LeadPaginationFilters;
   includeUnverified?: boolean;
 }): Prisma.LeadWhereInput {
   const andFilters: Prisma.LeadWhereInput[] = [];
 
-  andFilters.push(buildLeadVisibilityWhere(opts.ownerId));
+  andFilters.push(buildLeadVisibilityWhere(opts.ownerId, opts.companyId));
 
   // Unverified leads are system-internal and must not be displayed anywhere,
   // unless explicitly requested for leadSearch-scoped moderation flows.
@@ -57,22 +58,29 @@ export function buildLeadWhere(opts: {
 
     const orFilters: Prisma.LeadWhereInput[] = [];
 
+    // When user belongs to a company, directory filters should include
+    // directories owned by any company member.
+    const directoryOwnerFilter: Prisma.LeadDirectoryWhereInput =
+      opts.companyId
+        ? { owner: { OR: [{ id: opts.ownerId }, { companyId: opts.companyId }] } }
+        : { ownerId: opts.ownerId };
+
     if (directoryIds.length > 0) {
       orFilters.push({
         leadDirectoryLeads: {
           some: {
             directoryId: { in: directoryIds },
-            directory: { ownerId: opts.ownerId },
+            directory: directoryOwnerFilter,
           },
         },
       });
     }
 
     if (includeUnassigned) {
-      // Unassigned = lead is not linked to any directory (for this owner).
+      // Unassigned = lead is not linked to any directory (for this owner / company).
       orFilters.push({
         leadDirectoryLeads: {
-          none: { directory: { ownerId: opts.ownerId } },
+          none: { directory: directoryOwnerFilter },
         },
       });
     }
@@ -111,6 +119,7 @@ export class LeadRepository {
 
   async listLeads(opts: {
     ownerId: string;
+    companyId?: string | null;
     filters?: LeadPaginationFilters;
     page?: number;
     perPage?: number;
@@ -125,6 +134,7 @@ export class LeadRepository {
 
     const where = buildLeadWhere({
       ownerId: opts.ownerId,
+      companyId: opts.companyId,
       filters: opts.filters,
       includeUnverified: opts.includeUnverified,
     });
@@ -152,7 +162,11 @@ export class LeadRepository {
             },
           },
           leadDirectoryLeads: {
-            where: { directory: { ownerId: opts.ownerId } },
+            where: {
+              directory: opts.companyId
+                ? { owner: { OR: [{ id: opts.ownerId }, { companyId: opts.companyId }] } }
+                : { ownerId: opts.ownerId },
+            },
             select: {
               directory: {
                 select: {

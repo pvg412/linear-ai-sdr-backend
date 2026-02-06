@@ -17,17 +17,21 @@ export class LeadCommandService {
   constructor(
     @inject(LEAD_RAG_TYPES.LeadRagIndexSyncService)
     private readonly ragSync: LeadRagIndexSyncService,
-  ) {}
+  ) { }
 
   async setLeadsVerificationForLeadSearch(
     userId: string,
-    input: { leadSearchId: string; items: LeadVerificationPatch[] },
+    input: {
+      leadSearchId: string;
+      companyId?: string | null;
+      items: LeadVerificationPatch[];
+    },
     log?: LoggerLike,
   ): Promise<{ updated: number }> {
     const lg = ensureLogger(log);
     const prisma = getPrisma();
 
-    await this.assertLeadSearchOwned(userId, input.leadSearchId);
+    await this.assertLeadSearchAccessible(userId, input.leadSearchId, input.companyId);
 
     const unique = new Map<string, boolean>();
     for (const item of input.items) unique.set(item.id, item.isVerified);
@@ -68,15 +72,15 @@ export class LeadCommandService {
       const [a, b] = await Promise.all([
         toTrue.length > 0
           ? tx.lead.updateMany({
-              where: { id: { in: toTrue } },
-              data: { isVerified: true },
-            })
+            where: { id: { in: toTrue } },
+            data: { isVerified: true },
+          })
           : Promise.resolve({ count: 0 }),
         toFalse.length > 0
           ? tx.lead.updateMany({
-              where: { id: { in: toFalse } },
-              data: { isVerified: false },
-            })
+            where: { id: { in: toFalse } },
+            data: { isVerified: false },
+          })
           : Promise.resolve({ count: 0 }),
       ]);
 
@@ -100,21 +104,27 @@ export class LeadCommandService {
     return res;
   }
 
-  private async assertLeadSearchOwned(
+  private async assertLeadSearchAccessible(
     userId: string,
     leadSearchId: string,
+    companyId?: string | null,
   ): Promise<void> {
     const prisma = getPrisma();
 
-    const owned = await prisma.leadSearch.findFirst({
-      where: { id: leadSearchId, createdById: userId },
+    const accessible = await prisma.leadSearch.findFirst({
+      where: {
+        id: leadSearchId,
+        OR: companyId
+          ? [{ createdById: userId }, { createdBy: { companyId } }]
+          : [{ createdById: userId }],
+      },
       select: { id: true },
     });
 
-    if (!owned) {
+    if (!accessible) {
       throw new UserFacingError({
         code: "FORBIDDEN",
-        userMessage: "LeadSearch not found or not owned by user",
+        userMessage: "LeadSearch not found or not accessible",
       });
     }
   }
