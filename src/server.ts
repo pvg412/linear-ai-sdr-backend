@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 
@@ -19,6 +20,7 @@ import { registerLeadSearchRoutes } from "./modules/lead-search/lead-search.cont
 import { registerCompanyResearchRoutes } from "./modules/company-research/company-research.controller";
 import { registerProfileEnrichmentRoutes } from "./modules/profile-enrichment/profile-enrichment.controller";
 import { registerLeadConversationsRoutes } from "./modules/lead-conversations/controller/lead-conversations.controller";
+import { registerDatasetImportRoutes } from "./modules/dataset-import/dataset-import.controller";
 import { UserFacingError } from "./infra/userFacingError";
 
 function getStatusCodeFromErrorCode(code: string): number {
@@ -68,6 +70,9 @@ export async function buildServer() {
     allowedHeaders: ["Authorization", "Content-Type"],
     // credentials: true,
     maxAge: 86400,
+  });
+  await app.register(multipart, {
+    limits: { fileSize: 20 * 1024 * 1024, files: 1 },
   });
 
   // Swagger should not be exposed in production
@@ -149,6 +154,7 @@ export async function buildServer() {
   registerCompanyResearchRoutes(app);
   registerProfileEnrichmentRoutes(app);
   registerLeadConversationsRoutes(app);
+  registerDatasetImportRoutes(app);
 
   return { app, env };
 }

@@ -15,6 +15,7 @@ import { registerObjectStorageModule } from "./infra/object-storage/object-stora
 import { registerCompanyResearchModule } from "./modules/company-research/company-research.module";
 import { registerProfileEnrichmentModule } from "./modules/profile-enrichment/profile-enrichment.module";
 import { registerLeadConversationsModule } from "./modules/lead-conversations/lead-conversations.module";
+import { registerDatasetImportModule } from "./modules/dataset-import/dataset-import.module";
 
 const container = new Container();
 
@@ -32,5 +33,6 @@ registerLeadDirectoryModule(container);
 registerCompanyResearchModule(container);
 registerProfileEnrichmentModule(container);
 registerLeadConversationsModule(container);
+registerDatasetImportModule(container);
 
 export { container };

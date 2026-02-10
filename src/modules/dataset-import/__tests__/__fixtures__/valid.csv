@@ -1,0 +1,4 @@
+First Name,Last Name,LinkedIn URL,Company Name,Email,Title,Phone,Location,Industry,Seniority
+John,Doe,https://linkedin.com/in/johndoe,Acme Inc,john@acme.com,CEO,+1234567890,New York,Technology,C-Level
+Jane,Smith,https://linkedin.com/in/janesmith,Beta Corp,jane@beta.com,CTO,+0987654321,London,Finance,Senior
+Bob,Johnson,https://linkedin.com/in/bobjohnson,Gamma LLC,,Developer,,Berlin,Software,Mid Level
