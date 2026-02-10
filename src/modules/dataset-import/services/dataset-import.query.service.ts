@@ -18,13 +18,14 @@ export class DatasetImportQueryService {
       select: {
         id: true,
         email: true,
+        companyName: true,
       },
       orderBy: { email: "asc" },
     });
 
     return companies.map((c) => ({
       id: c.id,
-      name: c.email, // Use email as company name
+      name: c.companyName ?? c.email
     }));
   }
 }

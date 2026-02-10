@@ -175,6 +175,9 @@ model User {
   isActive     Boolean   @default(true)
   lastLoginAt  DateTime?
 
+  // Company-specific fields
+  companyName String?
+
   // Company association (self-referencing)
   companyId String?
   company   User?   @relation("CompanyMembers", fields: [companyId], references: [id])
@@ -195,6 +198,7 @@ model User {
 
   conversationMessagesCreated LeadConversationMessage[] @relation("ConversationMessageCreator")
 
+  @@unique([companyName])
   @@index([role])
   @@index([isActive])
   @@index([companyId])

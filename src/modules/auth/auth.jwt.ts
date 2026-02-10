@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 
+import { UserFacingError } from "@/infra/userFacingError";
+
 type JwtHeader = {
   alg: "HS256";
   typ: "JWT";
@@ -47,7 +49,7 @@ export function signJwt(payload: JwtPayload, secret: string): string {
 export function verifyJwt(token: string, secret: string): JwtPayload {
   const parts = token.split(".");
   if (parts.length !== 3) {
-    throw new Error("Invalid JWT format");
+    throw new UserFacingError({ userMessage: "Invalid token", code: "INVALID_JWT" });
   }
 
   const [encodedHeader, encodedPayload, encodedSig] = parts;
@@ -61,19 +63,19 @@ export function verifyJwt(token: string, secret: string): JwtPayload {
     actualSig.length !== expectedSig.length ||
     !crypto.timingSafeEqual(actualSig, expectedSig)
   ) {
-    throw new Error("Invalid JWT signature");
+    throw new UserFacingError({ userMessage: "Invalid token", code: "INVALID_JWT_SIGNATURE" });
   }
 
   const payloadJson = base64UrlDecodeToBuffer(encodedPayload).toString("utf8");
   const payload = JSON.parse(payloadJson) as JwtPayload;
 
   if (!payload?.sub || !payload?.exp || !payload?.iat) {
-    throw new Error("Invalid JWT payload");
+    throw new UserFacingError({ userMessage: "Invalid token", code: "INVALID_JWT_PAYLOAD" });
   }
 
   const now = Math.floor(Date.now() / 1000);
   if (payload.exp <= now) {
-    throw new Error("JWT expired");
+    throw new UserFacingError({ userMessage: "Token expired", code: "JWT_EXPIRED" });
   }
 
   return payload;

@@ -10,8 +10,10 @@ import {
   saleManagerIdParamsSchema,
   devRegisterBodySchema,
   loginBodySchema,
+  updateCompanyNameBodySchema,
 } from "./schemas/auth.schemas";
 import { UserRole } from "@prisma/client";
+import { getUserFacingMessage } from "@/infra/userFacingError";
 
 export function registerAuthRoutes(app: FastifyInstance, envArg?: Env) {
   const env = envArg ?? loadEnv();
@@ -23,8 +25,9 @@ export function registerAuthRoutes(app: FastifyInstance, envArg?: Env) {
     try {
       const result = await service.login(body.email, body.password, env);
       return reply.code(200).send(result);
-    } catch {
-      return reply.code(401).send({ message: "Invalid credentials" });
+    } catch (e: unknown) {
+      const message = getUserFacingMessage(e) ?? "Invalid credentials";
+      return reply.code(401).send({ message });
     }
   });
 
@@ -40,7 +43,7 @@ export function registerAuthRoutes(app: FastifyInstance, envArg?: Env) {
         );
         return reply.code(201).send(result);
       } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
+        const message = getUserFacingMessage(e) ?? "Registration failed";
         return reply.code(400).send({ message });
       }
     });
@@ -68,14 +71,18 @@ export function registerAuthRoutes(app: FastifyInstance, envArg?: Env) {
       );
       return reply.code(201).send(result);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = getUserFacingMessage(e);
+      if (message) {
+        return reply.code(400).send({ message });
+      }
+      const raw = e instanceof Error ? e.message : String(e);
       if (
-        /unique constraint/i.test(message) ||
-        /unique.*failed/i.test(message)
+        /unique constraint/i.test(raw) ||
+        /unique.*failed/i.test(raw)
       ) {
         return reply.code(409).send({ message: "Email already exists" });
       }
-      return reply.code(400).send({ message });
+      return reply.code(400).send({ message: "Failed to create sale manager" });
     }
   });
 
@@ -114,7 +121,7 @@ export function registerAuthRoutes(app: FastifyInstance, envArg?: Env) {
           .code(200)
           .send({ success: true, message: "Sale manager deactivated" });
       } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
+        const message = getUserFacingMessage(e) ?? "Sale manager not found";
         return reply.code(404).send({ message });
       }
     },
@@ -129,17 +136,72 @@ export function registerAuthRoutes(app: FastifyInstance, envArg?: Env) {
     const body = createCompanyBodySchema.parse(request.body);
 
     try {
-      const result = await service.createCompany(body.email, body.password);
+      const result = await service.createCompany(body.email, body.password, body.companyName);
       return reply.code(201).send(result);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      if (
-        /unique constraint/i.test(message) ||
-        /unique.*failed/i.test(message)
-      ) {
-        return reply.code(409).send({ message: "Email already exists" });
+      const message = getUserFacingMessage(e);
+      if (message) {
+        return reply.code(400).send({ message });
       }
-      return reply.code(400).send({ message });
+      const raw = e instanceof Error ? e.message : String(e);
+      if (
+        /unique constraint/i.test(raw) ||
+        /unique.*failed/i.test(raw)
+      ) {
+        if (/email/i.test(raw)) {
+          return reply.code(409).send({ message: "Email already exists" });
+        }
+        if (/companyName/i.test(raw)) {
+          return reply.code(409).send({ message: "Company name already exists" });
+        }
+        return reply.code(409).send({ message: "Duplicate value detected" });
+      }
+      return reply.code(400).send({ message: "Failed to create company" });
+    }
+  });
+
+  // Get user info (authenticated users)
+  app.get("/auth/me", async (request, reply) => {
+    if (!request.user) {
+      return reply.code(401).send({ message: "Unauthorized" });
+    }
+
+    try {
+      const userInfo = await service.getUserInfo(request.user.id);
+      return reply.code(200).send({ user: userInfo });
+    } catch (e: unknown) {
+      const message = getUserFacingMessage(e) ?? "User not found";
+      return reply.code(404).send({ message });
+    }
+  });
+
+  // Update company name (COMPANY only)
+  app.patch("/auth/me/company-name", async (request, reply) => {
+    if (request.user?.role !== UserRole.COMPANY) {
+      return reply.code(403).send({ message: "Forbidden" });
+    }
+
+    const body = updateCompanyNameBodySchema.parse(request.body);
+
+    try {
+      const updatedUser = await service.updateCompanyName(
+        request.user.id,
+        body.companyName,
+      );
+      return reply.code(200).send({ user: updatedUser });
+    } catch (e: unknown) {
+      const message = getUserFacingMessage(e);
+      if (message) {
+        return reply.code(400).send({ message });
+      }
+      const raw = e instanceof Error ? e.message : String(e);
+      if (
+        /unique constraint/i.test(raw) ||
+        /unique.*failed/i.test(raw)
+      ) {
+        return reply.code(409).send({ message: "Company name already exists" });
+      }
+      return reply.code(400).send({ message: "Failed to update company name" });
     }
   });
 }

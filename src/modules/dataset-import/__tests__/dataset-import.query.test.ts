@@ -18,18 +18,18 @@ describe("DatasetImportQueryService", () => {
   });
 
   describe("getCompanyList", () => {
-    it("returns list of companies with id and email", async () => {
+    it("returns list of companies with companyName when available", async () => {
       userFindManyMock.mockResolvedValue([
-        { id: "company-1", email: "acme@example.com" },
-        { id: "company-2", email: "beta@example.com" },
-        { id: "company-3", email: "gamma@example.com" },
+        { id: "company-1", email: "acme@example.com", companyName: "Acme Corp" },
+        { id: "company-2", email: "beta@example.com", companyName: "Beta Inc" },
+        { id: "company-3", email: "gamma@example.com", companyName: null },
       ]);
 
       const result = await queryService.getCompanyList();
 
       expect(result).toEqual([
-        { id: "company-1", name: "acme@example.com" },
-        { id: "company-2", name: "beta@example.com" },
+        { id: "company-1", name: "Acme Corp" },
+        { id: "company-2", name: "Beta Inc" },
         { id: "company-3", name: "gamma@example.com" },
       ]);
 
@@ -38,6 +38,7 @@ describe("DatasetImportQueryService", () => {
         select: {
           id: true,
           email: true,
+          companyName: true,
         },
         orderBy: { email: "asc" },
       });

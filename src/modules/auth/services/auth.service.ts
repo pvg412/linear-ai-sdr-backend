@@ -1,6 +1,7 @@
 import { UserRole } from "@prisma/client";
 
 import { getPrisma } from "@/infra/prisma";
+import { UserFacingError } from "@/infra/userFacingError";
 import type { Env } from "@/config/env";
 import { hashPassword, verifyPassword } from "../auth.password";
 import { signJwt, type JwtPayload } from "../auth.jwt";
@@ -9,48 +10,11 @@ export type AuthUser = {
   id: string;
   email: string;
   role: UserRole;
-};
-
-type DbUser = {
-  id: string;
-  email: string;
-  passwordHash: string;
-  role: UserRole;
-  isActive: boolean;
-  companyId: string | null;
-};
-
-type PrismaWithUser = {
-  user: {
-    findUnique: (args: {
-      where: { email: string } | { id: string };
-    }) => Promise<DbUser | null>;
-    findUniqueOrThrow?: unknown;
-    create: (args: {
-      data: {
-        email: string;
-        passwordHash: string;
-        role: UserRole;
-        companyId?: string;
-      };
-    }) => Promise<DbUser>;
-    update: (args: {
-      where: { id: string };
-      data: Partial<{ lastLoginAt: Date; isActive: boolean }>;
-    }) => Promise<DbUser>;
-    count: (args?: { where?: Record<string, unknown> }) => Promise<number>;
-    findMany: (args: {
-      where: Record<string, unknown>;
-      skip?: number;
-      take?: number;
-      orderBy?: Record<string, string>;
-      select?: Record<string, boolean>;
-    }) => Promise<Array<Record<string, unknown>>>;
-  };
+  companyName?: string | null;
 };
 
 export class AuthService {
-  private readonly prisma = getPrisma() as unknown as PrismaWithUser;
+  private readonly prisma = getPrisma();
 
   async login(
     email: string,
@@ -63,12 +27,12 @@ export class AuthService {
   }> {
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user || !user.isActive) {
-      throw new Error("Invalid credentials");
+      throw new UserFacingError({ userMessage: "Invalid credentials", code: "INVALID_CREDENTIALS" });
     }
 
     const ok = await verifyPassword(password, user.passwordHash);
     if (!ok) {
-      throw new Error("Invalid credentials");
+      throw new UserFacingError({ userMessage: "Invalid credentials", code: "INVALID_CREDENTIALS" });
     }
 
     const now = Math.floor(Date.now() / 1000);
@@ -129,6 +93,7 @@ export class AuthService {
   async createCompany(
     email: string,
     password: string,
+    companyName: string,
   ): Promise<{ user: AuthUser }> {
     const passwordHash = await hashPassword(password);
     const user = await this.prisma.user.create({
@@ -136,9 +101,10 @@ export class AuthService {
         email,
         passwordHash,
         role: UserRole.COMPANY,
+        companyName,
       },
     });
-    return { user: { id: user.id, email: user.email, role: user.role } };
+    return { user: { id: user.id, email: user.email, role: user.role, companyName: user.companyName } };
   }
 
   async listCompanySaleManagers(
@@ -193,7 +159,7 @@ export class AuthService {
       user.companyId !== companyId ||
       user.role !== UserRole.SALE_MANAGER
     ) {
-      throw new Error("Sale manager not found in this company");
+      throw new UserFacingError({ userMessage: "Sale manager not found in this company", code: "SALE_MANAGER_NOT_FOUND" });
     }
 
     await this.prisma.user.update({
@@ -218,9 +184,11 @@ export class AuthService {
 
     if (!email || !password) {
       if (env.NODE_ENV === "production") {
-        throw new Error(
-          "No users exist. Set AUTH_INITIAL_ADMIN_EMAIL and AUTH_INITIAL_ADMIN_PASSWORD to bootstrap the first admin.",
-        );
+        throw new UserFacingError({
+          userMessage: "Initial admin configuration is missing",
+          code: "MISSING_INITIAL_ADMIN",
+          debugMessage: "No users exist. Set AUTH_INITIAL_ADMIN_EMAIL and AUTH_INITIAL_ADMIN_PASSWORD to bootstrap the first admin.",
+        });
       }
       log?.warn(
         { hasEmail: Boolean(email), hasPassword: Boolean(password) },
@@ -239,5 +207,51 @@ export class AuthService {
     });
 
     log?.info({ email }, "Auth: initial admin user created");
+  }
+
+  async getUserInfo(userId: string): Promise<AuthUser> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user || !user.isActive) {
+      throw new UserFacingError({ userMessage: "User not found", code: "USER_NOT_FOUND" });
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      companyName: user.companyName,
+    };
+  }
+
+  async updateCompanyName(
+    userId: string,
+    companyName: string,
+  ): Promise<AuthUser> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user || !user.isActive) {
+      throw new UserFacingError({ userMessage: "User not found", code: "USER_NOT_FOUND" });
+    }
+
+    if (user.role !== UserRole.COMPANY) {
+      throw new UserFacingError({ userMessage: "Only company users can update company name", code: "FORBIDDEN" });
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: { companyName },
+    });
+
+    return {
+      id: updatedUser.id,
+      email: updatedUser.email,
+      role: updatedUser.role,
+      companyName: updatedUser.companyName,
+    };
   }
 }
