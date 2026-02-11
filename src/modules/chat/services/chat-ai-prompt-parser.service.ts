@@ -49,6 +49,7 @@ export class ChatAiPromptParserService implements ChatPromptParser {
     previousMessagesCount?: number;
     lastLeadResponse?: string;
     suggestedChannel?: string;
+    customInstructions?: string;
     debug?: boolean;
   }): Promise<{
     channel: string;
@@ -95,6 +96,7 @@ export class ChatAiPromptParserService implements ChatPromptParser {
       suggestedChannel:
         suggestedChannel ?? ProtoOutreachChannel.OUTREACH_CHANNEL_UNSPECIFIED,
       debug: input.debug ?? false,
+      customInstructions: input.customInstructions ?? "",
     });
 
     console.log(

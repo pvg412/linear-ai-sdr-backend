@@ -47,3 +47,32 @@ export const updateCompanyNameBodySchema = z.object({
 });
 
 export type UpdateCompanyNameBody = z.infer<typeof updateCompanyNameBodySchema>;
+
+/**
+ * Regex patterns to detect code / structured data in custom instructions.
+ * Rejects JSON objects/arrays, HTML tags, code blocks, import/require statements,
+ * and other programming constructs that could be used for prompt injection.
+ */
+const DISALLOWED_PATTERNS = [
+  /[{}[\]]/,                       // JSON-like braces/brackets
+  /<\/?[a-z][a-z0-9]*[\s>]/i,      // HTML/XML tags
+  /```/,                           // Markdown code blocks
+  /\b(import|require|export|function|const|let|var|class|def|return)\b/i, // Programming keywords
+  /\b(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER)\b/i, // SQL keywords
+] as const;
+
+export const updateCustomInstructionsBodySchema = z.object({
+  customInstructions: z
+    .string()
+    .max(500, "Custom instructions must be 500 characters or fewer")
+    .refine(
+      (val) => !DISALLOWED_PATTERNS.some((pattern) => pattern.test(val)),
+      {
+        message:
+          "Custom instructions must be plain text only. Code, JSON, HTML, and programming constructs are not allowed.",
+      },
+    )
+    .nullable(),
+});
+
+export type UpdateCustomInstructionsBody = z.infer<typeof updateCustomInstructionsBodySchema>;

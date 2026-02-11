@@ -11,6 +11,7 @@ import {
   devRegisterBodySchema,
   loginBodySchema,
   updateCompanyNameBodySchema,
+  updateCustomInstructionsBodySchema,
 } from "./schemas/auth.schemas";
 import { UserRole } from "@prisma/client";
 import { getUserFacingMessage } from "@/infra/userFacingError";
@@ -202,6 +203,26 @@ export function registerAuthRoutes(app: FastifyInstance, envArg?: Env) {
         return reply.code(409).send({ message: "Company name already exists" });
       }
       return reply.code(400).send({ message: "Failed to update company name" });
+    }
+  });
+
+  // Update custom instructions
+  app.put("/auth/me/custom-instructions", async (request, reply) => {
+    if (!request.user) {
+      return reply.code(401).send({ message: "Unauthorized" });
+    }
+
+    const body = updateCustomInstructionsBodySchema.parse(request.body);
+
+    try {
+      const updatedUser = await service.updateCustomInstructions(
+        request.user.id,
+        body.customInstructions,
+      );
+      return reply.code(200).send({ user: updatedUser });
+    } catch (e: unknown) {
+      const message = getUserFacingMessage(e) ?? "Failed to update custom instructions";
+      return reply.code(400).send({ message });
     }
   });
 }

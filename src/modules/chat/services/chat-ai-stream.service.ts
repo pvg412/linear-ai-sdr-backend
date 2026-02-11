@@ -4,6 +4,7 @@ import { ChatMessageRole, ChatMessageType } from "@prisma/client";
 
 import { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.types";
+import { getPrisma } from "@/infra/prisma";
 
 import { ChatRepository } from "../persistence/chat.repository";
 import { CHAT_TYPES } from "../chat.types";
@@ -334,6 +335,16 @@ export class ChatAiStreamService {
         }));
       }
 
+      // Load user's custom instructions from DB if not provided in context
+      let resolvedCustomInstructions = ctx.customInstructions ?? "";
+      if (!resolvedCustomInstructions) {
+        const dbUser = await getPrisma().user.findUnique({
+          where: { id: input.userId },
+          select: { customInstructions: true },
+        });
+        resolvedCustomInstructions = dbUser?.customInstructions ?? "";
+      }
+
       outreachContext = {
         channel: ctx.channel
           ? mapStringToOutreachChannel(ctx.channel)
@@ -349,7 +360,7 @@ export class ChatAiStreamService {
         leadResponseType: PbLeadResponseType.LEAD_RESPONSE_TYPE_NO_RESPONSE,
         leadLastReply: "",
         previousMessages,
-        customInstructions: ctx.customInstructions ?? "",
+        customInstructions: resolvedCustomInstructions,
         assetPermissionGranted: false,
         assetToSend: "",
       };

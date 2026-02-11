@@ -11,6 +11,7 @@ export type AuthUser = {
   email: string;
   role: UserRole;
   companyName?: string | null;
+  customInstructions?: string | null;
 };
 
 export class AuthService {
@@ -223,6 +224,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       companyName: user.companyName,
+      customInstructions: user.customInstructions,
     };
   }
 
@@ -253,5 +255,44 @@ export class AuthService {
       role: updatedUser.role,
       companyName: updatedUser.companyName,
     };
+  }
+
+  async updateCustomInstructions(
+    userId: string,
+    customInstructions: string | null,
+  ): Promise<AuthUser> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user || !user.isActive) {
+      throw new UserFacingError({ userMessage: "User not found", code: "USER_NOT_FOUND" });
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: { customInstructions },
+    });
+
+    return {
+      id: updatedUser.id,
+      email: updatedUser.email,
+      role: updatedUser.role,
+      companyName: updatedUser.companyName,
+      customInstructions: updatedUser.customInstructions,
+    };
+  }
+
+  async getCustomInstructions(userId: string): Promise<string | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { customInstructions: true, isActive: true },
+    });
+
+    if (!user || !user.isActive) {
+      throw new UserFacingError({ userMessage: "User not found", code: "USER_NOT_FOUND" });
+    }
+
+    return user.customInstructions;
   }
 }

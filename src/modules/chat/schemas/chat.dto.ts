@@ -72,6 +72,7 @@ export interface ChatPromptParser {
     previousMessagesCount?: number;
     lastLeadResponse?: string;
     suggestedChannel?: string;
+    customInstructions?: string;
     debug?: boolean;
   }): Promise<{
     channel: string;

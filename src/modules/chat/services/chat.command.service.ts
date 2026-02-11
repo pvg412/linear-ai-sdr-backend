@@ -8,6 +8,7 @@ import {
 } from "@prisma/client";
 
 import { UserFacingError } from "@/infra/userFacingError";
+import { getPrisma } from "@/infra/prisma";
 import { ChatRepository } from "../persistence/chat.repository";
 import { CHAT_TYPES } from "../chat.types";
 import type {
@@ -440,10 +441,17 @@ export class ChatCommandService {
       authorUserId: userId,
     });
 
+    // Load user's custom instructions from DB
+    const user = await getPrisma().user.findUnique({
+      where: { id: userId },
+      select: { customInstructions: true },
+    });
+
     console.log("[parseOutreachPrompt] calling chatPromptParser.parseOutreachContext", {
       suggestedChannel: dto.suggestedChannel,
       leadId: directory.firstLeadId,
       text: dto.text,
+      hasCustomInstructions: !!user?.customInstructions,
     });
 
     const parsed = await this.chatPromptParser.parseOutreachContext({
@@ -453,6 +461,7 @@ export class ChatCommandService {
       leadId: directory.firstLeadId,
       directoryId: dto.directoryId,
       suggestedChannel: dto.suggestedChannel,
+      customInstructions: user?.customInstructions ?? undefined,
       debug: false,
     });
 
