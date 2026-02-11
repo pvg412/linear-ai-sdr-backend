@@ -28,6 +28,7 @@ export function registerScraperModule(container: Container) {
         env.APIFY_TOKEN ?? "",
         isApifyEnabled,
         env.APIFY_MONGODB_CONNECTION_STRING ?? "",
+        env.APIFY_DEDUPE_ENABLED ?? false,
       );
     })
     .inSingletonScope();

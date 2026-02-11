@@ -38,6 +38,7 @@ export class ApifyLinkedinProfileSearchScraperAdapter implements ScraperAdapter 
     private readonly token: string,
     private readonly enabled: boolean,
     private readonly mongodbConnectionString: string,
+    private readonly dedupeEnabled: boolean,
   ) {
     this.client = new ApifyLinkedinProfileSearchClient(token);
   }
@@ -54,6 +55,7 @@ export class ApifyLinkedinProfileSearchScraperAdapter implements ScraperAdapter 
         inputBase,
         query,
         this.mongodbConnectionString,
+        this.dedupeEnabled,
       );
       ensureApifySearchInput(input);
 
@@ -152,13 +154,13 @@ export class ApifyLinkedinProfileSearchScraperAdapter implements ScraperAdapter 
 
     const startPageBase =
       typeof input.query.startPage === "number" &&
-      Number.isFinite(input.query.startPage)
+        Number.isFinite(input.query.startPage)
         ? Math.max(1, Math.min(100, Math.floor(input.query.startPage)))
         : 1;
 
     const takePagesTotal =
       typeof input.query.takePages === "number" &&
-      Number.isFinite(input.query.takePages)
+        Number.isFinite(input.query.takePages)
         ? Math.max(0, Math.min(100, Math.floor(input.query.takePages)))
         : calcTakePages(input.query.limit);
 
@@ -518,18 +520,19 @@ function applyApifyMongoDedupAndPostFilters(
   input: ApifyLinkedinProfileSearchInput,
   query: ApifyScraperQuery,
   mongoConn: string,
+  dedupeEnabled: boolean,
 ): ApifyLinkedinProfileSearchInput {
   const out: ApifyLinkedinProfileSearchInput = {
     ...input,
-    // 1:1 из query
     postFilteringMongoDbQuery: query.postFilteringMongoDbQuery,
     postFilteringMongoDbAggregation: query.postFilteringMongoDbAggregation,
   };
 
   // dedupe boolean -> default mode is "insert_ids" (explicit mode wins)
+  // If APIFY_DEDUPE_ENABLED=0, force mode to "off" regardless of query settings
   const mode =
     query.profileDeduplicationMode ??
-    (query.dedupe === false ? "off" : "insert_ids");
+    (query.dedupe === false || !dedupeEnabled ? "off" : "insert_ids");
 
   if (mode === "off") return out;
 
@@ -539,7 +542,7 @@ function applyApifyMongoDedupAndPostFilters(
       code: "APIFY_MISSING_MONGODB",
       userMessage:
         "Apify deduplication enabled but MongoDB is not configured.\n" +
-        "Set APIFY_MONGODB_CONNECTION_STRING on the server.\n",
+        "Set APIFY_MONGODB_CONNECTION_STRING on the server or set APIFY_DEDUPE_ENABLED=0.\n",
       debugMessage: `dedupe requested, profileDeduplicationMode=${mode}`,
     });
   }

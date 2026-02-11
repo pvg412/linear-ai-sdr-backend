@@ -37,6 +37,7 @@ describe("ApifyScraperAdapter.checkStatus()", () => {
       "token",
       true,
       "mongodb://localhost:27017",
+      true,
     );
 
     const res = await adapter.checkStatus("run_1");
@@ -60,6 +61,7 @@ describe("ApifyScraperAdapter.checkStatus()", () => {
       "token",
       true,
       "mongodb://localhost:27017",
+      true,
     );
 
     const res = await adapter.checkStatus("run_2");
@@ -80,6 +82,7 @@ describe("ApifyScraperAdapter.checkStatus()", () => {
       "token",
       true,
       "mongodb://localhost:27017",
+      true,
     );
 
     const res = await adapter.checkStatus("run_3");
@@ -108,6 +111,7 @@ describe("ApifyScraperAdapter.getRateLimitResumePlan()", () => {
       "token",
       true,
       "mongodb://localhost:27017",
+      true,
     );
 
     const now = new Date("2026-01-19T10:35:43.128Z");

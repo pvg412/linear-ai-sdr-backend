@@ -51,6 +51,10 @@ const EnvSchema = z.object({
 
   APIFY_TOKEN: z.string().optional(),
   APIFY_MONGODB_CONNECTION_STRING: z.string().optional(),
+  APIFY_DEDUPE_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
 
   SCRAPERCITY_API_KEY: z.string().optional(),
   SCRAPERCITY_API_URL: z.url().optional(),
