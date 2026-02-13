@@ -28,6 +28,7 @@ export function registerLeadRoutes(app: FastifyInstance): void {
     const q = LeadPaginationSchema.parse(req.body);
 
     return await leadQueryService.listLeads(user.id, {
+      role: user.role,
       companyId: user.companyId,
       filters: q.filters,
       page: q.page,
@@ -46,6 +47,7 @@ export function registerLeadRoutes(app: FastifyInstance): void {
       user.id,
       {
         leadSearchId: params.leadSearchId,
+        role: user.role,
         companyId: user.companyId,
         page: body.page,
         perPage: body.perPage,

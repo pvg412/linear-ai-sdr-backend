@@ -1,10 +1,8 @@
-import { inject, injectable, optional } from "inversify";
-import { Queue } from "bullmq";
+import { injectable } from "inversify";
+import type { Queue } from "bullmq";
 
 import { ensureLogger, type LoggerLike } from "@/infra/observability";
-import { LEAD_SEARCH_TYPES } from "../lead-search.types";
 import { LeadSearchRepository } from "../persistence/lead-search.repository";
-import { QUEUE_TYPES } from "@/infra/queue/queue.types";
 import {
   type LeadSearchJobData,
   type LeadSearchJobName,
@@ -13,18 +11,20 @@ import {
 
 @injectable()
 export class LeadSearchRecoveryService {
-  constructor(
-    @inject(LEAD_SEARCH_TYPES.LeadSearchRepository)
-    private readonly leadSearchRepository: LeadSearchRepository,
+  private readonly leadSearchRepository: LeadSearchRepository;
+  private readonly leadSearchQueue?: Queue<
+    LeadSearchJobData,
+    void,
+    LeadSearchJobName
+  >;
 
-    @inject(QUEUE_TYPES.LeadSearchQueue)
-    @optional()
-    private readonly leadSearchQueue?: Queue<
-      LeadSearchJobData,
-      void,
-      LeadSearchJobName
-    >,
-  ) {}
+  constructor(args: {
+    leadSearchRepository: LeadSearchRepository;
+    queue?: Queue<LeadSearchJobData, void, LeadSearchJobName>;
+  }) {
+    this.leadSearchRepository = args.leadSearchRepository;
+    this.leadSearchQueue = args.queue;
+  }
 
   async recover(log?: LoggerLike): Promise<void> {
     const lg = ensureLogger(log);

@@ -50,6 +50,7 @@ export class LeadQueryService {
   async listLeads(
     userId: string,
     opts: {
+      role?: string;
       companyId?: string | null;
       page?: number;
       perPage?: number;
@@ -60,6 +61,7 @@ export class LeadQueryService {
 
     return this.leadRepository.listLeads({
       ownerId: userId,
+      role: opts.role,
       companyId: opts.companyId,
       page: opts.page,
       perPage: opts.perPage,
@@ -71,6 +73,7 @@ export class LeadQueryService {
     userId: string,
     input: {
       leadSearchId: string;
+      role?: string;
       companyId?: string | null;
       page: number;
       perPage: number;
@@ -81,6 +84,7 @@ export class LeadQueryService {
 
     return this.leadRepository.listLeads({
       ownerId: userId,
+      role: input.role,
       companyId: input.companyId,
       page: input.page,
       perPage: input.perPage,

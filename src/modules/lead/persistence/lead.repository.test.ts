@@ -5,37 +5,14 @@ import { buildLeadWhere } from "./lead.repository";
 
 describe("buildLeadWhere", () => {
   const ownerId = "user_1";
-  const ownerVisibility = {
-    OR: [
-      { createdById: ownerId },
-      { searches: { some: { leadSearch: { createdById: ownerId } } } },
-      { leadDirectoryLeads: { some: { directory: { ownerId } } } },
-    ],
-  };
+  const ownerVisibility = { createdById: ownerId };
 
   const companyId = "company_1";
   const companyVisibility = {
     OR: [
       { createdById: ownerId },
+      { createdById: companyId },
       { createdBy: { companyId } },
-      {
-        searches: {
-          some: {
-            leadSearch: {
-              OR: [
-                { createdById: ownerId },
-                { createdBy: { companyId } },
-              ],
-            },
-          },
-        },
-      },
-      { leadDirectoryLeads: { some: { directory: { ownerId } } } },
-      {
-        leadDirectoryLeads: {
-          some: { directory: { owner: { companyId } } },
-        },
-      },
     ],
   };
 
@@ -142,6 +119,28 @@ describe("buildLeadWhere", () => {
     );
   });
 
+  it("unassigned filter always uses ownerId even with companyId", () => {
+    const where = buildLeadWhere({
+      ownerId,
+      companyId,
+      filters: { directoryIds: [UNASSIGNED_DIRECTORY_ID] },
+    });
+
+    const andFilters = (where as { AND: unknown[] }).AND;
+    // Unassigned should check only the current user's directories, not company-wide
+    expect(andFilters).toEqual(
+      expect.arrayContaining([
+        companyVisibility,
+        { isVerified: true },
+        {
+          leadDirectoryLeads: {
+            none: { directory: { ownerId } },
+          },
+        },
+      ]),
+    );
+  });
+
   it("uses company-wide visibility when companyId is provided", () => {
     const where = buildLeadWhere({ ownerId, companyId });
     const andFilters = (where as { AND: unknown[] }).AND;
@@ -173,6 +172,7 @@ describe("buildLeadWhere", () => {
     expect(andFilters).toEqual(
       expect.arrayContaining([
         companyVisibility,
+        { isVerified: true },
         {
           leadDirectoryLeads: {
             some: {
@@ -186,6 +186,27 @@ describe("buildLeadWhere", () => {
           },
         },
       ]),
+    );
+  });
+
+  it("admin visibility returns empty filter (sees all leads)", () => {
+    const where = buildLeadWhere({ ownerId, role: "ADMIN" });
+    const andFilters = (where as { AND: unknown[] }).AND;
+    // Admin visibility is {} which merges into AND without restricting
+    expect(andFilters).toEqual(
+      expect.arrayContaining([{}, { isVerified: true }]),
+    );
+  });
+
+  it("admin visibility with companyId still returns empty filter", () => {
+    const where = buildLeadWhere({ ownerId, role: "ADMIN", companyId });
+    const andFilters = (where as { AND: unknown[] }).AND;
+    expect(andFilters).toEqual(
+      expect.arrayContaining([{}, { isVerified: true }]),
+    );
+    // Should NOT contain company visibility constraints
+    expect(andFilters).not.toEqual(
+      expect.arrayContaining([companyVisibility]),
     );
   });
 });

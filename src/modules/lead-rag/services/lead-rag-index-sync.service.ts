@@ -1,4 +1,4 @@
-import { inject, injectable, optional } from "inversify";
+import { injectable } from "inversify";
 import type { Queue } from "bullmq";
 
 import { ensureLogger, type LoggerLike } from "@/infra/observability";
@@ -9,7 +9,6 @@ import type {
 } from "@/infra/queue/lead-rag/lead-rag-index.queue";
 
 import { LeadRagIndexProcessorService } from "./lead-rag-index-processor.service";
-import { QUEUE_TYPES } from "@/infra/queue/queue.types";
 
 function isJobAlreadyExistsError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
@@ -18,25 +17,28 @@ function isJobAlreadyExistsError(err: unknown): boolean {
 
 @injectable()
 export class LeadRagIndexSyncService {
-  @inject(QUEUE_TYPES.LeadRagIndexQueue)
-  @optional()
+  private readonly processor: LeadRagIndexProcessorService;
   private readonly leadRagIndexQueue?: Queue<
     LeadRagIndexJobData,
     void,
     LeadRagIndexJobName
   >;
 
-  constructor(args: { processor: LeadRagIndexProcessorService }) {
+  constructor(
+    args: {
+      processor: LeadRagIndexProcessorService;
+      queue?: Queue<LeadRagIndexJobData, void, LeadRagIndexJobName>;
+    },
+  ) {
     this.processor = args.processor;
+    this.leadRagIndexQueue = args.queue;
   }
-
-  private readonly processor: LeadRagIndexProcessorService;
 
   private upsertJobId(ownerId: string, leadId: string): string {
-    return `rag:upsert:${ownerId}:${leadId}`;
+    return `rag-upsert-${ownerId}-${leadId}`;
   }
   private deleteJobId(ownerId: string, leadId: string): string {
-    return `rag:delete:${ownerId}:${leadId}`;
+    return `rag-delete-${ownerId}-${leadId}`;
   }
 
   /**

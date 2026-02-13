@@ -253,9 +253,9 @@ export class LeadDirectoryCommandService {
     ownerId: string,
     directoryId: string,
     leadId: string,
-    log?: LoggerLike,
+    opts?: { companyId?: string | null; log?: LoggerLike },
   ): Promise<void> {
-    const lg = ensureLogger(log);
+    const lg = ensureLogger(opts?.log);
 
     const dir = await this.leadDirectoryRepository.findOwnedById({
       ownerId,
@@ -266,6 +266,7 @@ export class LeadDirectoryCommandService {
     const lead = await this.leadDirectoryRepository.getLeadStatus({
       ownerId,
       leadId,
+      companyId: opts?.companyId,
     });
     if (!lead.exists) throw new LeadDirectoryNotFoundError("Lead not found");
     if (!lead.isVerified) {

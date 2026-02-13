@@ -139,8 +139,13 @@ export class LeadDirectoryQueryService {
   async listDirectoriesForLead(
     ownerId: string,
     leadId: string,
+    opts?: { companyId?: string | null },
   ): Promise<LeadDirectoryDto[]> {
-    const lead = await this.repo.getLeadStatus({ ownerId, leadId });
+    const lead = await this.repo.getLeadStatus({
+      ownerId,
+      leadId,
+      companyId: opts?.companyId,
+    });
     // Unverified leads are system-internal and should not be exposed.
     if (!lead.exists || !lead.isVerified) return [];
 

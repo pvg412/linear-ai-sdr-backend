@@ -242,11 +242,12 @@ export class LeadDirectoryRepository {
   async getLeadStatus(input: {
     ownerId: string;
     leadId: string;
+    companyId?: string | null;
   }): Promise<{ exists: boolean; isVerified: boolean }> {
     const row = await this.prisma.lead.findFirst({
       where: {
         id: input.leadId,
-        AND: [buildLeadVisibilityWhere(input.ownerId)],
+        AND: [buildLeadVisibilityWhere({ ownerId: input.ownerId, companyId: input.companyId })],
       },
       select: { id: true, isVerified: true },
     });
@@ -332,7 +333,7 @@ export class LeadDirectoryRepository {
     return this.prisma.lead.count({
       where: {
         AND: [
-          buildLeadVisibilityWhere(input.ownerId),
+          buildLeadVisibilityWhere({ ownerId: input.ownerId }),
           { isVerified: true },
           {
             leadDirectoryLeads: {
@@ -351,7 +352,7 @@ export class LeadDirectoryRepository {
   }): Promise<{ total: number; items: Prisma.LeadGetPayload<object>[] }> {
     const where = {
       AND: [
-        buildLeadVisibilityWhere(input.ownerId),
+        buildLeadVisibilityWhere({ ownerId: input.ownerId }),
         { isVerified: true },
         {
           leadDirectoryLeads: {

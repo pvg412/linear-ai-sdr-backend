@@ -1,43 +1,29 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 
-export function buildLeadVisibilityWhere(
-  ownerId: string,
-  companyId?: string | null,
-): Prisma.LeadWhereInput {
-  // When the user belongs to a company, they can see leads from all company members.
-  if (companyId) {
-    const companyMember = { companyId };
-    return {
-      OR: [
-        { createdById: ownerId },
-        { createdBy: companyMember },
-        {
-          searches: {
-            some: {
-              leadSearch: {
-                OR: [
-                  { createdById: ownerId },
-                  { createdBy: companyMember },
-                ],
-              },
-            },
-          },
-        },
-        { leadDirectoryLeads: { some: { directory: { ownerId } } } },
-        {
-          leadDirectoryLeads: {
-            some: { directory: { owner: companyMember } },
-          },
-        },
-      ],
-    };
+export function buildLeadVisibilityWhere(opts: {
+  ownerId: string;
+  role?: string;
+  companyId?: string | null;
+}): Prisma.LeadWhereInput {
+  // Admin sees everything.
+  if (opts.role === UserRole.ADMIN) {
+    return {};
   }
 
-  return {
-    OR: [
-      { createdById: ownerId },
-      { searches: { some: { leadSearch: { createdById: ownerId } } } },
-      { leadDirectoryLeads: { some: { directory: { ownerId } } } },
-    ],
-  };
+  // When the user belongs to a company, they can see leads created by:
+  // - themselves
+  // - any member of the same company (user.companyId matches)
+  // - the company account itself (createdById === companyId)
+  if (opts.companyId) {
+    const result = {
+      OR: [
+        { createdById: opts.ownerId },
+        { createdById: opts.companyId },
+        { createdBy: { companyId: opts.companyId } },
+      ],
+    };
+    return result;
+  }
+
+  return { createdById: opts.ownerId };
 }

@@ -1,13 +1,11 @@
-import { inject, injectable, optional } from "inversify";
-import { Queue, type Job } from "bullmq";
+import { injectable } from "inversify";
+import type { Queue, Job } from "bullmq";
 import { LeadSearchKind, LeadSearchStatus } from "@prisma/client";
 
 import { ensureLogger, type LoggerLike } from "@/infra/observability";
 
-import { LEAD_SEARCH_TYPES } from "./lead-search.types";
 import { LeadSearchRepository } from "./persistence/lead-search.repository";
 
-import { QUEUE_TYPES } from "@/infra/queue/queue.types";
 import {
   type LeadSearchJobData,
   type LeadSearchJobName,
@@ -20,27 +18,29 @@ import { ScraperStepLeadSearchHandler } from "@/modules/lead-search/services/scr
 
 @injectable()
 export class LeadSearchRunnerService {
-  constructor(
-    @inject(LEAD_SEARCH_TYPES.LeadSearchRepository)
-    private readonly leadSearchRepository: LeadSearchRepository,
+  private readonly leadSearchRepository: LeadSearchRepository;
+  private readonly leadDbHandler: LeadDbLeadSearchHandler;
+  private readonly scraperInlineHandler: ScraperInlineLeadSearchHandler;
+  private readonly scraperStepHandler: ScraperStepLeadSearchHandler;
+  private readonly leadSearchQueue?: Queue<
+    LeadSearchJobData,
+    void,
+    LeadSearchJobName
+  >;
 
-    @inject(LEAD_SEARCH_TYPES.LeadDbLeadSearchHandler)
-    private readonly leadDbHandler: LeadDbLeadSearchHandler,
-
-    @inject(LEAD_SEARCH_TYPES.ScraperInlineLeadSearchHandler)
-    private readonly scraperInlineHandler: ScraperInlineLeadSearchHandler,
-
-    @inject(LEAD_SEARCH_TYPES.ScraperStepLeadSearchHandler)
-    private readonly scraperStepHandler: ScraperStepLeadSearchHandler,
-
-    @inject(QUEUE_TYPES.LeadSearchQueue)
-    @optional()
-    private readonly leadSearchQueue?: Queue<
-      LeadSearchJobData,
-      void,
-      LeadSearchJobName
-    >,
-  ) {}
+  constructor(args: {
+    leadSearchRepository: LeadSearchRepository;
+    leadDbHandler: LeadDbLeadSearchHandler;
+    scraperInlineHandler: ScraperInlineLeadSearchHandler;
+    scraperStepHandler: ScraperStepLeadSearchHandler;
+    queue?: Queue<LeadSearchJobData, void, LeadSearchJobName>;
+  }) {
+    this.leadSearchRepository = args.leadSearchRepository;
+    this.leadDbHandler = args.leadDbHandler;
+    this.scraperInlineHandler = args.scraperInlineHandler;
+    this.scraperStepHandler = args.scraperStepHandler;
+    this.leadSearchQueue = args.queue;
+  }
 
   private isProd(): boolean {
     return process.env.NODE_ENV === "production";

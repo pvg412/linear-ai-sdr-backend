@@ -119,7 +119,7 @@ export class LeadRagIndexProcessorService {
     const lead = await this.prisma.lead.findFirst({
       where: {
         id: args.leadId,
-        AND: [buildLeadVisibilityWhere(args.ownerId)],
+        AND: [buildLeadVisibilityWhere({ ownerId: args.ownerId })],
       },
     });
 

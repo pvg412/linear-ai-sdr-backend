@@ -17,7 +17,10 @@ import {
   MoveLeadDirectoryBodySchema,
   UpdateLeadDirectoryBodySchema,
 } from "./schemas/lead-directory.schemas";
-import { requireRequestUserId } from "@/infra/auth/requestUser";
+import {
+  requireRequestUser,
+  requireRequestUserId,
+} from "@/infra/auth/requestUser";
 
 function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown): T {
   const parsed = schema.safeParse(data);
@@ -25,7 +28,7 @@ function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown): T {
     throw new LeadDirectoryError(
       "VALIDATION",
       "Invalid request payload",
-      parsed.error.flatten(),
+      z.treeifyError(parsed.error),
     );
   }
   return parsed.data;
@@ -181,11 +184,14 @@ export function registerLeadDirectoryRoutes(app: FastifyInstance) {
 
   app.post("/lead-directories/:directoryId/leads", async (req, reply) => {
     try {
-      const userId = requireRequestUserId(req);
+      const user = requireRequestUser(req);
       const params = req.params as { directoryId: string };
       const body = parseOrThrow(AddLeadToDirectoryBodySchema, req.body);
 
-      await cmd.addLead(userId, params.directoryId, body.leadId, lg);
+      await cmd.addLead(user.id, params.directoryId, body.leadId, {
+        companyId: user.companyId,
+        log: lg,
+      });
       return reply.code(204).send();
     } catch (err) {
       return handleError(reply, err);
@@ -230,10 +236,12 @@ export function registerLeadDirectoryRoutes(app: FastifyInstance) {
 
   app.get("/leads/:leadId/directories", async (req, reply) => {
     try {
-      const userId = requireRequestUserId(req);
+      const user = requireRequestUser(req);
       const params = req.params as { leadId: string };
 
-      const items = await qry.listDirectoriesForLead(userId, params.leadId);
+      const items = await qry.listDirectoriesForLead(user.id, params.leadId, {
+        companyId: user.companyId,
+      });
       return reply.send({ items });
     } catch (err) {
       return handleError(reply, err);
