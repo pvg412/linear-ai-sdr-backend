@@ -207,6 +207,22 @@ export class DatasetImportParserService {
         .filter(Boolean)
         .join(" ");
     }
+
+    // Merge virtual _locationCity / _locationState / _locationCountry into location
+    if (!lead.location) {
+      const parts = [
+        lead._locationCity,
+        lead._locationState,
+        lead._locationCountry,
+      ].filter(Boolean);
+      if (parts.length > 0) {
+        lead.location = parts.join(", ");
+      }
+    }
+    delete lead._locationCity;
+    delete lead._locationState;
+    delete lead._locationCountry;
+
     return lead;
   }
 }

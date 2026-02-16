@@ -302,6 +302,7 @@ model Lead {
   companyUrl         String?
   companyId          String?
   companyLinkedinUrl String?
+  companyPhone       String?
   companySize        CompanySize?
   companyIndustry    String?
   companyLocation    String?

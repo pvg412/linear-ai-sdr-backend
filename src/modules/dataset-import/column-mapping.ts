@@ -1,4 +1,4 @@
-import { CompanySize, SeniorityLevel } from "@prisma/client";
+import { CompanySize, EmailStatus, SeniorityLevel } from "@prisma/client";
 
 export type LeadFieldMapping = {
   prismaField: string;
@@ -89,6 +89,32 @@ function mapToSeniorityLevel(value: string): SeniorityLevel | null {
   return map[value.trim().toLowerCase()] ?? null;
 }
 
+function mapToEmailStatus(value: string): EmailStatus | null {
+  const v = value.trim().toUpperCase();
+  if (Object.values(EmailStatus).includes(v as EmailStatus)) {
+    return v as EmailStatus;
+  }
+  const map: Record<string, EmailStatus> = {
+    verified: EmailStatus.DELIVERABLE,
+    deliverable: EmailStatus.DELIVERABLE,
+    undeliverable: EmailStatus.UNDELIVERABLE,
+    bounce: EmailStatus.UNDELIVERABLE,
+    bounced: EmailStatus.UNDELIVERABLE,
+    risky: EmailStatus.RISKY,
+    guessed: EmailStatus.RISKY,
+    "accept all": EmailStatus.CATCH_ALL,
+    "accept-all": EmailStatus.CATCH_ALL,
+    "catch all": EmailStatus.CATCH_ALL,
+    "catch-all": EmailStatus.CATCH_ALL,
+    catchall: EmailStatus.CATCH_ALL,
+    unknown: EmailStatus.UNKNOWN,
+    unverified: EmailStatus.UNKNOWN,
+    valid: EmailStatus.VALID,
+    invalid: EmailStatus.INVALID,
+  };
+  return map[value.trim().toLowerCase()] ?? null;
+}
+
 export const LEAD_FIELD_MAPPINGS: LeadFieldMapping[] = [
   {
     prismaField: "firstName",
@@ -166,6 +192,21 @@ export const LEAD_FIELD_MAPPINGS: LeadFieldMapping[] = [
     required: false,
   },
   {
+    prismaField: "emailStatus",
+    aliases: [
+      "emailstatus",
+      "email status",
+      "email_status",
+      "email verification",
+      "email_verification",
+      "verification status",
+      "verification_status",
+      "email validity",
+    ],
+    required: false,
+    transform: mapToEmailStatus,
+  },
+  {
     prismaField: "company",
     aliases: [
       "company",
@@ -210,12 +251,37 @@ export const LEAD_FIELD_MAPPINGS: LeadFieldMapping[] = [
     prismaField: "location",
     aliases: [
       "location",
-      "city",
-      "region",
-      "geo",
-      "geography",
       "person location",
       "person_location",
+      "full location",
+    ],
+    required: false,
+  },
+  {
+    prismaField: "_locationCity",
+    aliases: ["city", "person city"],
+    required: false,
+  },
+  {
+    prismaField: "_locationState",
+    aliases: [
+      "state",
+      "region",
+      "province",
+      "person state",
+      "person_state",
+    ],
+    required: false,
+  },
+  {
+    prismaField: "_locationCountry",
+    aliases: [
+      "country",
+      "nation",
+      "geo",
+      "geography",
+      "person country",
+      "person_country",
     ],
     required: false,
   },
@@ -234,6 +300,23 @@ export const LEAD_FIELD_MAPPINGS: LeadFieldMapping[] = [
       "cell phone",
       "telephone",
       "tel",
+    ],
+    required: false,
+  },
+  {
+    prismaField: "companyPhone",
+    aliases: [
+      "companyphone",
+      "company phone",
+      "company_phone",
+      "company phone number",
+      "company_phone_number",
+      "company company phone",
+      "office phone",
+      "office_phone",
+      "office number",
+      "company telephone",
+      "company tel",
     ],
     required: false,
   },
