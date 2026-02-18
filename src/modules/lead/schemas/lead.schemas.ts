@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LeadOrigin } from "@prisma/client";
 
 const SearchStringSchema = z.preprocess(
   (v) => (typeof v === "string" ? v.trim() : v),
@@ -12,6 +13,7 @@ export const LeadPaginationFiltersSchema = z.object({
   createdById: z.cuid().optional(),
   email: z.email().optional(),
   search: SearchStringSchema.optional(),
+  origin: z.enum(LeadOrigin).optional(),
 });
 
 export type LeadPaginationFilters = z.infer<typeof LeadPaginationFiltersSchema>;

@@ -10,19 +10,21 @@ export function buildLeadVisibilityWhere(opts: {
     return {};
   }
 
-  // When the user belongs to a company, they can see leads created by:
-  // - themselves
-  // - any member of the same company (user.companyId matches)
-  // - the company account itself (createdById === companyId)
-  if (opts.companyId) {
-    const result = {
+  // For COMPANY role, the user *is* the company — their members reference
+  // them via companyId === ownerId. For SALE_MANAGER, companyId points to
+  // the parent company. In both cases resolve to a single effective ID.
+  const effectiveCompanyId =
+    opts.role === UserRole.COMPANY ? opts.ownerId : opts.companyId;
+
+  if (effectiveCompanyId) {
+    return {
       OR: [
-        { createdById: opts.ownerId },
-        { createdById: opts.companyId },
-        { createdBy: { companyId: opts.companyId } },
+        // Leads created by members whose companyId points to the company.
+        { createdBy: { companyId: effectiveCompanyId } },
+        // Leads created by the company account itself (its own companyId is null).
+        { createdById: effectiveCompanyId },
       ],
     };
-    return result;
   }
 
   return { createdById: opts.ownerId };

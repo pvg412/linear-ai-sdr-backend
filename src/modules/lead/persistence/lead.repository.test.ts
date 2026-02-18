@@ -10,9 +10,8 @@ describe("buildLeadWhere", () => {
   const companyId = "company_1";
   const companyVisibility = {
     OR: [
-      { createdById: ownerId },
-      { createdById: companyId },
       { createdBy: { companyId } },
+      { createdById: companyId },
     ],
   };
 
@@ -161,7 +160,7 @@ describe("buildLeadWhere", () => {
     );
   });
 
-  it("expands directory filter to company members when companyId is provided", () => {
+  it("directory filter uses ownerId even when companyId is provided", () => {
     const where = buildLeadWhere({
       ownerId,
       companyId,
@@ -177,11 +176,7 @@ describe("buildLeadWhere", () => {
           leadDirectoryLeads: {
             some: {
               directoryId: { in: ["dir_a"] },
-              directory: {
-                owner: {
-                  OR: [{ id: ownerId }, { companyId }],
-                },
-              },
+              directory: { ownerId },
             },
           },
         },

@@ -32,6 +32,10 @@ export function buildLeadWhere(opts: {
     andFilters.push({ createdById: opts.filters.createdById });
   }
 
+  if (opts.filters?.origin) {
+    andFilters.push({ origin: opts.filters.origin });
+  }
+
   if (opts.filters?.email) {
     andFilters.push({
       email: { equals: opts.filters.email, mode: "insensitive" },
@@ -46,9 +50,9 @@ export function buildLeadWhere(opts: {
 
   const rawDirectoryIds =
     opts.filters?.directoryIds ??
-    (opts.filters?.directoryId ? [opts.filters.directoryId] : undefined);
+    (opts.filters?.directoryId ? [opts.filters.directoryId] : [UNASSIGNED_DIRECTORY_ID]);
 
-  if (rawDirectoryIds?.length) {
+  if (rawDirectoryIds.length) {
     const uniqueDirectoryIds = Array.from(new Set(rawDirectoryIds));
     const includeUnassigned = uniqueDirectoryIds.includes(
       UNASSIGNED_DIRECTORY_ID,
@@ -59,19 +63,12 @@ export function buildLeadWhere(opts: {
 
     const orFilters: Prisma.LeadWhereInput[] = [];
 
-    // Directory ownership filter: for assigned directories, include company-wide;
-    // for unassigned check, only consider current user's own directories.
-    const directoryOwnerFilter: Prisma.LeadDirectoryWhereInput =
-      opts.companyId
-        ? { owner: { OR: [{ id: opts.ownerId }, { companyId: opts.companyId }] } }
-        : { ownerId: opts.ownerId };
-
     if (directoryIds.length > 0) {
       orFilters.push({
         leadDirectoryLeads: {
           some: {
             directoryId: { in: directoryIds },
-            directory: directoryOwnerFilter,
+            directory: { ownerId: opts.ownerId },
           },
         },
       });
