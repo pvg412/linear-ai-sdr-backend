@@ -201,6 +201,8 @@ model User {
 
   conversationMessagesCreated LeadConversationMessage[] @relation("ConversationMessageCreator")
 
+  serviceCatalogs CompanyServiceCatalog[] @relation("CompanyServiceCatalogs")
+
   @@unique([companyName])
   @@index([role])
   @@index([isActive])
@@ -690,4 +692,37 @@ model LeadConversationMessage {
   @@index([stage])
   @@index([sentAt])
   @@index([chatMessageId])
+}
+
+model CompanyServiceCatalog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   User   @relation("CompanyServiceCatalogs", fields: [companyId], references: [id])
+
+  name String @db.Citext
+
+  subServices CompanyServiceCatalogSubService[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model CompanyServiceCatalogSubService {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyServiceCatalogId String
+  companyServiceCatalog   CompanyServiceCatalog @relation(fields: [companyServiceCatalogId], references: [id], onDelete: Cascade)
+
+  name      String @db.Citext
+  priority  Int
+  budgetMin Int
+  budgetMax Int
+
+  @@unique([companyServiceCatalogId, name])
+  @@index([companyServiceCatalogId])
 }

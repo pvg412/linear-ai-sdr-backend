@@ -21,6 +21,7 @@ import { registerCompanyResearchRoutes } from "./modules/company-research/compan
 import { registerProfileEnrichmentRoutes } from "./modules/profile-enrichment/profile-enrichment.controller";
 import { registerLeadConversationsRoutes } from "./modules/lead-conversations/controller/lead-conversations.controller";
 import { registerDatasetImportRoutes } from "./modules/dataset-import/dataset-import.controller";
+import { registerServiceCatalogRoutes } from "./modules/service-catalog/service-catalog.controller";
 import { UserFacingError } from "./infra/userFacingError";
 
 function getStatusCodeFromErrorCode(code: string): number {
@@ -155,6 +156,7 @@ export async function buildServer() {
   registerProfileEnrichmentRoutes(app);
   registerLeadConversationsRoutes(app);
   registerDatasetImportRoutes(app);
+  registerServiceCatalogRoutes(app);
 
   return { app, env };
 }

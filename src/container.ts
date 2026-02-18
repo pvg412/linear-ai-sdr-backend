@@ -16,6 +16,7 @@ import { registerCompanyResearchModule } from "./modules/company-research/compan
 import { registerProfileEnrichmentModule } from "./modules/profile-enrichment/profile-enrichment.module";
 import { registerLeadConversationsModule } from "./modules/lead-conversations/lead-conversations.module";
 import { registerDatasetImportModule } from "./modules/dataset-import/dataset-import.module";
+import { registerServiceCatalogModule } from "./modules/service-catalog/service-catalog.module";
 
 const container = new Container();
 
@@ -34,5 +35,6 @@ registerCompanyResearchModule(container);
 registerProfileEnrichmentModule(container);
 registerLeadConversationsModule(container);
 registerDatasetImportModule(container);
+registerServiceCatalogModule(container);
 
 export { container };

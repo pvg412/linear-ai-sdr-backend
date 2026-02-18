@@ -53,6 +53,9 @@ beforeEach(async () => {
 
   // Clean in FK-safe order (children -> parents)
   await prisma.$transaction([
+    prisma.companyServiceCatalogSubService.deleteMany(),
+    prisma.companyServiceCatalog.deleteMany(),
+
     prisma.chatMessage.deleteMany(),
     prisma.chatThread.deleteMany(),
 
