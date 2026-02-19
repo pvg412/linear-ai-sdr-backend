@@ -8,6 +8,7 @@ import { startLeadSearchWorker } from "./lead-search/lead-search.worker";
 import { startLeadRagIndexWorker } from "./lead-rag/lead-rag-index.worker";
 import { startProfileEnrichmentWorker } from "./profile-enrichment/profile-enrichment.worker";
 import { startCompanyResearchWorker } from "./company-research/company-research.worker";
+import { startPipelineRunWorker } from "./pipeline-run/pipeline-run.worker";
 
 const env = loadEnv();
 
@@ -50,6 +51,12 @@ export function startWorkers(log?: LoggerLike): WorkersHandle | null {
     concurrency: env.COMPANY_RESEARCH_QUEUE_CONCURRENCY,
   });
 
+  const pipelineRunWorker = startPipelineRunWorker({
+    redis,
+    concurrency: env.PIPELINE_QUEUE_CONCURRENCY,
+    log: lg,
+  });
+
   lg.info({}, "Workers started");
 
   return {
@@ -78,6 +85,12 @@ export function startWorkers(log?: LoggerLike): WorkersHandle | null {
         await companyResearchWorker.close();
       } catch (err) {
         lg.error({ err }, "CompanyResearch worker close error");
+      }
+
+      try {
+        await pipelineRunWorker.close();
+      } catch (err) {
+        lg.error({ err }, "PipelineRun worker close error");
       }
 
       try {

@@ -164,6 +164,23 @@ enum MessageSender {
   LEAD
 }
 
+enum PipelineRunStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum PipelineStepRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
 model User {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -202,6 +219,8 @@ model User {
   conversationMessagesCreated LeadConversationMessage[] @relation("ConversationMessageCreator")
 
   serviceCatalogs CompanyServiceCatalog[] @relation("CompanyServiceCatalogs")
+
+  pipelineRuns PipelineRun[] @relation("PipelineRunCreatedBy")
 
   @@unique([companyName])
   @@index([role])
@@ -725,4 +744,68 @@ model CompanyServiceCatalogSubService {
 
   @@unique([companyServiceCatalogId, name])
   @@index([companyServiceCatalogId])
+}
+
+model PipelineRun {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pipelineKey     String
+  pipelineVersion Int    @default(1)
+
+  createdById String
+  createdBy   User   @relation("PipelineRunCreatedBy", fields: [createdById], references: [id])
+
+  companyId String?
+
+  status           PipelineRunStatus @default(PENDING)
+  currentStepId    String?
+  currentStepIndex Int?
+
+  input      Json?
+  context    Json?
+  definition Json
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  errorMessage String?
+  errorStepId  String?
+
+  stepRuns PipelineStepRun[]
+
+  @@index([createdById])
+  @@index([companyId, status])
+  @@index([status])
+  @@index([pipelineKey])
+}
+
+model PipelineStepRun {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pipelineRunId String
+  pipelineRun   PipelineRun @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade)
+
+  stepId      String
+  stepType    String
+  stepIndex   Int
+  displayName String
+
+  status PipelineStepRunStatus @default(QUEUED)
+
+  attempts Int @default(0)
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  durationMs Int?
+
+  outputSummary Json?
+  errorMessage  String?
+
+  @@unique([pipelineRunId, stepId])
+  @@index([pipelineRunId, stepIndex])
+  @@index([status])
 }

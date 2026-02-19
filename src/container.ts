@@ -17,6 +17,7 @@ import { registerProfileEnrichmentModule } from "./modules/profile-enrichment/pr
 import { registerLeadConversationsModule } from "./modules/lead-conversations/lead-conversations.module";
 import { registerDatasetImportModule } from "./modules/dataset-import/dataset-import.module";
 import { registerServiceCatalogModule } from "./modules/service-catalog/service-catalog.module";
+import { registerPipelineModule } from "./modules/pipeline/pipeline.module";
 
 const container = new Container();
 
@@ -36,5 +37,6 @@ registerProfileEnrichmentModule(container);
 registerLeadConversationsModule(container);
 registerDatasetImportModule(container);
 registerServiceCatalogModule(container);
+registerPipelineModule(container);
 
 export { container };

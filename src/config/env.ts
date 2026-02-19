@@ -32,6 +32,11 @@ const EnvSchema = z.object({
   PROFILE_ENRICHMENT_QUEUE_CONCURRENCY: z.coerce.number().default(2),
   COMPANY_RESEARCH_QUEUE_CONCURRENCY: z.coerce.number().default(2),
 
+  PIPELINE_QUEUE_CONCURRENCY: z.coerce.number().default(2),
+  PIPELINE_QUEUE_ATTEMPTS: z.coerce.number().default(2),
+  PIPELINE_QUEUE_BACKOFF_MS: z.coerce.number().default(5000),
+  PIPELINE_MAX_CONCURRENT_PER_COMPANY: z.coerce.number().default(3),
+
   AUTH_JWT_SECRET: z
     .string()
     .min(32, "JWT secret must be at least 32 characters")

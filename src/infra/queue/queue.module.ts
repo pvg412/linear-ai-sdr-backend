@@ -19,6 +19,11 @@ import {
   ProfileEnrichmentJobData,
   ProfileEnrichmentJobName,
 } from "./profile-enrichment/profile-enrichment.queue";
+import {
+  createPipelineRunQueue,
+  type PipelineRunJobData,
+  type PipelineRunJobName,
+} from "./pipeline-run/pipeline-run.queue";
 
 const redis = tryCreateRedisClient();
 
@@ -48,6 +53,13 @@ export function registerQueueModule(container: Container) {
         Queue<ProfileEnrichmentJobData, void, ProfileEnrichmentJobName>
       >(QUEUE_TYPES.ProfileEnrichmentQueue)
       .toConstantValue(profileEnrichmentQueue);
+
+    const pipelineRunQueue = createPipelineRunQueue(redis);
+    container
+      .bind<
+        Queue<PipelineRunJobData, void, PipelineRunJobName>
+      >(QUEUE_TYPES.PipelineRunQueue)
+      .toConstantValue(pipelineRunQueue);
   } else {
     console.warn("[queue] REDIS_URL not set; LeadSearch will run inline");
   }

@@ -3,4 +3,5 @@ export const QUEUE_TYPES = {
   LeadSearchQueue: Symbol.for("LeadSearchQueue"),
   LeadRagIndexQueue: Symbol.for("LeadRagIndexQueue"),
   ProfileEnrichmentQueue: Symbol.for("ProfileEnrichmentQueue"),
+  PipelineRunQueue: Symbol.for("PipelineRunQueue"),
 } as const;
