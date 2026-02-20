@@ -15,7 +15,7 @@ import { OutreachStep } from "./steps/outreach.step";
 import { ScoringStep } from "./steps/scoring.step";
 import { FinalScoringStep } from "./steps/final-scoring.step";
 import { SignalsStep } from "./steps/signals.step";
-import { DecisionMakerStep } from "./steps/decision-maker.step";
+
 
 export function registerPipelineModule(container: Container): void {
   /* Core infrastructure */
@@ -44,7 +44,6 @@ export function registerPipelineModule(container: Container): void {
       registry.register(ctx.get<ScoringStep>(ScoringStep));
       registry.register(ctx.get<FinalScoringStep>(FinalScoringStep));
       registry.register(ctx.get<SignalsStep>(SignalsStep));
-      registry.register(ctx.get<DecisionMakerStep>(DecisionMakerStep));
 
       return registry;
     })
@@ -57,7 +56,6 @@ export function registerPipelineModule(container: Container): void {
   container.bind<ScoringStep>(ScoringStep).to(ScoringStep).inSingletonScope();
   container.bind<FinalScoringStep>(FinalScoringStep).to(FinalScoringStep).inSingletonScope();
   container.bind<SignalsStep>(SignalsStep).to(SignalsStep).inSingletonScope();
-  container.bind<DecisionMakerStep>(DecisionMakerStep).to(DecisionMakerStep).inSingletonScope();
 
   /* Executor */
   container

@@ -5,6 +5,40 @@ import type { PipelineRepository } from "@/modules/pipeline/persistence/pipeline
 import { listPipelineDefinitions } from "@/modules/pipeline/engine/pipeline.definitions";
 import type { PipelineDefinition } from "@/modules/pipeline/schemas/pipeline.dto";
 
+/* ------------------------------------------------------------------ */
+/*  Sanitization helpers                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Strip internal fields from the stored pipeline definition snapshot
+ * so that retry policies, timeouts, and step configs are never leaked
+ * to API consumers.
+ */
+function sanitizeDefinition(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+
+  const def = raw as Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { defaults: _defaults, ...rest } = def;
+
+  if (Array.isArray(def.steps)) {
+    rest.steps = (def.steps as Record<string, unknown>[]).map((step) => ({
+      type: step.type,
+      id: step.id,
+      displayName: step.displayName,
+    }));
+  }
+
+  return rest;
+}
+
+/** Sanitize a single PipelineRun record in-place and return it. */
+function sanitizeRun<T extends { definition: unknown }>(run: T): T {
+  return { ...run, definition: sanitizeDefinition(run.definition) };
+}
+
+/* ------------------------------------------------------------------ */
+
 @injectable()
 export class PipelineQueryService {
   constructor(
@@ -17,7 +51,8 @@ export class PipelineQueryService {
   /* ---------------------------------------------------------------- */
 
   async getRun(userId: string, pipelineRunId: string) {
-    return this.repo.getRunForUser(userId, pipelineRunId);
+    const run = await this.repo.getRunForUser(userId, pipelineRunId);
+    return sanitizeRun(run);
   }
 
   /* ---------------------------------------------------------------- */
@@ -28,7 +63,7 @@ export class PipelineQueryService {
     userId: string,
     opts?: { limit?: number; offset?: number; status?: string },
   ) {
-    return this.repo.listRunsForUser(userId, {
+    const result = await this.repo.listRunsForUser(userId, {
       limit: opts?.limit,
       offset: opts?.offset,
       status: opts?.status as
@@ -39,6 +74,11 @@ export class PipelineQueryService {
         | "CANCELLED"
         | undefined,
     });
+
+    return {
+      ...result,
+      runs: result.runs.map(sanitizeRun),
+    };
   }
 
   /* ---------------------------------------------------------------- */

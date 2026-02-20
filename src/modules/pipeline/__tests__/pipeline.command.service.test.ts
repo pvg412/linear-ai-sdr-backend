@@ -19,7 +19,6 @@ const KNOWN_STEP_TYPES = new Set([
   "final-scoring",
   "enrichment",
   "signals",
-  "decision-maker",
   "outreach",
 ]);
 
@@ -104,9 +103,8 @@ function makeDbRun(overrides?: Record<string, unknown>) {
       { id: "sr-1", stepId: "scoring-initial", status: "SUCCEEDED" },
       { id: "sr-2", stepId: "enrichment", status: "RUNNING" },
       { id: "sr-3", stepId: "signals", status: "QUEUED" },
-      { id: "sr-4", stepId: "decision-maker", status: "QUEUED" },
-      { id: "sr-5", stepId: "scoring-final", status: "QUEUED" },
-      { id: "sr-6", stepId: "outreach", status: "QUEUED" },
+      { id: "sr-4", stepId: "scoring-final", status: "QUEUED" },
+      { id: "sr-5", stepId: "outreach", status: "QUEUED" },
     ],
     ...overrides,
   };
@@ -280,10 +278,10 @@ describe("PipelineCommandService", () => {
       /* Remaining QUEUED steps cancelled */
       expect(repo.cancelRemainingSteps).toHaveBeenCalledWith("run-123", 0);
 
-      /* Broadcast: 2 SUCCEEDED out of 7 total */
+      /* Broadcast: 2 SUCCEEDED out of 6 total */
       expect(broadcaster.emitRunCancelled).toHaveBeenCalledWith(
         "run-123",
-        { current: 2, total: 7, percent: 29 },
+        { current: 2, total: 6, percent: 33 },
         "enrichment",
       );
     });

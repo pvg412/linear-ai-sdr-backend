@@ -7,7 +7,7 @@ import type { PipelineDefinition } from "@/modules/pipeline/schemas/pipeline.dto
 /**
  * Default full pipeline:
  * lead-generation → scoring (initial) → enrichment → signals
- *   → decision-maker → scoring (final) → outreach
+ *   → scoring (final) → outreach
  */
 export const DEFAULT_COMPANY_PIPELINE: PipelineDefinition = {
   key: "default-company-pipeline",
@@ -15,7 +15,7 @@ export const DEFAULT_COMPANY_PIPELINE: PipelineDefinition = {
   displayName: "Full Lead Pipeline",
   description:
     "End-to-end pipeline: generate leads, score, enrich, detect signals, " +
-    "identify decision-makers, re-score, and prepare outreach.",
+    "re-score, and prepare outreach.",
   steps: [
     {
       type: "lead-generation",
@@ -45,13 +45,6 @@ export const DEFAULT_COMPANY_PIPELINE: PipelineDefinition = {
       id: "signals",
       displayName: "Signals Detection",
       config: {},
-    },
-    {
-      type: "decision-maker",
-      id: "decision-maker",
-      displayName: "Decision Maker Identification",
-      config: {},
-      enabled: false,
     },
     {
       type: "final-scoring",
