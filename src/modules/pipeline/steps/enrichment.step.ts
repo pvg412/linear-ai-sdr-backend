@@ -165,6 +165,56 @@ export class EnrichmentStep implements PipelineStepHandler {
       await this.pollForCompletion(enrichmentIds, companyResearchIds, tools);
     }
 
+    // ── Phase 3: Fetch completed company research results ──────────
+
+    const companyResearchByLead: Record<string, {
+      company: string;
+      items: Array<{
+        date: string | null;
+        summary: string;
+        sourceUrl: string;
+        category: string;
+      }>;
+    }> = {};
+
+    if (companyResearchIds.length > 0) {
+      tools.emitProgress("Collecting company research results...");
+
+      const researchRecords = await this.prisma.companyResearch.findMany({
+        where: { id: { in: companyResearchIds }, status: "COMPLETED" },
+        select: {
+          leadId: true,
+          company: true,
+          items: {
+            select: {
+              date: true,
+              summary: true,
+              sourceUrl: true,
+              category: true,
+            },
+            orderBy: { createdAt: "asc" },
+          },
+        },
+      });
+
+      for (const record of researchRecords) {
+        companyResearchByLead[record.leadId] = {
+          company: record.company,
+          items: record.items.map((item) => ({
+            date: item.date,
+            summary: item.summary,
+            sourceUrl: item.sourceUrl,
+            category: item.category.toLowerCase(),
+          })),
+        };
+      }
+
+      tools.log.info(
+        { leadsWithResearch: Object.keys(companyResearchByLead).length },
+        "Company research results collected",
+      );
+    }
+
     // ── Log summary ──────────────────────────────────────────────────
 
     const allErrors = allResults.flatMap((r) => r.errors);
@@ -186,6 +236,9 @@ export class EnrichmentStep implements PipelineStepHandler {
         enrichmentResults: {
           profileRequests,
           companyResearchRequests,
+          companyResearch: Object.keys(companyResearchByLead).length > 0
+            ? companyResearchByLead
+            : undefined,
           errors: allErrors.length > 0 ? allErrors : undefined,
         },
       },

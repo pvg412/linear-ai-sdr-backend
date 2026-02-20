@@ -254,14 +254,19 @@ export class FinalScoringStep implements PipelineStepHandler {
           scored: scoredLeads.length,
           averageFinalScore,
           errors: errorCount,
-          details: scoredLeads.map((s) => ({
-            leadId: s.leadId,
-            icpFit: s.icpFit,
-            signalStrength: s.signalStrength,
-            finalScore: s.finalScore,
-            icpReasoning: s.icpReasoning,
-            error: s.error,
-          })),
+          details: scoredLeads.map((s) => {
+            const ref = leads.find((l) => l.id === s.leadId);
+            return {
+              leadId: s.leadId,
+              fullName: ref?.fullName ?? null,
+              company: ref?.company ?? null,
+              icpFit: s.icpFit,
+              signalStrength: s.signalStrength,
+              finalScore: s.finalScore,
+              icpReasoning: s.icpReasoning,
+              error: s.error,
+            };
+          }),
         },
       },
       outputSummary: {

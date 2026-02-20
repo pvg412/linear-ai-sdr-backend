@@ -73,7 +73,26 @@ function createMockPrisma(opts?: {
     },
     companyResearch: {
       findMany: vi.fn().mockImplementation(
-        (args: { where: { id: { in: string[] } } }) => {
+        (args: { where: { id: { in: string[] }; status?: string }; select?: unknown }) => {
+          // Phase 3 fetch: return research results with items
+          if (args.where.status === "COMPLETED") {
+            return Promise.resolve(
+              args.where.id.in.map((id) => ({
+                leadId: id.replace("cr-", ""),
+                company: `Company for ${id}`,
+                items: [
+                  {
+                    date: "2026-01-15",
+                    summary: `Recent news about ${id}`,
+                    sourceUrl: `https://example.com/news/${id}`,
+                    category: "NEWS",
+                  },
+                ],
+              })),
+            );
+          }
+
+          // Phase 2 polling: return status progression
           const idx = researchPollCount++;
           return Promise.resolve(
             args.where.id.in.map((id) => {
@@ -153,6 +172,14 @@ describe("EnrichmentStep", () => {
         errors: 0,
       }),
     );
+
+    // Company research results should be in contextPatch
+    const enrichment = result.contextPatch.enrichmentResults as Record<string, unknown>;
+    expect(enrichment.companyResearch).toBeDefined();
+    const research = enrichment.companyResearch as Record<string, { company: string; items: unknown[] }>;
+    expect(research["lead-0"]).toBeDefined();
+    expect(research["lead-0"].items).toHaveLength(1);
+    expect(research["lead-1"]).toBeDefined();
   });
 
   it("empty leads array returns zero summary with no calls", async () => {

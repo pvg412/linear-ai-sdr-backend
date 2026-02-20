@@ -244,13 +244,18 @@ export class ScoringStep implements PipelineStepHandler {
           averageScore,
           threshold: SCORING_THRESHOLD,
           errors: errorCount,
-          details: scoredLeads.map((s) => ({
-            leadId: s.leadId,
-            score: s.score,
-            reasoning: s.reasoning,
-            passed: s.score >= SCORING_THRESHOLD,
-            error: s.error,
-          })),
+          details: scoredLeads.map((s) => {
+            const ref = leads.find((l) => l.id === s.leadId);
+            return {
+              leadId: s.leadId,
+              fullName: ref?.fullName ?? null,
+              company: ref?.company ?? null,
+              score: s.score,
+              reasoning: s.reasoning,
+              passed: s.score >= SCORING_THRESHOLD,
+              error: s.error,
+            };
+          }),
         },
       },
       outputSummary: {
