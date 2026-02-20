@@ -35,6 +35,7 @@ const EnvSchema = z.object({
   PIPELINE_QUEUE_CONCURRENCY: z.coerce.number().default(2),
   PIPELINE_QUEUE_ATTEMPTS: z.coerce.number().default(2),
   PIPELINE_QUEUE_BACKOFF_MS: z.coerce.number().default(5000),
+  PIPELINE_MAX_CONCURRENT_GLOBAL: z.coerce.number().default(1),
   PIPELINE_MAX_CONCURRENT_PER_COMPANY: z.coerce.number().default(3),
 
   AUTH_JWT_SECRET: z
@@ -45,7 +46,7 @@ const EnvSchema = z.object({
     .number()
     .int()
     .positive()
-    .default(60 * 60 * 12),
+    .default(60 * 60 * 48),
   AUTH_ALLOW_DEV_REGISTER: z
     .string()
     .optional()

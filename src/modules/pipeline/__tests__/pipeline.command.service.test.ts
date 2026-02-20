@@ -16,6 +16,7 @@ import type { PipelineStepRegistry } from "@/modules/pipeline/engine/pipeline.re
 const KNOWN_STEP_TYPES = new Set([
   "lead-generation",
   "scoring",
+  "final-scoring",
   "enrichment",
   "signals",
   "decision-maker",
@@ -28,6 +29,7 @@ function createMockRepo() {
     getRunByIdOrThrow: vi.fn(),
     getRunForUser: vi.fn(),
     listRunsForUser: vi.fn(),
+    countRunningGlobal: vi.fn().mockResolvedValue(0),
     countRunningForCompany: vi.fn().mockResolvedValue(0),
     createRun: vi.fn().mockResolvedValue({ id: "run-123" }),
     updateRunStatus: vi.fn().mockResolvedValue({}),
@@ -81,6 +83,9 @@ function createMockPrisma() {
         id: "user-1",
         companyId: "company-1",
       }),
+    },
+    companyServiceCatalog: {
+      count: vi.fn().mockResolvedValue(1),
     },
   };
 }

@@ -13,6 +13,7 @@ import { LeadGenerationStep } from "./steps/lead-generation.step";
 import { EnrichmentStep } from "./steps/enrichment.step";
 import { OutreachStep } from "./steps/outreach.step";
 import { ScoringStep } from "./steps/scoring.step";
+import { FinalScoringStep } from "./steps/final-scoring.step";
 import { SignalsStep } from "./steps/signals.step";
 import { DecisionMakerStep } from "./steps/decision-maker.step";
 
@@ -39,8 +40,9 @@ export function registerPipelineModule(container: Container): void {
       registry.register(ctx.get<EnrichmentStep>(EnrichmentStep));
       registry.register(ctx.get<OutreachStep>(OutreachStep));
 
-      /* Stubs for future modules */
+      /* AI-powered steps */
       registry.register(ctx.get<ScoringStep>(ScoringStep));
+      registry.register(ctx.get<FinalScoringStep>(FinalScoringStep));
       registry.register(ctx.get<SignalsStep>(SignalsStep));
       registry.register(ctx.get<DecisionMakerStep>(DecisionMakerStep));
 
@@ -53,6 +55,7 @@ export function registerPipelineModule(container: Container): void {
   container.bind<EnrichmentStep>(EnrichmentStep).to(EnrichmentStep).inSingletonScope();
   container.bind<OutreachStep>(OutreachStep).to(OutreachStep).inSingletonScope();
   container.bind<ScoringStep>(ScoringStep).to(ScoringStep).inSingletonScope();
+  container.bind<FinalScoringStep>(FinalScoringStep).to(FinalScoringStep).inSingletonScope();
   container.bind<SignalsStep>(SignalsStep).to(SignalsStep).inSingletonScope();
   container.bind<DecisionMakerStep>(DecisionMakerStep).to(DecisionMakerStep).inSingletonScope();
 

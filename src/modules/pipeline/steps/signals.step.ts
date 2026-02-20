@@ -13,7 +13,8 @@ import type {
  * This step will eventually detect buying signals, intent data,
  * job changes, funding events, etc. for each lead/company.
  *
- * Stub: returns an empty signals array.
+ * Current behaviour: passes all leads through unchanged with
+ * a skip message. No signals are detected or scored.
  */
 @injectable()
 export class SignalsStep implements PipelineStepHandler {
@@ -28,23 +29,20 @@ export class SignalsStep implements PipelineStepHandler {
 
     tools.log.info(
       { pipelineRunId: ctx.pipelineRunId, leadCount: leads.length },
-      "Signals step: stub — no signals detection implemented yet",
+      "Signals step skipped — not yet implemented",
     );
 
-    tools.emitProgress(`Detecting signals for ${leads.length} lead(s) (stub)`);
+    tools.emitProgress(
+      `Signals detection not yet available — passing ${leads.length} lead(s) through`,
+    );
 
-    const signals = leads.map((lead) => ({
-      leadId: lead.id,
-      signals: [] as string[],
-      note: "placeholder — signals detection not yet implemented",
-    }));
-
+    // Leads pass through unchanged; no context mutation needed
     return Promise.resolve({
-      contextPatch: { signalsResults: signals },
+      contextPatch: {},
       outputSummary: {
         leadsAnalyzed: leads.length,
         signalsDetected: 0,
-        stub: true,
+        skipped: true,
       },
     });
   }

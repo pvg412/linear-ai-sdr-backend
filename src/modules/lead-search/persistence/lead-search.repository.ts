@@ -1,5 +1,11 @@
 import { injectable } from "inversify";
-import { LeadSearchStatus, Prisma, PrismaClient } from "@prisma/client";
+import {
+  LeadProvider,
+  LeadSearchKind,
+  LeadSearchStatus,
+  Prisma,
+  PrismaClient,
+} from "@prisma/client";
 
 import { getPrisma } from "@/infra/prisma";
 
@@ -17,6 +23,29 @@ export type LeadSearchSelectorRow = {
 @injectable()
 export class LeadSearchRepository {
   private readonly prisma: PrismaClient = getPrisma();
+
+  async createSearch(input: {
+    createdById: string;
+    provider: LeadProvider;
+    kind: LeadSearchKind;
+    query: Prisma.InputJsonValue;
+    limit: number;
+    prompt?: string;
+    threadId?: string;
+  }) {
+    return this.prisma.leadSearch.create({
+      data: {
+        createdById: input.createdById,
+        provider: input.provider,
+        kind: input.kind,
+        query: input.query,
+        limit: input.limit,
+        prompt: input.prompt ?? null,
+        threadId: input.threadId ?? null,
+        status: LeadSearchStatus.PENDING,
+      },
+    });
+  }
 
   getById(id: string) {
     return this.prisma.leadSearch.findUnique({

@@ -101,3 +101,62 @@ export const LEAD_SEARCH_CONSTANTS = {
 export const TRUNCATION_LIMITS = {
   AXIOS_ERROR_DATA: 2_000,
 } as const;
+
+/**
+ * Lead scoring pipeline step constants
+ */
+export const SCORING_CONSTANTS = {
+  /** Lead passes scoring if score >= this value (0-100 scale) */
+  SCORING_THRESHOLD: 60,
+  /** Number of leads processed in parallel per batch */
+  BATCH_SIZE: 10,
+} as const;
+
+/**
+ * Lead enrichment pipeline step constants
+ *
+ * Batch size is conservative because each lead triggers two sequential
+ * fire-and-forget operations (profile enrichment + company research),
+ * each involving 3-5 DB queries + a Redis enqueue.
+ */
+export const ENRICHMENT_CONSTANTS = {
+  /** Leads processed in parallel per batch */
+  BATCH_SIZE: 5,
+  /** Interval between DB polls when waiting for enrichment completion (ms) */
+  POLL_INTERVAL_MS: 10_000,
+} as const;
+
+/**
+ * Final lead scoring pipeline step constants
+ *
+ * Final scoring combines ICP fit (from AI via gRPC) with signal strength
+ * into a weighted composite score. Signal strength is currently a stub
+ * value until the signals step is implemented.
+ */
+export const FINAL_SCORING_CONSTANTS = {
+  /** Number of leads processed in parallel per batch */
+  BATCH_SIZE: 10,
+  /** Weight of ICP fit in composite score (0-1) */
+  ICP_FIT_WEIGHT: 0.7,
+  /** Weight of signal strength in composite score (0-1) */
+  SIGNAL_STRENGTH_WEIGHT: 0.3,
+  /** Stub value for signal strength until signals step is implemented */
+  SIGNAL_STRENGTH_STUB: 50,
+} as const;
+
+/**
+ * Outreach pipeline step constants
+ *
+ * Generates outreach messages for each lead via a two-step AI flow:
+ *   1. ParseOutreachContext (unary gRPC) — AI determines channel, stage, tactic
+ *   2. ChatStream (streaming gRPC)       — AI generates message variants
+ *
+ * Batch size is conservative because each lead triggers two sequential
+ * gRPC calls (parse + stream), each consuming AI resources.
+ */
+export const OUTREACH_CONSTANTS = {
+  /** Number of leads processed in parallel per batch */
+  BATCH_SIZE: 5,
+  /** Per-call timeout for the gRPC chatStream (ms) */
+  STREAM_TIMEOUT_MS: 60_000,
+} as const;

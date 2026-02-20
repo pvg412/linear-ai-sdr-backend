@@ -22,7 +22,7 @@ export const DEFAULT_COMPANY_PIPELINE: PipelineDefinition = {
       id: "lead-generation",
       displayName: "Lead Generation",
       config: {},
-      timeoutMs: 5 * 60 * 1000, // 5 min
+      timeoutMs: 15 * 60 * 1000, // 15 min (APIFY runs ~2-5 min for 100 leads)
     },
     {
       type: "scoring",
@@ -51,14 +51,14 @@ export const DEFAULT_COMPANY_PIPELINE: PipelineDefinition = {
       id: "decision-maker",
       displayName: "Decision Maker Identification",
       config: {},
+      enabled: false,
     },
     {
-      type: "scoring",
+      type: "final-scoring",
       id: "scoring-final",
       displayName: "Final Scoring",
       config: {
         model: "default",
-        includeSignals: true,
         _stepId: "scoring-final",
       },
     },
@@ -66,7 +66,7 @@ export const DEFAULT_COMPANY_PIPELINE: PipelineDefinition = {
       type: "outreach",
       id: "outreach",
       displayName: "Outreach",
-      config: { channel: "email" },
+      config: { channel: "linkedin" },
     },
   ],
   defaults: {

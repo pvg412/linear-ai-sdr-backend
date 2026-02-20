@@ -10,13 +10,15 @@ import type { ServiceCatalogRepository } from "@/modules/service-catalog/persist
 
 import { CompanySize as ProtoCompanySize } from "@/generated/aisdr/v1/ai_sdr";
 import type {
+  CompanyResearchItemProto,
   LeadProfileProto,
-  ScoreLeadResponse,
+  ScoreLeadFinalResponse,
   ServiceCatalogProto,
   ServiceCatalogSubServiceProto,
 } from "@/generated/aisdr/v1/ai_sdr";
 
-import { SCORING_CONSTANTS } from "@/config/constants";
+import { mapCategoryToProto } from "@/modules/company-research/utils/category-mapping";
+import { FINAL_SCORING_CONSTANTS } from "@/config/constants";
 
 import type { PipelineStepHandler } from "./step.interface";
 import type {
@@ -30,24 +32,29 @@ import type {
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const { SCORING_THRESHOLD, BATCH_SIZE } = SCORING_CONSTANTS;
+const {
+  BATCH_SIZE,
+  ICP_FIT_WEIGHT,
+  SIGNAL_STRENGTH_WEIGHT,
+  SIGNAL_STRENGTH_STUB,
+} = FINAL_SCORING_CONSTANTS;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-interface ScoredLead {
+interface FinalScoredLead {
   leadId: string;
-  score: number;
-  reasoning: string;
+  icpFit: number;
+  icpReasoning: string;
+  signalStrength: number;
+  finalScore: number;
   error?: string;
 }
 
-interface ScoringProgress {
+interface FinalScoringProgress {
   completed: number;
   total: number;
-  passed: number;
-  rejected: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -55,19 +62,25 @@ interface ScoringProgress {
 /* ------------------------------------------------------------------ */
 
 /**
- * Scoring step — AI-powered lead scoring.
+ * Final scoring step — AI-powered lead scoring with enrichment context.
  *
- * Evaluates each lead against the company's Service Catalogs via gRPC
- * `ScoreLead` method. Leads with score >= SCORING_THRESHOLD pass
- * through; the rest are filtered out.
+ * Unlike the initial scoring step, this step sends enriched lead
+ * profiles AND company research data to the AI via the `ScoreLeadFinal`
+ * gRPC method for a higher-fidelity ICP fit evaluation.
  *
- * Processing is batched for parallelism: each batch of BATCH_SIZE
- * leads is scored via `Promise.all`, with progress emitted after
- * every batch completes.
+ * The composite final score is:
+ *   finalScore = round(icpFit * ICP_FIT_WEIGHT + signalStrength * SIGNAL_STRENGTH_WEIGHT)
+ *
+ * Signal strength is currently a stub value (SIGNAL_STRENGTH_STUB)
+ * until the signals step is fully implemented.
+ *
+ * All leads pass through (no threshold filtering) — the purpose of
+ * final scoring is ranking, not elimination. Leads are sorted by
+ * finalScore DESC in the output.
  */
 @injectable()
-export class ScoringStep implements PipelineStepHandler {
-  readonly type = "scoring";
+export class FinalScoringStep implements PipelineStepHandler {
+  readonly type = "final-scoring";
 
   private readonly prisma: PrismaClient = getPrisma();
 
@@ -84,14 +97,13 @@ export class ScoringStep implements PipelineStepHandler {
     tools: PipelineTools,
   ): Promise<PipelineStepResult> {
     const leads = ctx.data.leads ?? [];
-    const stepInstanceId = config._stepId as string | undefined;
-    const contextKey = stepInstanceId ?? "scoringResults";
+    const stepInstanceId = (config._stepId as string | undefined) ?? "scoring-final";
 
     if (leads.length === 0) {
       tools.emitProgress("No leads to score");
       return {
-        contextPatch: { [contextKey]: { scored: 0, passed: 0, rejected: 0 } },
-        outputSummary: { total: 0, passedCount: 0, rejectedCount: 0, averageScore: 0 },
+        contextPatch: { [stepInstanceId]: { scored: 0 } },
+        outputSummary: { total: 0, averageFinalScore: 0 },
       };
     }
 
@@ -107,7 +119,7 @@ export class ScoringStep implements PipelineStepHandler {
 
     tools.log.info(
       { requested: leadIds.length, found: fullLeads.length },
-      "Lead profiles loaded from DB",
+      "Lead profiles loaded for final scoring",
     );
 
     // ── Step 2: Fetch service catalogs ───────────────────────────────
@@ -133,84 +145,88 @@ export class ScoringStep implements PipelineStepHandler {
 
     tools.log.info(
       { companyId: ctx.companyId, catalogCount: serviceCatalogsProto.length },
-      "Service catalogs loaded",
+      "Service catalogs loaded for final scoring",
     );
 
-    if (await tools.checkCancelled()) return cancelledResult(contextKey);
+    // ── Step 3: Fetch company research data ──────────────────────────
+    tools.emitProgress("Loading company research data...");
 
-    // ── Step 3: Batch-parallel scoring ───────────────────────────────
-    tools.emitProgress("Scoring leads via AI...", { total: leads.length });
+    const companyResearchByLead = await this.loadCompanyResearch(leadIds);
 
-    const scoredLeads: ScoredLead[] = [];
-    let passedCount = 0;
-    let rejectedCount = 0;
+    tools.log.info(
+      { leadsWithResearch: companyResearchByLead.size },
+      "Company research data loaded",
+    );
+
+    if (await tools.checkCancelled()) return cancelledResult(stepInstanceId);
+
+    // ── Step 4: Batch-parallel final scoring ─────────────────────────
+    tools.emitProgress("Final scoring leads via AI...", { total: leads.length });
+
+    const scoredLeads: FinalScoredLead[] = [];
 
     const batches = createBatches(leads, BATCH_SIZE);
 
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
       if (await tools.checkCancelled()) {
-        // Save whatever we have so far before returning
         if (scoredLeads.length > 0) {
           await this.persistScores(scoredLeads, ctx.pipelineRunId, stepInstanceId);
         }
-        return cancelledResult(contextKey);
+        return cancelledResult(stepInstanceId);
       }
 
       const batch = batches[batchIdx];
 
       const batchResults = await Promise.all(
-        batch.map((leadRef) => this.scoreOneLead(leadRef, leadMap, serviceCatalogsProto)),
+        batch.map((leadRef) =>
+          this.scoreOneLead(
+            leadRef,
+            leadMap,
+            serviceCatalogsProto,
+            companyResearchByLead.get(leadRef.id) ?? [],
+          ),
+        ),
       );
 
-      for (const result of batchResults) {
-        scoredLeads.push(result);
-        if (result.score >= SCORING_THRESHOLD) {
-          passedCount++;
-        } else {
-          rejectedCount++;
-        }
-      }
+      scoredLeads.push(...batchResults);
 
-      const progress: ScoringProgress = {
+      const progress: FinalScoringProgress = {
         completed: scoredLeads.length,
         total: leads.length,
-        passed: passedCount,
-        rejected: rejectedCount,
       };
 
       tools.emitProgress(
-        `Scored ${progress.completed}/${progress.total} leads (${progress.passed} passed, ${progress.rejected} rejected)`,
+        `Final scored ${progress.completed}/${progress.total} leads`,
         progress,
       );
     }
 
-    // ── Step 4: Persist all scores to DB ─────────────────────────────
-    tools.emitProgress("Saving scores to database...");
+    // ── Step 5: Persist all scores to DB ─────────────────────────────
+    tools.emitProgress("Saving final scores to database...");
 
     await this.persistScores(scoredLeads, ctx.pipelineRunId, stepInstanceId);
 
-    // ── Step 5: Filter & sort ────────────────────────────────────────
-    const passed = scoredLeads
-      .filter((s) => s.score >= SCORING_THRESHOLD)
-      .sort((a, b) => b.score - a.score);
+    // ── Step 6: Sort leads by finalScore DESC (no filtering) ─────────
+    const sorted = [...scoredLeads].sort((a, b) => b.finalScore - a.finalScore);
 
-    // Build filtered lead references for downstream steps
-    const passedLeadRefs: LeadReference[] = passed.map((s) => {
+    const sortedLeadRefs: LeadReference[] = sorted.map((s) => {
       const original = leads.find((l) => l.id === s.leadId);
       return {
         id: s.leadId,
         fullName: original?.fullName ?? null,
         email: original?.email ?? null,
         company: original?.company ?? null,
-        score: s.score,
-        scoringReasoning: s.reasoning,
+        finalScore: s.finalScore,
+        icpFit: s.icpFit,
+        signalStrength: s.signalStrength,
+        icpReasoning: s.icpReasoning,
       };
     });
 
-    // ── Step 6: Log summary ──────────────────────────────────────────
-    const totalScore = scoredLeads.reduce((sum, s) => sum + s.score, 0);
-    const averageScore = scoredLeads.length > 0
-      ? Math.round(totalScore / scoredLeads.length)
+    // ── Step 7: Log summary ──────────────────────────────────────────
+    const totalFinalScore = scoredLeads.reduce((sum, s) => sum + s.finalScore, 0);
+    const averageFinalScore = scoredLeads.length > 0
+      ? Math.round(totalFinalScore / scoredLeads.length)
       : 0;
 
     const errorCount = scoredLeads.filter((s) => s.error).length;
@@ -218,47 +234,39 @@ export class ScoringStep implements PipelineStepHandler {
     tools.log.info(
       {
         total: scoredLeads.length,
-        passed: passedCount,
-        rejected: rejectedCount,
-        averageScore,
-        threshold: SCORING_THRESHOLD,
+        averageFinalScore,
         errors: errorCount,
         stepInstanceId,
       },
-      "Scoring step completed",
+      "Final scoring step completed",
     );
 
     tools.emitProgress(
-      `Scoring complete: ${passedCount} passed, ${rejectedCount} rejected (avg score: ${averageScore})`,
-      { completed: scoredLeads.length, total: leads.length, passed: passedCount, rejected: rejectedCount },
+      `Final scoring complete: ${scoredLeads.length} leads scored (avg: ${averageFinalScore})`,
+      { completed: scoredLeads.length, total: leads.length },
     );
 
-    // ── Step 7: Return result ────────────────────────────────────────
+    // ── Step 8: Return result ────────────────────────────────────────
     return {
       contextPatch: {
-        leads: passedLeadRefs,
-        [contextKey]: {
+        leads: sortedLeadRefs,
+        [stepInstanceId]: {
           scored: scoredLeads.length,
-          passed: passedCount,
-          rejected: rejectedCount,
-          averageScore,
-          threshold: SCORING_THRESHOLD,
+          averageFinalScore,
           errors: errorCount,
           details: scoredLeads.map((s) => ({
             leadId: s.leadId,
-            score: s.score,
-            reasoning: s.reasoning,
-            passed: s.score >= SCORING_THRESHOLD,
+            icpFit: s.icpFit,
+            signalStrength: s.signalStrength,
+            finalScore: s.finalScore,
+            icpReasoning: s.icpReasoning,
             error: s.error,
           })),
         },
       },
       outputSummary: {
         total: scoredLeads.length,
-        passedCount,
-        rejectedCount,
-        averageScore,
-        threshold: SCORING_THRESHOLD,
+        averageFinalScore,
         errors: errorCount,
       },
     };
@@ -269,58 +277,116 @@ export class ScoringStep implements PipelineStepHandler {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Score a single lead via gRPC. On error, returns score=0 with the
-   * error message as reasoning — the lead will be rejected but still
-   * persisted for analytics.
+   * Score a single lead via gRPC ScoreLeadFinal, then compute the
+   * composite finalScore from icpFit + signalStrength.
+   *
+   * On error, returns icpFit=0 with the error message as reasoning —
+   * the lead still passes through (no filtering) but will rank last.
    */
   private async scoreOneLead(
     leadRef: LeadReference,
     leadMap: Map<string, Lead>,
     serviceCatalogs: ServiceCatalogProto[],
-  ): Promise<ScoredLead> {
+    companyResearchItems: CompanyResearchItemProto[],
+  ): Promise<FinalScoredLead> {
     const fullLead = leadMap.get(leadRef.id);
     const profile = buildLeadProfile(leadRef, fullLead);
 
+    // TODO: Replace with real signal strength once signals.step.ts is implemented
+    const signalStrength = SIGNAL_STRENGTH_STUB;
+
     try {
-      const resp: ScoreLeadResponse = await this.aiGrpcClient.scoreLead({
+      const resp: ScoreLeadFinalResponse = await this.aiGrpcClient.scoreLeadFinal({
         requestId: "",
         lead: profile,
         serviceCatalogs,
+        companyResearchItems,
       });
+
+      const icpFit = clampScore(resp.icpFit);
+      const finalScore = computeFinalScore(icpFit, signalStrength);
 
       return {
         leadId: leadRef.id,
-        score: clampScore(resp.score),
-        reasoning: resp.reasoning ?? "",
+        icpFit,
+        icpReasoning: resp.icpReasoning ?? "",
+        signalStrength,
+        finalScore,
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const finalScore = computeFinalScore(0, signalStrength);
+
       return {
         leadId: leadRef.id,
-        score: 0,
-        reasoning: `Scoring failed: ${msg}`,
+        icpFit: 0,
+        icpReasoning: `Final scoring failed: ${msg}`,
+        signalStrength,
+        finalScore,
         error: msg,
       };
     }
   }
 
   /**
-   * Persist all scored leads to the LeadScore table.
+   * Load completed company research items for the given lead IDs.
+   * Returns a map of leadId -> CompanyResearchItemProto[].
+   */
+  private async loadCompanyResearch(
+    leadIds: string[],
+  ): Promise<Map<string, CompanyResearchItemProto[]>> {
+    const researches = await this.prisma.companyResearch.findMany({
+      where: {
+        leadId: { in: leadIds },
+        status: "COMPLETED",
+      },
+      include: { items: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const result = new Map<string, CompanyResearchItemProto[]>();
+
+    for (const research of researches) {
+      // Use the most recent completed research per lead
+      if (result.has(research.leadId)) continue;
+
+      const items: CompanyResearchItemProto[] = research.items.map((item, idx) => ({
+        index: idx + 1,
+        date: item.date ?? "",
+        summary: item.summary,
+        sourceUrl: item.sourceUrl,
+        category: mapCategoryToProto(item.category),
+        sourceName: item.source ?? "",
+      }));
+
+      result.set(research.leadId, items);
+    }
+
+    return result;
+  }
+
+  /**
+   * Persist all final-scored leads to the LeadScore table.
+   * Uses the new icpFit, signalStrength, finalScore columns.
+   * The `score` column stores the finalScore for backward compatibility.
    */
   private async persistScores(
-    scored: ScoredLead[],
+    scored: FinalScoredLead[],
     pipelineRunId: string,
-    stepInstanceId: string | undefined,
+    stepInstanceId: string,
   ): Promise<void> {
     if (scored.length === 0) return;
 
     await this.prisma.leadScore.createMany({
       data: scored.map((s) => ({
         leadId: s.leadId,
-        score: s.score,
-        reasoning: s.reasoning || null,
+        score: s.finalScore,
+        reasoning: s.icpReasoning || null,
         pipelineRunId,
-        stepInstanceId: stepInstanceId ?? null,
+        stepInstanceId,
+        icpFit: s.icpFit,
+        signalStrength: s.signalStrength,
+        finalScore: s.finalScore,
       })),
       skipDuplicates: true,
     });
@@ -331,13 +397,13 @@ export class ScoringStep implements PipelineStepHandler {
 /*  Pure helpers                                                       */
 /* ------------------------------------------------------------------ */
 
-function cancelledResult(contextKey: string): PipelineStepResult {
+function cancelledResult(stepInstanceId: string): PipelineStepResult {
   return {
     contextPatch: {
       leads: [],
-      [contextKey]: { scored: 0, passed: 0, rejected: 0, cancelled: true },
+      [stepInstanceId]: { scored: 0, cancelled: true },
     },
-    outputSummary: { total: 0, passedCount: 0, rejectedCount: 0, cancelled: true },
+    outputSummary: { total: 0, averageFinalScore: 0, cancelled: true },
   };
 }
 
@@ -353,6 +419,11 @@ function createBatches<T>(items: T[], batchSize: number): T[][] {
 /** Clamp score to 0-100 range. */
 function clampScore(score: number): number {
   return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+/** Compute the weighted composite final score. */
+function computeFinalScore(icpFit: number, signalStrength: number): number {
+  return Math.round(icpFit * ICP_FIT_WEIGHT + signalStrength * SIGNAL_STRENGTH_WEIGHT);
 }
 
 /**

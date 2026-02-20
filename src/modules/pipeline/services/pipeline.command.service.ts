@@ -83,7 +83,30 @@ export class PipelineCommandService {
     }
     const companyId = user.companyId ?? user.id;
 
-    /* 4. Check concurrency limit per company */
+    /* 4. Ensure company has at least one service catalog */
+    const catalogCount = await this.prisma.companyServiceCatalog.count({
+      where: { companyId },
+    });
+    if (catalogCount === 0) {
+      throw new UserFacingError({
+        code: "BAD_REQUEST",
+        userMessage:
+          "Cannot start pipeline: no service catalogs configured for the company. Please add at least one service catalog before running a pipeline.",
+      });
+    }
+
+    /* 5. Check global concurrency limit */
+    const globalRunning = await this.repo.countRunningGlobal();
+    const maxGlobal = env.PIPELINE_MAX_CONCURRENT_GLOBAL;
+    if (globalRunning >= maxGlobal) {
+      throw new UserFacingError({
+        code: "TOO_MANY_REQUESTS",
+        userMessage:
+          "The system is currently busy processing another pipeline. Please try again later.",
+      });
+    }
+
+    /* 6. Check concurrency limit per company */
     const runningCount = await this.repo.countRunningForCompany(companyId);
     const maxConcurrent = env.PIPELINE_MAX_CONCURRENT_PER_COMPANY;
     if (runningCount >= maxConcurrent) {
@@ -93,7 +116,7 @@ export class PipelineCommandService {
       });
     }
 
-    /* 5. Create PipelineRun + PipelineStepRun records */
+    /* 7. Create PipelineRun + PipelineStepRun records */
     const run = await this.repo.createRun({
       pipelineKey: definition.key,
       pipelineVersion: definition.version,
@@ -109,7 +132,7 @@ export class PipelineCommandService {
       })),
     });
 
-    /* 6. Enqueue BullMQ job */
+    /* 8. Enqueue BullMQ job */
     await this.queue.add(
       "pipeline.execute",
       { pipelineRunId: run.id },

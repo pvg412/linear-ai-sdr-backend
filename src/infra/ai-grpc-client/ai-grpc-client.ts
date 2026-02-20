@@ -10,9 +10,14 @@ import type {
   DeleteLeadDocumentsResponse,
   ParseLeadSearchPromptRequest,
   ParseLeadSearchPromptResponse,
+  ParseLeadSearchPromptWithServiceCatalogsRequest,
   ParseOutreachContextRequest,
   ParseOutreachContextResponse,
   PingResponse,
+  ScoreLeadFinalRequest,
+  ScoreLeadFinalResponse,
+  ScoreLeadRequest,
+  ScoreLeadResponse,
   UpsertCompanyResearchRequest,
   UpsertCompanyResearchResponse,
   UpsertLeadDocumentsRequest,
@@ -38,6 +43,8 @@ export type UnaryTimeouts = Partial<{
   upsertMs: number;
   deleteMs: number;
   companyResearchMs: number;
+  scoreLeadMs: number;
+  scoreLeadFinalMs: number;
 }>;
 
 export interface AiGrpcClientOptions {
@@ -113,6 +120,8 @@ export class AiGrpcClient {
       upsertMs: opts.timeouts?.upsertMs ?? 60_000,
       deleteMs: opts.timeouts?.deleteMs ?? 60_000,
       companyResearchMs: opts.timeouts?.companyResearchMs ?? 60_000,
+      scoreLeadMs: opts.timeouts?.scoreLeadMs ?? 30_000,
+      scoreLeadFinalMs: opts.timeouts?.scoreLeadFinalMs ?? 30_000,
     };
 
     const insecure = opts.insecure ?? true;
@@ -224,6 +233,20 @@ export class AiGrpcClient {
     );
   }
 
+  parseLeadSearchPromptWithServiceCatalogs(
+    req: ParseLeadSearchPromptWithServiceCatalogsRequest,
+  ): Promise<ParseLeadSearchPromptResponse> {
+    const base = req.base ? withRequestId(req.base) : withRequestId({} as ParseLeadSearchPromptRequest);
+    const normalized = { ...req, base };
+    return this.unary(
+      "parseLeadSearchPromptWithServiceCatalogs",
+      (r, md, opt, cb) =>
+        this.client.parseLeadSearchPromptWithServiceCatalogs(r, md, opt, cb),
+      normalized,
+      this.timeouts.parseMs,
+    );
+  }
+
   parseOutreachContext(
     req: ParseOutreachContextRequest,
   ): Promise<ParseOutreachContextResponse> {
@@ -287,6 +310,26 @@ export class AiGrpcClient {
       (r, md, opt, cb) => this.client.upsertCompanyResearch(r, md, opt, cb),
       normalized,
       this.timeouts.companyResearchMs,
+    );
+  }
+
+  scoreLead(req: ScoreLeadRequest): Promise<ScoreLeadResponse> {
+    const normalized = withRequestId(req);
+    return this.unary(
+      "scoreLead",
+      (r, md, opt, cb) => this.client.scoreLead(r, md, opt, cb),
+      normalized,
+      this.timeouts.scoreLeadMs,
+    );
+  }
+
+  scoreLeadFinal(req: ScoreLeadFinalRequest): Promise<ScoreLeadFinalResponse> {
+    const normalized = withRequestId(req);
+    return this.unary(
+      "scoreLeadFinal",
+      (r, md, opt, cb) => this.client.scoreLeadFinal(r, md, opt, cb),
+      normalized,
+      this.timeouts.scoreLeadFinalMs,
     );
   }
 

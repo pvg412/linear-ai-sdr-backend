@@ -302,17 +302,16 @@ describe("PipelineExecutor", () => {
     const executor = buildExecutor({ repo, registry, broadcaster });
     await executor.executePipeline("run-1");
 
-    /* Step B was skipped */
+    /* Step B was silently skipped — no broadcast, no DB status update */
     expect(handlerA.run).toHaveBeenCalledTimes(1);
     expect(handlerB.run).not.toHaveBeenCalled();
     expect(handlerC.run).toHaveBeenCalledTimes(1);
 
-    expect(broadcaster.emitStepSkipped).toHaveBeenCalledTimes(1);
-    expect(repo.updateStepStatus).toHaveBeenCalledWith(
-      "run-1",
-      "step-b",
-      "SKIPPED",
-    );
+    expect(broadcaster.emitStepSkipped).not.toHaveBeenCalled();
+    /* Disabled steps are invisible: not in emitRunStarted step list */
+    const startedCall = (broadcaster.emitRunStarted as ReturnType<typeof vi.fn>).mock.calls[0];
+    const emittedSteps = startedCall[2] as Array<{ stepId: string }>;
+    expect(emittedSteps.map((s) => s.stepId)).toEqual(["step-a", "step-c"]);
   });
 
   it("stops when cancellation flag is set", async () => {

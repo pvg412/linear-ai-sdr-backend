@@ -350,6 +350,7 @@ model Lead {
 
   conversationMessages LeadConversationMessage[] @relation("ConversationLead")
   chatMessages         ChatMessage[]
+  scores               LeadScore[]
 
   @@unique([email])
   @@unique([linkedinUrl])
@@ -808,4 +809,29 @@ model PipelineStepRun {
   @@unique([pipelineRunId, stepId])
   @@index([pipelineRunId, stepIndex])
   @@index([status])
+}
+
+// ── Lead Scoring ─────────────────────────────────────────────────────
+
+model LeadScore {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  pipelineRunId  String?
+  stepInstanceId String? // e.g. "scoring-initial", "scoring-final"
+
+  score     Int     // 0-100: ICP fit score from AI
+  reasoning String? // Brief AI justification
+
+  // Final scoring components (populated by scoring-final step)
+  icpFit         Int? // 0-100: ICP fit component from AI
+  signalStrength Int? // 0-100: signal strength component
+  finalScore     Int? // 0-100: weighted composite score
+
+  @@index([leadId])
+  @@index([pipelineRunId])
+  @@index([pipelineRunId, stepInstanceId])
 }

@@ -120,6 +120,14 @@ export class PipelineRepository {
     return { runs, total };
   }
 
+  async countRunningGlobal(): Promise<number> {
+    return this.prisma.pipelineRun.count({
+      where: {
+        status: { in: ["PENDING", "RUNNING"] },
+      },
+    });
+  }
+
   async countRunningForCompany(companyId: string): Promise<number> {
     return this.prisma.pipelineRun.count({
       where: {

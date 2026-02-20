@@ -80,7 +80,8 @@ export class PipelineExecutor {
 
     const definition = run.definition as unknown as PipelineDefinition;
     const steps = definition.steps;
-    const totalSteps = steps.length;
+    const enabledSteps = steps.filter((s) => s.enabled !== false);
+    const totalSteps = enabledSteps.length;
 
     /* 2. Mark run as RUNNING ---------------------------------------- */
     await this.repo.updateRunStatus(pipelineRunId, "RUNNING", {
@@ -90,7 +91,7 @@ export class PipelineExecutor {
     this.broadcaster.emitRunStarted(
       pipelineRunId,
       definition.key,
-      steps.map((s) => ({
+      enabledSteps.map((s) => ({
         stepId: s.id,
         displayName: s.displayName,
         stepType: s.type,
@@ -135,16 +136,10 @@ export class PipelineExecutor {
       }
 
       /* 4b. Check if step is disabled ------------------------------- */
+      /*    Disabled steps are completely transparent: no DB status   */
+      /*    update, no WS events, not counted in progress.           */
       if (stepConfig.enabled === false) {
-        lg.info({ pipelineRunId, stepId: stepConfig.id }, "Step disabled; skipping");
-        await this.repo.updateStepStatus(pipelineRunId, stepConfig.id, "SKIPPED");
-        this.broadcaster.emitStepSkipped(
-          pipelineRunId,
-          stepConfig.id,
-          "Step is disabled",
-          buildProgress(completedSteps, totalSteps),
-        );
-        completedSteps++;
+        lg.info({ pipelineRunId, stepId: stepConfig.id }, "Step disabled; skipping silently");
         continue;
       }
 

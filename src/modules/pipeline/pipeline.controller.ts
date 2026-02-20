@@ -1,7 +1,9 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import { UserRole } from "@prisma/client";
 
 import { container } from "@/container";
-import { requireRequestUserId } from "@/infra/auth/requestUser";
+import { requireRequestUser, requireRequestUserId } from "@/infra/auth/requestUser";
+import { UserFacingError } from "@/infra/userFacingError";
 import { PIPELINE_TYPES } from "./pipeline.types";
 import type { PipelineCommandService } from "./services/pipeline.command.service";
 import type { PipelineQueryService } from "./services/pipeline.query.service";
@@ -15,6 +17,26 @@ import {
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
+
+function requirePipelineUser(req: FastifyRequest): { userId: string } {
+  const user = requireRequestUser(req);
+
+  if (user.role !== UserRole.COMPANY && user.role !== UserRole.SALE_MANAGER) {
+    throw new UserFacingError({
+      code: "FORBIDDEN",
+      userMessage: "Only company and sale manager accounts can run pipelines",
+    });
+  }
+
+  if (user.role === UserRole.SALE_MANAGER && !user.companyId) {
+    throw new UserFacingError({
+      code: "FORBIDDEN",
+      userMessage: "Sale manager must be linked to a company to run pipelines",
+    });
+  }
+
+  return { userId: user.id };
+}
 
 type RealtimeSocket = {
   readonly readyState: number;
@@ -56,7 +78,7 @@ export function registerPipelineRoutes(app: FastifyInstance): void {
   /* ---------------------------------------------------------------- */
 
   app.post("/pipelines/runs", async (req, reply) => {
-    const userId = requireRequestUserId(req);
+    const { userId } = requirePipelineUser(req);
     const body = StartPipelineBodySchema.parse(req.body);
 
     const result = await commandService.startPipeline(
