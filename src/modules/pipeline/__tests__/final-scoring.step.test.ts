@@ -5,7 +5,7 @@ import { FinalScoringStep } from "@/modules/pipeline/steps/final-scoring.step";
 import type { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 import type { ServiceCatalogRepository } from "@/modules/service-catalog/persistence/service-catalog.repository";
 
-import { makeCtx, makeTools, makeLeadRefs } from "./step-test.helpers";
+import { makeCtx, makeTools } from "./step-test.helpers";
 
 /* ------------------------------------------------------------------ */
 /*  Constants (mirrored from FINAL_SCORING_CONSTANTS for assertions)    */
@@ -112,12 +112,27 @@ function makeCompanyResearch(
   };
 }
 
+function makeRunLeads(count: number, leads?: ReturnType<typeof makeDbLead>[]) {
+  const dbLeads = leads ?? Array.from({ length: count }, (_, i) => makeDbLead(i));
+  return dbLeads.map((l) => ({
+    id: `prl-${l.id}`,
+    createdAt: new Date(),
+    pipelineRunId: "run-1",
+    leadId: l.id,
+    lead: l,
+    excluded: false,
+    excludedByStepId: null,
+  }));
+}
+
 function createMockPrisma(opts?: {
+  leadCount?: number;
   leads?: ReturnType<typeof makeDbLead>[];
   companyResearches?: ReturnType<typeof makeCompanyResearch>[];
 }) {
-  const defaultLeads = Array.from({ length: 30 }, (_, i) => makeDbLead(i));
-  const leads = opts?.leads ?? defaultLeads;
+  const leads = opts?.leads
+    ?? Array.from({ length: opts?.leadCount ?? 30 }, (_, i) => makeDbLead(i));
+  const runLeads = makeRunLeads(leads.length, leads);
   const companyResearches = opts?.companyResearches ?? [];
 
   return {
@@ -128,6 +143,9 @@ function createMockPrisma(opts?: {
           return Promise.resolve(leads.filter((l) => ids.has(l.id)));
         },
       ),
+    },
+    pipelineRunLead: {
+      findMany: vi.fn().mockResolvedValue(runLeads),
     },
     companyResearch: {
       findMany: vi.fn().mockResolvedValue(companyResearches),
@@ -181,17 +199,16 @@ describe("FinalScoringStep", () => {
 
     const { step, aiGrpcClient, mockPrisma } = buildStep({
       aiGrpcClient: createMockAiGrpcClient(icpOverrides),
-      prisma: createMockPrisma({ companyResearches }),
+      prisma: createMockPrisma({ leadCount: 3, companyResearches }),
     });
 
-    const leads = makeLeadRefs(3);
-    const ctx = makeCtx({ data: { leads } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, { _stepId: "scoring-final" }, tools);
 
     // All 3 leads pass through (no filtering)
-    expect(result.contextPatch.leads).toHaveLength(3);
+    expect(result.outputSummary.total).toBe(3);
 
     // gRPC called for each lead
     expect(aiGrpcClient.scoreLeadFinal).toHaveBeenCalledTimes(3);
@@ -219,8 +236,10 @@ describe("FinalScoringStep", () => {
   });
 
   it("empty leads returns zero summary with no calls", async () => {
-    const { step, aiGrpcClient, mockPrisma } = buildStep();
-    const ctx = makeCtx({ data: { leads: [] } });
+    const { step, aiGrpcClient, mockPrisma } = buildStep({
+      prisma: createMockPrisma({ leadCount: 0 }),
+    });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, { _stepId: "scoring-final" }, tools);
@@ -233,11 +252,10 @@ describe("FinalScoringStep", () => {
   it("lead with no company research sends empty items to gRPC", async () => {
     // No company research records at all
     const { step, aiGrpcClient } = buildStep({
-      prisma: createMockPrisma({ companyResearches: [] }),
+      prisma: createMockPrisma({ leadCount: 1, companyResearches: [] }),
     });
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-final" }, tools);
@@ -262,11 +280,10 @@ describe("FinalScoringStep", () => {
     newerResearch.id = "cr-lead-0-new";
 
     const { step, aiGrpcClient } = buildStep({
-      prisma: createMockPrisma({ companyResearches: [newerResearch, olderResearch] }),
+      prisma: createMockPrisma({ leadCount: 1, companyResearches: [newerResearch, olderResearch] }),
     });
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-final" }, tools);
@@ -287,11 +304,10 @@ describe("FinalScoringStep", () => {
     });
 
     const { step, aiGrpcClient } = buildStep({
-      prisma: createMockPrisma({ companyResearches: [research] }),
+      prisma: createMockPrisma({ leadCount: 1, companyResearches: [research] }),
     });
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-final" }, tools);
@@ -323,28 +339,37 @@ describe("FinalScoringStep", () => {
       ),
     } as unknown as AiGrpcClient;
 
-    const { step } = buildStep({ aiGrpcClient });
-    const leads = makeLeadRefs(3);
-    const ctx = makeCtx({ data: { leads } });
+    const { step, mockPrisma } = buildStep({
+      aiGrpcClient,
+      prisma: createMockPrisma({ leadCount: 3 }),
+    });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, { _stepId: "scoring-final" }, tools);
 
     // All 3 leads pass through (no filtering in final scoring)
-    expect(result.contextPatch.leads).toHaveLength(3);
+    expect(result.outputSummary.total).toBe(3);
     expect(result.outputSummary.errors).toBe(1);
 
-    // Errored lead should be last (lowest finalScore)
-    const outputLeads = result.contextPatch.leads!;
-    const erroredLead = outputLeads.find((l) => l.id === "lead-1");
-    expect(erroredLead).toBeDefined();
-    expect(erroredLead!.icpFit).toBe(0);
+    // Errored lead (lead-1) should be persisted with icpFit=0
+    expect(mockPrisma.leadScore.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            leadId: "lead-1",
+            icpFit: 0,
+          }),
+        ]),
+      }),
+    );
   });
 
   it("signal strength uses SIGNAL_STRENGTH_STUB (50)", async () => {
-    const { step, mockPrisma } = buildStep();
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    const { step, mockPrisma } = buildStep({
+      prisma: createMockPrisma({ leadCount: 1 }),
+    });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-final" }, tools);
@@ -361,49 +386,64 @@ describe("FinalScoringStep", () => {
   });
 
   it("finalScore math: icpFit=80, signal=50 gives round(80*0.7 + 50*0.3) = 71", async () => {
-    const { step } = buildStep({
+    const { step, mockPrisma } = buildStep({
       aiGrpcClient: createMockAiGrpcClient({
         "lead-0": { icpFit: 80, icpReasoning: "Good" },
       }),
+      prisma: createMockPrisma({ leadCount: 1 }),
     });
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
-    const result = await step.run(ctx, { _stepId: "scoring-final" }, tools);
+    await step.run(ctx, { _stepId: "scoring-final" }, tools);
 
-    const lead = result.contextPatch.leads![0];
-    expect(lead.finalScore).toBe(71); // round(80 * 0.7 + 50 * 0.3) = round(56 + 15) = 71
+    expect(mockPrisma.leadScore.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            leadId: "lead-0",
+            finalScore: 71, // round(80 * 0.7 + 50 * 0.3) = round(56 + 15) = 71
+          }),
+        ],
+      }),
+    );
   });
 
-  it("output sorted by finalScore DESC", async () => {
+  it("all leads persisted with correct ICP scores", async () => {
     const icpOverrides: Record<string, { icpFit: number; icpReasoning: string }> = {
       "lead-0": { icpFit: 50, icpReasoning: "Low" },
       "lead-1": { icpFit: 90, icpReasoning: "High" },
       "lead-2": { icpFit: 70, icpReasoning: "Medium" },
     };
 
-    const { step } = buildStep({
+    const { step, mockPrisma } = buildStep({
       aiGrpcClient: createMockAiGrpcClient(icpOverrides),
+      prisma: createMockPrisma({ leadCount: 3 }),
     });
 
-    const leads = makeLeadRefs(3);
-    const ctx = makeCtx({ data: { leads } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, { _stepId: "scoring-final" }, tools);
 
-    const outputLeads = result.contextPatch.leads!;
-    expect(outputLeads[0].id).toBe("lead-1"); // highest icpFit=90
-    expect(outputLeads[1].id).toBe("lead-2"); // icpFit=70
-    expect(outputLeads[2].id).toBe("lead-0"); // icpFit=50
+    expect(result.outputSummary.total).toBe(3);
+    expect(mockPrisma.leadScore.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({ leadId: "lead-0", icpFit: 50 }),
+          expect.objectContaining({ leadId: "lead-1", icpFit: 90 }),
+          expect.objectContaining({ leadId: "lead-2", icpFit: 70 }),
+        ]),
+      }),
+    );
   });
 
   it("null companyId sends empty service catalogs", async () => {
-    const { step, aiGrpcClient, serviceCatalogRepo } = buildStep();
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ companyId: null, data: { leads } });
+    const { step, aiGrpcClient, serviceCatalogRepo } = buildStep({
+      prisma: createMockPrisma({ leadCount: 1 }),
+    });
+    const ctx = makeCtx({ companyId: null });
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-final" }, tools);
@@ -417,9 +457,10 @@ describe("FinalScoringStep", () => {
   });
 
   it("cancellation mid-batch persists partial scores and returns cancelled result", async () => {
-    const { step, mockPrisma } = buildStep();
-    const leads = makeLeadRefs(25);
-    const ctx = makeCtx({ data: { leads } });
+    const { step, mockPrisma } = buildStep({
+      prisma: createMockPrisma({ leadCount: 25 }),
+    });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     // checkCancelled calls: (1) before batch loop, (2) before batch 0, (3) before batch 1
@@ -431,17 +472,16 @@ describe("FinalScoringStep", () => {
 
     const result = await step.run(ctx, { _stepId: "scoring-final" }, tools);
 
-    expect(result.contextPatch.leads).toEqual([]);
-    expect(
-      (result.contextPatch["scoring-final"] as { cancelled?: boolean }).cancelled,
-    ).toBe(true);
+    expect(result.outputSummary.total).toBe(0);
+    expect(result.outputSummary.cancelled).toBe(true);
     expect(mockPrisma.leadScore.createMany).toHaveBeenCalled();
   });
 
   it("batching: 25 leads processes in 3 batches with progress per batch", async () => {
-    const { step } = buildStep();
-    const leads = makeLeadRefs(25);
-    const ctx = makeCtx({ data: { leads } });
+    const { step } = buildStep({
+      prisma: createMockPrisma({ leadCount: 25 }),
+    });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-final" }, tools);
@@ -463,10 +503,10 @@ describe("FinalScoringStep", () => {
       aiGrpcClient: createMockAiGrpcClient({
         "lead-0": { icpFit: expectedIcpFit, icpReasoning: "Good" },
       }),
+      prisma: createMockPrisma({ leadCount: 1 }),
     });
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-final" }, tools);
@@ -484,16 +524,23 @@ describe("FinalScoringStep", () => {
   });
 
   it("default stepInstanceId is scoring-final when not in config", async () => {
-    const { step } = buildStep();
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    const { step, mockPrisma } = buildStep({
+      prisma: createMockPrisma({ leadCount: 1 }),
+    });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, {}, tools);
 
-    expect(result.contextPatch["scoring-final"]).toBeDefined();
-    expect(
-      (result.contextPatch["scoring-final"] as { scored: number }).scored,
-    ).toBe(1);
+    expect(result.outputSummary.total).toBe(1);
+    expect(mockPrisma.leadScore.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            stepInstanceId: "scoring-final",
+          }),
+        ],
+      }),
+    );
   });
 });

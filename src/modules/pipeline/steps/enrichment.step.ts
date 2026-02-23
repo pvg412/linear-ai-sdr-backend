@@ -1,5 +1,5 @@
 import { inject, injectable } from "inversify";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, Lead } from "@prisma/client";
 
 import { COMPANY_RESEARCH_TYPES } from "@/modules/company-research/company-research.types";
 import type { CompanyResearchCommandService } from "@/modules/company-research/services/company-research.command.service";
@@ -11,7 +11,6 @@ import { getPrisma } from "@/infra/prisma";
 
 import type { PipelineStepHandler } from "./step.interface";
 import type {
-  LeadReference,
   PipelineContext,
   PipelineStepResult,
   PipelineTools,
@@ -89,14 +88,16 @@ export class EnrichmentStep implements PipelineStepHandler {
     config: Record<string, unknown>,
     tools: PipelineTools,
   ): Promise<PipelineStepResult> {
-    const leads = ctx.data.leads ?? [];
+    // ── Load active leads from PipelineRunLead ───────────────────────
+    const runLeads = await this.prisma.pipelineRunLead.findMany({
+      where: { pipelineRunId: ctx.pipelineRunId, excluded: false },
+      include: { lead: true },
+      orderBy: { createdAt: "asc" },
+    });
 
-    if (leads.length === 0) {
+    if (runLeads.length === 0) {
       tools.emitProgress("No leads to enrich");
       return {
-        contextPatch: {
-          enrichmentResults: { profileRequests: 0, companyResearchRequests: 0 },
-        },
         outputSummary: { totalLeads: 0, profileRequests: 0, companyResearchRequests: 0, errors: 0 },
       };
     }
@@ -104,7 +105,7 @@ export class EnrichmentStep implements PipelineStepHandler {
     const includeCompanyResearch = config.includeCompanyResearch !== false;
     const includeProfileEnrichment = config.includeProfileEnrichment !== false;
 
-    tools.emitProgress(`Enriching ${leads.length} lead(s)...`, { total: leads.length });
+    tools.emitProgress(`Enriching ${runLeads.length} lead(s)...`, { total: runLeads.length });
 
     // ── Phase 1: Batch-parallel enqueueing ───────────────────────────
 
@@ -113,7 +114,7 @@ export class EnrichmentStep implements PipelineStepHandler {
     let companyResearchRequests = 0;
     let errorCount = 0;
 
-    const batches = createBatches(leads, BATCH_SIZE);
+    const batches = createBatches(runLeads, BATCH_SIZE);
 
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
       if (await tools.checkCancelled()) break;
@@ -121,8 +122,8 @@ export class EnrichmentStep implements PipelineStepHandler {
       const batch = batches[batchIdx];
 
       const batchResults = await Promise.all(
-        batch.map((lead) =>
-          this.enrichOneLead(lead, ctx.createdById, includeProfileEnrichment, includeCompanyResearch, tools),
+        batch.map((rl) =>
+          this.enrichOneLead(rl.lead, ctx.createdById, includeProfileEnrichment, includeCompanyResearch, tools),
         ),
       );
 
@@ -135,7 +136,7 @@ export class EnrichmentStep implements PipelineStepHandler {
 
       const progress: EnrichmentProgress = {
         completed: allResults.length,
-        total: leads.length,
+        total: runLeads.length,
         profileRequests,
         companyResearchRequests,
         errors: errorCount,
@@ -217,11 +218,9 @@ export class EnrichmentStep implements PipelineStepHandler {
 
     // ── Log summary ──────────────────────────────────────────────────
 
-    const allErrors = allResults.flatMap((r) => r.errors);
-
     tools.log.info(
       {
-        totalLeads: leads.length,
+        totalLeads: runLeads.length,
         profileRequests,
         companyResearchRequests,
         errors: errorCount,
@@ -232,18 +231,8 @@ export class EnrichmentStep implements PipelineStepHandler {
     // ── Return result ────────────────────────────────────────────────
 
     return {
-      contextPatch: {
-        enrichmentResults: {
-          profileRequests,
-          companyResearchRequests,
-          companyResearch: Object.keys(companyResearchByLead).length > 0
-            ? companyResearchByLead
-            : undefined,
-          errors: allErrors.length > 0 ? allErrors : undefined,
-        },
-      },
       outputSummary: {
-        totalLeads: leads.length,
+        totalLeads: runLeads.length,
         profileRequests,
         companyResearchRequests,
         errors: errorCount,
@@ -263,7 +252,7 @@ export class EnrichmentStep implements PipelineStepHandler {
    * Returns the request IDs so the caller can poll for completion.
    */
   private async enrichOneLead(
-    lead: LeadReference,
+    lead: Lead,
     userId: string,
     includeProfileEnrichment: boolean,
     includeCompanyResearch: boolean,

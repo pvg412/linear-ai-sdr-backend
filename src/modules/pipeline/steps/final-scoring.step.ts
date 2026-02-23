@@ -22,7 +22,6 @@ import { FINAL_SCORING_CONSTANTS } from "@/config/constants";
 
 import type { PipelineStepHandler } from "./step.interface";
 import type {
-  LeadReference,
   PipelineContext,
   PipelineStepResult,
   PipelineTools,
@@ -96,30 +95,29 @@ export class FinalScoringStep implements PipelineStepHandler {
     config: Record<string, unknown>,
     tools: PipelineTools,
   ): Promise<PipelineStepResult> {
-    const leads = ctx.data.leads ?? [];
     const stepInstanceId = (config._stepId as string | undefined) ?? "scoring-final";
 
-    if (leads.length === 0) {
+    // ── Load active leads from PipelineRunLead ───────────────────────
+    const runLeads = await this.prisma.pipelineRunLead.findMany({
+      where: { pipelineRunId: ctx.pipelineRunId, excluded: false },
+      include: { lead: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (runLeads.length === 0) {
       tools.emitProgress("No leads to score");
       return {
-        contextPatch: { [stepInstanceId]: { scored: 0 } },
         outputSummary: { total: 0, averageFinalScore: 0 },
       };
     }
 
-    // ── Step 1: Fetch full lead data from DB ─────────────────────────
-    tools.emitProgress("Loading lead profiles...");
-
-    const leadIds = leads.map((l) => l.id);
-    const fullLeads = await this.prisma.lead.findMany({
-      where: { id: { in: leadIds } },
-    });
-
-    const leadMap = new Map(fullLeads.map((l) => [l.id, l]));
+    // ── Build lead map from PipelineRunLead results ──────────────────
+    const leadMap = new Map(runLeads.map((rl) => [rl.leadId, rl.lead]));
+    const leadIds = runLeads.map((rl) => rl.leadId);
 
     tools.log.info(
-      { requested: leadIds.length, found: fullLeads.length },
-      "Lead profiles loaded for final scoring",
+      { activeLeads: runLeads.length },
+      "Active leads loaded for final scoring",
     );
 
     // ── Step 2: Fetch service catalogs ───────────────────────────────
@@ -158,32 +156,32 @@ export class FinalScoringStep implements PipelineStepHandler {
       "Company research data loaded",
     );
 
-    if (await tools.checkCancelled()) return cancelledResult(stepInstanceId);
+    if (await tools.checkCancelled()) return cancelledResult();
 
     // ── Step 4: Batch-parallel final scoring ─────────────────────────
-    tools.emitProgress("Final scoring leads via AI...", { total: leads.length });
+    tools.emitProgress("Final scoring leads via AI...", { total: runLeads.length });
 
     const scoredLeads: FinalScoredLead[] = [];
 
-    const batches = createBatches(leads, BATCH_SIZE);
+    const batches = createBatches(runLeads, BATCH_SIZE);
 
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
       if (await tools.checkCancelled()) {
         if (scoredLeads.length > 0) {
           await this.persistScores(scoredLeads, ctx.pipelineRunId, stepInstanceId);
         }
-        return cancelledResult(stepInstanceId);
+        return cancelledResult();
       }
 
       const batch = batches[batchIdx];
 
       const batchResults = await Promise.all(
-        batch.map((leadRef) =>
+        batch.map((rl) =>
           this.scoreOneLead(
-            leadRef,
+            rl.leadId,
             leadMap,
             serviceCatalogsProto,
-            companyResearchByLead.get(leadRef.id) ?? [],
+            companyResearchByLead.get(rl.leadId) ?? [],
           ),
         ),
       );
@@ -192,7 +190,7 @@ export class FinalScoringStep implements PipelineStepHandler {
 
       const progress: FinalScoringProgress = {
         completed: scoredLeads.length,
-        total: leads.length,
+        total: runLeads.length,
       };
 
       tools.emitProgress(
@@ -206,24 +204,7 @@ export class FinalScoringStep implements PipelineStepHandler {
 
     await this.persistScores(scoredLeads, ctx.pipelineRunId, stepInstanceId);
 
-    // ── Step 6: Sort leads by finalScore DESC (no filtering) ─────────
-    const sorted = [...scoredLeads].sort((a, b) => b.finalScore - a.finalScore);
-
-    const sortedLeadRefs: LeadReference[] = sorted.map((s) => {
-      const original = leads.find((l) => l.id === s.leadId);
-      return {
-        id: s.leadId,
-        fullName: original?.fullName ?? null,
-        email: original?.email ?? null,
-        company: original?.company ?? null,
-        finalScore: s.finalScore,
-        icpFit: s.icpFit,
-        signalStrength: s.signalStrength,
-        icpReasoning: s.icpReasoning,
-      };
-    });
-
-    // ── Step 7: Log summary ──────────────────────────────────────────
+    // ── Step 6: Log summary ────────────────────────────────────────────
     const totalFinalScore = scoredLeads.reduce((sum, s) => sum + s.finalScore, 0);
     const averageFinalScore = scoredLeads.length > 0
       ? Math.round(totalFinalScore / scoredLeads.length)
@@ -243,32 +224,11 @@ export class FinalScoringStep implements PipelineStepHandler {
 
     tools.emitProgress(
       `Final scoring complete: ${scoredLeads.length} leads scored (avg: ${averageFinalScore})`,
-      { completed: scoredLeads.length, total: leads.length },
+      { completed: scoredLeads.length, total: runLeads.length },
     );
 
-    // ── Step 8: Return result ────────────────────────────────────────
+    // ── Step 7: Return result ────────────────────────────────────────
     return {
-      contextPatch: {
-        leads: sortedLeadRefs,
-        [stepInstanceId]: {
-          scored: scoredLeads.length,
-          averageFinalScore,
-          errors: errorCount,
-          details: scoredLeads.map((s) => {
-            const ref = leads.find((l) => l.id === s.leadId);
-            return {
-              leadId: s.leadId,
-              fullName: ref?.fullName ?? null,
-              company: ref?.company ?? null,
-              icpFit: s.icpFit,
-              signalStrength: s.signalStrength,
-              finalScore: s.finalScore,
-              icpReasoning: s.icpReasoning,
-              error: s.error,
-            };
-          }),
-        },
-      },
       outputSummary: {
         total: scoredLeads.length,
         averageFinalScore,
@@ -289,13 +249,13 @@ export class FinalScoringStep implements PipelineStepHandler {
    * the lead still passes through (no filtering) but will rank last.
    */
   private async scoreOneLead(
-    leadRef: LeadReference,
+    leadId: string,
     leadMap: Map<string, Lead>,
     serviceCatalogs: ServiceCatalogProto[],
     companyResearchItems: CompanyResearchItemProto[],
   ): Promise<FinalScoredLead> {
-    const fullLead = leadMap.get(leadRef.id);
-    const profile = buildLeadProfile(leadRef, fullLead);
+    const fullLead = leadMap.get(leadId);
+    const profile = buildLeadProfile(leadId, fullLead);
 
     // TODO: Replace with real signal strength once signals.step.ts is implemented
     const signalStrength = SIGNAL_STRENGTH_STUB;
@@ -312,7 +272,7 @@ export class FinalScoringStep implements PipelineStepHandler {
       const finalScore = computeFinalScore(icpFit, signalStrength);
 
       return {
-        leadId: leadRef.id,
+        leadId,
         icpFit,
         icpReasoning: resp.icpReasoning ?? "",
         signalStrength,
@@ -323,7 +283,7 @@ export class FinalScoringStep implements PipelineStepHandler {
       const finalScore = computeFinalScore(0, signalStrength);
 
       return {
-        leadId: leadRef.id,
+        leadId,
         icpFit: 0,
         icpReasoning: `Final scoring failed: ${msg}`,
         signalStrength,
@@ -402,12 +362,8 @@ export class FinalScoringStep implements PipelineStepHandler {
 /*  Pure helpers                                                       */
 /* ------------------------------------------------------------------ */
 
-function cancelledResult(stepInstanceId: string): PipelineStepResult {
+function cancelledResult(): PipelineStepResult {
   return {
-    contextPatch: {
-      leads: [],
-      [stepInstanceId]: { scored: 0, cancelled: true },
-    },
     outputSummary: { total: 0, averageFinalScore: 0, cancelled: true },
   };
 }
@@ -469,16 +425,16 @@ function mapCompanySizeToProto(
  * Falls back to reference fields when the full lead is not available.
  */
 function buildLeadProfile(
-  ref: LeadReference,
+  leadId: string,
   full: Lead | undefined,
 ): LeadProfileProto {
   if (!full) {
     return {
-      id: ref.id,
-      fullName: ref.fullName ?? "",
+      id: leadId,
+      fullName: "",
       title: "",
       headline: "",
-      company: ref.company ?? "",
+      company: "",
       companyIndustry: "",
       companySize: ProtoCompanySize.COMPANY_SIZE_UNSPECIFIED,
       companyDomain: "",

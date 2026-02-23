@@ -6,23 +6,46 @@ import { PipelineStepRegistry } from "@/modules/pipeline/engine/pipeline.registr
 import type { PipelineStepHandler } from "@/modules/pipeline/steps/step.interface";
 import type { PipelineRepository } from "@/modules/pipeline/persistence/pipeline.repository";
 import type { PipelineBroadcaster } from "@/modules/pipeline/engine/pipeline.broadcaster";
-import type { PipelineDefinition } from "@/modules/pipeline/schemas/pipeline.dto";
+
 
 /* ------------------------------------------------------------------ */
 /*  Test helpers                                                       */
 /* ------------------------------------------------------------------ */
 
-const TEST_PIPELINE_DEF: PipelineDefinition = {
-  key: "test-pipeline",
-  version: 1,
-  displayName: "Test Pipeline",
-  steps: [
-    { type: "step-a", id: "step-a", displayName: "Step A" },
-    { type: "step-b", id: "step-b", displayName: "Step B" },
-    { type: "step-c", id: "step-c", displayName: "Step C" },
-  ],
-  defaults: { onError: "stop" },
-};
+const TEST_STEPS = [
+  { type: "step-a", id: "step-a", displayName: "Step A" },
+  { type: "step-b", id: "step-b", displayName: "Step B" },
+  { type: "step-c", id: "step-c", displayName: "Step C" },
+];
+
+function makeStepRuns(
+  steps: Array<{ type: string; id: string; displayName: string; enabled?: boolean; onError?: string; timeoutMs?: number; retryMaxAttempts?: number; retryBackoffMs?: number; retryBackoffType?: string }>,
+) {
+  return steps.map((s, i) => ({
+    id: `sr-${i}`,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    pipelineRunId: "run-1",
+    stepId: s.id,
+    stepType: s.type,
+    stepIndex: i,
+    displayName: s.displayName,
+    status: "QUEUED" as const,
+    enabled: s.enabled ?? true,
+    stepConfig: null,
+    onError: s.onError ?? null,
+    timeoutMs: s.timeoutMs ?? null,
+    retryMaxAttempts: s.retryMaxAttempts ?? null,
+    retryBackoffMs: s.retryBackoffMs ?? null,
+    retryBackoffType: s.retryBackoffType ?? null,
+    attempts: 0,
+    startedAt: null,
+    finishedAt: null,
+    durationMs: null,
+    outputSummary: null,
+    errorMessage: null,
+  }));
+}
 
 function makeDbRun(overrides?: Record<string, unknown>) {
   return {
@@ -31,35 +54,25 @@ function makeDbRun(overrides?: Record<string, unknown>) {
     updatedAt: new Date(),
     pipelineKey: "test-pipeline",
     pipelineVersion: 1,
+    pipelineDisplayName: "Test Pipeline",
+    pipelineDescription: null,
     createdById: "user-1",
     companyId: "company-1",
     status: "PENDING" as const,
     currentStepId: null,
     currentStepIndex: null,
-    input: {},
-    context: {},
-    definition: TEST_PIPELINE_DEF,
+    defaultOnError: "stop",
+    defaultTimeoutMs: null,
+    defaultRetryMaxAttempts: null,
+    defaultRetryBackoffMs: null,
+    defaultRetryBackoffType: null,
+    inputDirectoryId: null,
+    inputLeadIds: [],
     startedAt: null,
     finishedAt: null,
     errorMessage: null,
     errorStepId: null,
-    stepRuns: TEST_PIPELINE_DEF.steps.map((s, i) => ({
-      id: `sr-${i}`,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      pipelineRunId: "run-1",
-      stepId: s.id,
-      stepType: s.type,
-      stepIndex: i,
-      displayName: s.displayName,
-      status: "QUEUED" as const,
-      attempts: 0,
-      startedAt: null,
-      finishedAt: null,
-      durationMs: null,
-      outputSummary: null,
-      errorMessage: null,
-    })),
+    stepRuns: makeStepRuns(TEST_STEPS),
     ...overrides,
   };
 }
@@ -73,7 +86,6 @@ function makeStubHandler(
     run: vi.fn().mockImplementation(() => {
       if (behavior === "fail") return Promise.reject(new Error(`${type} failed intentionally`));
       return Promise.resolve({
-        contextPatch: { [type]: { done: true } },
         outputSummary: { step: type },
       });
     }),
@@ -90,7 +102,6 @@ function createMockRepo() {
     createRun: vi.fn(),
     updateRunStatus: vi.fn().mockResolvedValue({}),
     updateRunCurrentStep: vi.fn().mockResolvedValue({}),
-    updateRunContext: vi.fn().mockResolvedValue({}),
     updateStepStatus: vi.fn().mockResolvedValue({}),
     cancelRemainingSteps: vi.fn().mockResolvedValue({}),
   } as unknown as PipelineRepository;
@@ -238,13 +249,10 @@ describe("PipelineExecutor", () => {
   });
 
   it("continues past failure when onError=continue", async () => {
-    const def: PipelineDefinition = {
-      ...TEST_PIPELINE_DEF,
-      steps: TEST_PIPELINE_DEF.steps.map((s) => ({
-        ...s,
-        onError: "continue" as const,
-      })),
-    };
+    const steps = TEST_STEPS.map((s) => ({
+      ...s,
+      onError: "continue",
+    }));
 
     const handlerA = makeStubHandler("step-a");
     const handlerB = makeStubHandler("step-b", "fail");
@@ -256,7 +264,7 @@ describe("PipelineExecutor", () => {
     registry.register(handlerC);
 
     const repo = createMockRepo();
-    const run = makeDbRun({ definition: def });
+    const run = makeDbRun({ stepRuns: makeStepRuns(steps) });
     (repo.getRunById as ReturnType<typeof vi.fn>).mockResolvedValue(run);
 
     const broadcaster = createMockBroadcaster();
@@ -275,14 +283,11 @@ describe("PipelineExecutor", () => {
   });
 
   it("skips disabled steps", async () => {
-    const def: PipelineDefinition = {
-      ...TEST_PIPELINE_DEF,
-      steps: [
-        TEST_PIPELINE_DEF.steps[0],
-        { ...TEST_PIPELINE_DEF.steps[1], enabled: false },
-        TEST_PIPELINE_DEF.steps[2],
-      ],
-    };
+    const steps = [
+      TEST_STEPS[0],
+      { ...TEST_STEPS[1], enabled: false },
+      TEST_STEPS[2],
+    ];
 
     const handlerA = makeStubHandler("step-a");
     const handlerB = makeStubHandler("step-b");
@@ -294,7 +299,7 @@ describe("PipelineExecutor", () => {
     registry.register(handlerC);
 
     const repo = createMockRepo();
-    const run = makeDbRun({ definition: def });
+    const run = makeDbRun({ stepRuns: makeStepRuns(steps) });
     (repo.getRunById as ReturnType<typeof vi.fn>).mockResolvedValue(run);
 
     const broadcaster = createMockBroadcaster();
@@ -325,13 +330,10 @@ describe("PipelineExecutor", () => {
     registry.register(handlerA);
     registry.register(handlerB);
 
-    const def: PipelineDefinition = {
-      ...TEST_PIPELINE_DEF,
-      steps: TEST_PIPELINE_DEF.steps.slice(0, 2),
-    };
+    const steps = TEST_STEPS.slice(0, 2);
 
     const repo = createMockRepo();
-    const run = makeDbRun({ definition: def });
+    const run = makeDbRun({ stepRuns: makeStepRuns(steps) });
     (repo.getRunById as ReturnType<typeof vi.fn>).mockResolvedValue(run);
 
     const broadcaster = createMockBroadcaster();
@@ -358,27 +360,26 @@ describe("PipelineExecutor", () => {
       run: vi.fn().mockImplementation(() => {
         callCount++;
         if (callCount < 3) return Promise.reject(new Error("transient error"));
-        return Promise.resolve({ contextPatch: {}, outputSummary: { recovered: true } });
+        return Promise.resolve({ outputSummary: { recovered: true } });
       }),
     };
 
-    const def: PipelineDefinition = {
-      ...TEST_PIPELINE_DEF,
-      steps: [
-        {
-          type: "step-a",
-          id: "step-a",
-          displayName: "Flaky Step",
-          retryPolicy: { maxAttempts: 3, backoffMs: 10, backoffType: "fixed" },
-        },
-      ],
-    };
+    const steps = [
+      {
+        type: "step-a",
+        id: "step-a",
+        displayName: "Flaky Step",
+        retryMaxAttempts: 3,
+        retryBackoffMs: 10,
+        retryBackoffType: "fixed",
+      },
+    ];
 
     const registry = new PipelineStepRegistry();
     registry.register(handlerFlaky);
 
     const repo = createMockRepo();
-    const run = makeDbRun({ definition: def });
+    const run = makeDbRun({ stepRuns: makeStepRuns(steps) });
     (repo.getRunById as ReturnType<typeof vi.fn>).mockResolvedValue(run);
 
     const broadcaster = createMockBroadcaster();
@@ -420,23 +421,20 @@ describe("PipelineExecutor", () => {
       ),
     };
 
-    const def: PipelineDefinition = {
-      ...TEST_PIPELINE_DEF,
-      steps: [
-        {
-          type: "step-a",
-          id: "step-a",
-          displayName: "Slow Step",
-          timeoutMs: 50, // very short timeout
-        },
-      ],
-    };
+    const steps = [
+      {
+        type: "step-a",
+        id: "step-a",
+        displayName: "Slow Step",
+        timeoutMs: 50,
+      },
+    ];
 
     const registry = new PipelineStepRegistry();
     registry.register(handlerSlow);
 
     const repo = createMockRepo();
-    const run = makeDbRun({ definition: def });
+    const run = makeDbRun({ stepRuns: makeStepRuns(steps) });
     (repo.getRunById as ReturnType<typeof vi.fn>).mockResolvedValue(run);
 
     const broadcaster = createMockBroadcaster();

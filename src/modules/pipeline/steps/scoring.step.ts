@@ -20,7 +20,6 @@ import { SCORING_CONSTANTS } from "@/config/constants";
 
 import type { PipelineStepHandler } from "./step.interface";
 import type {
-  LeadReference,
   PipelineContext,
   PipelineStepResult,
   PipelineTools,
@@ -83,31 +82,28 @@ export class ScoringStep implements PipelineStepHandler {
     config: Record<string, unknown>,
     tools: PipelineTools,
   ): Promise<PipelineStepResult> {
-    const leads = ctx.data.leads ?? [];
     const stepInstanceId = config._stepId as string | undefined;
-    const contextKey = stepInstanceId ?? "scoringResults";
 
-    if (leads.length === 0) {
+    // ── Load active leads from PipelineRunLead ───────────────────────
+    const runLeads = await this.prisma.pipelineRunLead.findMany({
+      where: { pipelineRunId: ctx.pipelineRunId, excluded: false },
+      include: { lead: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (runLeads.length === 0) {
       tools.emitProgress("No leads to score");
       return {
-        contextPatch: { [contextKey]: { scored: 0, passed: 0, rejected: 0 } },
         outputSummary: { total: 0, passedCount: 0, rejectedCount: 0, averageScore: 0 },
       };
     }
 
-    // ── Step 1: Fetch full lead data from DB ─────────────────────────
-    tools.emitProgress("Loading lead profiles...");
-
-    const leadIds = leads.map((l) => l.id);
-    const fullLeads = await this.prisma.lead.findMany({
-      where: { id: { in: leadIds } },
-    });
-
-    const leadMap = new Map(fullLeads.map((l) => [l.id, l]));
+    // ── Build lead map from PipelineRunLead results ──────────────────
+    const leadMap = new Map(runLeads.map((rl) => [rl.leadId, rl.lead]));
 
     tools.log.info(
-      { requested: leadIds.length, found: fullLeads.length },
-      "Lead profiles loaded from DB",
+      { activeLeads: runLeads.length },
+      "Active leads loaded from PipelineRunLead",
     );
 
     // ── Step 2: Fetch service catalogs ───────────────────────────────
@@ -136,16 +132,16 @@ export class ScoringStep implements PipelineStepHandler {
       "Service catalogs loaded",
     );
 
-    if (await tools.checkCancelled()) return cancelledResult(contextKey);
+    if (await tools.checkCancelled()) return cancelledResult();
 
     // ── Step 3: Batch-parallel scoring ───────────────────────────────
-    tools.emitProgress("Scoring leads via AI...", { total: leads.length });
+    tools.emitProgress("Scoring leads via AI...", { total: runLeads.length });
 
     const scoredLeads: ScoredLead[] = [];
     let passedCount = 0;
     let rejectedCount = 0;
 
-    const batches = createBatches(leads, BATCH_SIZE);
+    const batches = createBatches(runLeads, BATCH_SIZE);
 
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
       if (await tools.checkCancelled()) {
@@ -153,13 +149,13 @@ export class ScoringStep implements PipelineStepHandler {
         if (scoredLeads.length > 0) {
           await this.persistScores(scoredLeads, ctx.pipelineRunId, stepInstanceId);
         }
-        return cancelledResult(contextKey);
+        return cancelledResult();
       }
 
       const batch = batches[batchIdx];
 
       const batchResults = await Promise.all(
-        batch.map((leadRef) => this.scoreOneLead(leadRef, leadMap, serviceCatalogsProto)),
+        batch.map((rl) => this.scoreOneLead(rl.leadId, leadMap, serviceCatalogsProto)),
       );
 
       for (const result of batchResults) {
@@ -173,7 +169,7 @@ export class ScoringStep implements PipelineStepHandler {
 
       const progress: ScoringProgress = {
         completed: scoredLeads.length,
-        total: leads.length,
+        total: runLeads.length,
         passed: passedCount,
         rejected: rejectedCount,
       };
@@ -189,23 +185,20 @@ export class ScoringStep implements PipelineStepHandler {
 
     await this.persistScores(scoredLeads, ctx.pipelineRunId, stepInstanceId);
 
-    // ── Step 5: Filter & sort ────────────────────────────────────────
-    const passed = scoredLeads
-      .filter((s) => s.score >= SCORING_THRESHOLD)
-      .sort((a, b) => b.score - a.score);
+    // ── Step 5: Exclude rejected leads in PipelineRunLead ────────────
+    const rejectedLeadIds = scoredLeads
+      .filter((s) => s.score < SCORING_THRESHOLD)
+      .map((s) => s.leadId);
 
-    // Build filtered lead references for downstream steps
-    const passedLeadRefs: LeadReference[] = passed.map((s) => {
-      const original = leads.find((l) => l.id === s.leadId);
-      return {
-        id: s.leadId,
-        fullName: original?.fullName ?? null,
-        email: original?.email ?? null,
-        company: original?.company ?? null,
-        score: s.score,
-        scoringReasoning: s.reasoning,
-      };
-    });
+    if (rejectedLeadIds.length > 0 && stepInstanceId) {
+      await this.prisma.pipelineRunLead.updateMany({
+        where: {
+          pipelineRunId: ctx.pipelineRunId,
+          leadId: { in: rejectedLeadIds },
+        },
+        data: { excluded: true, excludedByStepId: stepInstanceId },
+      });
+    }
 
     // ── Step 6: Log summary ──────────────────────────────────────────
     const totalScore = scoredLeads.reduce((sum, s) => sum + s.score, 0);
@@ -230,34 +223,11 @@ export class ScoringStep implements PipelineStepHandler {
 
     tools.emitProgress(
       `Scoring complete: ${passedCount} passed, ${rejectedCount} rejected (avg score: ${averageScore})`,
-      { completed: scoredLeads.length, total: leads.length, passed: passedCount, rejected: rejectedCount },
+      { completed: scoredLeads.length, total: runLeads.length, passed: passedCount, rejected: rejectedCount },
     );
 
     // ── Step 7: Return result ────────────────────────────────────────
     return {
-      contextPatch: {
-        leads: passedLeadRefs,
-        [contextKey]: {
-          scored: scoredLeads.length,
-          passed: passedCount,
-          rejected: rejectedCount,
-          averageScore,
-          threshold: SCORING_THRESHOLD,
-          errors: errorCount,
-          details: scoredLeads.map((s) => {
-            const ref = leads.find((l) => l.id === s.leadId);
-            return {
-              leadId: s.leadId,
-              fullName: ref?.fullName ?? null,
-              company: ref?.company ?? null,
-              score: s.score,
-              reasoning: s.reasoning,
-              passed: s.score >= SCORING_THRESHOLD,
-              error: s.error,
-            };
-          }),
-        },
-      },
       outputSummary: {
         total: scoredLeads.length,
         passedCount,
@@ -279,12 +249,12 @@ export class ScoringStep implements PipelineStepHandler {
    * persisted for analytics.
    */
   private async scoreOneLead(
-    leadRef: LeadReference,
+    leadId: string,
     leadMap: Map<string, Lead>,
     serviceCatalogs: ServiceCatalogProto[],
   ): Promise<ScoredLead> {
-    const fullLead = leadMap.get(leadRef.id);
-    const profile = buildLeadProfile(leadRef, fullLead);
+    const fullLead = leadMap.get(leadId);
+    const profile = buildLeadProfile(leadId, fullLead);
 
     try {
       const resp: ScoreLeadResponse = await this.aiGrpcClient.scoreLead({
@@ -294,14 +264,14 @@ export class ScoringStep implements PipelineStepHandler {
       });
 
       return {
-        leadId: leadRef.id,
+        leadId,
         score: clampScore(resp.score),
         reasoning: resp.reasoning ?? "",
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
-        leadId: leadRef.id,
+        leadId,
         score: 0,
         reasoning: `Scoring failed: ${msg}`,
         error: msg,
@@ -336,12 +306,8 @@ export class ScoringStep implements PipelineStepHandler {
 /*  Pure helpers                                                       */
 /* ------------------------------------------------------------------ */
 
-function cancelledResult(contextKey: string): PipelineStepResult {
+function cancelledResult(): PipelineStepResult {
   return {
-    contextPatch: {
-      leads: [],
-      [contextKey]: { scored: 0, passed: 0, rejected: 0, cancelled: true },
-    },
     outputSummary: { total: 0, passedCount: 0, rejectedCount: 0, cancelled: true },
   };
 }
@@ -398,16 +364,16 @@ function mapCompanySizeToProto(
  * Falls back to reference fields when the full lead is not available.
  */
 function buildLeadProfile(
-  ref: LeadReference,
+  leadId: string,
   full: Lead | undefined,
 ): LeadProfileProto {
   if (!full) {
     return {
-      id: ref.id,
-      fullName: ref.fullName ?? "",
+      id: leadId,
+      fullName: "",
       title: "",
       headline: "",
-      company: ref.company ?? "",
+      company: "",
       companyIndustry: "",
       companySize: ProtoCompanySize.COMPANY_SIZE_UNSPECIFIED,
       companyDomain: "",

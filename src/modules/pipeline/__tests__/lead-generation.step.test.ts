@@ -26,8 +26,6 @@ function makeCtx(overrides?: Partial<PipelineContext>): PipelineContext {
     pipelineKey: "test-pipeline",
     createdById: "user-1",
     companyId: "company-1",
-    input: {},
-    data: {},
     ...overrides,
   };
 }
@@ -187,7 +185,19 @@ function buildStep(overrides?: {
     overrides?.leadSearchRunRepo ?? createMockLeadSearchRunRepo(),
     overrides?.persister ?? createMockPersister(),
   );
-  return { step, adapter };
+
+  const mockPrisma = {
+    pipelineRunLead: {
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+  };
+
+  Object.defineProperty(step, "prisma", {
+    value: mockPrisma,
+    writable: true,
+  });
+
+  return { step, adapter, mockPrisma };
 }
 
 /* ------------------------------------------------------------------ */
@@ -206,30 +216,24 @@ describe("LeadGenerationStep", () => {
     const persister = createMockPersister();
     const leadSearchRepo = createMockLeadSearchRepo();
     const leadSearchRunRepo = createMockLeadSearchRunRepo();
-    const { step } = buildStep({ persister, leadSearchRepo, leadSearchRunRepo });
+    const { step, mockPrisma } = buildStep({ persister, leadSearchRepo, leadSearchRunRepo });
     const tools = makeTools();
 
     const result = await step.run(makeCtx(), {}, tools);
 
-    // Should return 10 leads
-    expect(result.contextPatch.leads).toHaveLength(10);
+    // Should persist 10 leads to PipelineRunLead
+    expect(mockPrisma.pipelineRunLead.createMany).toHaveBeenCalledWith({
+      data: Array.from({ length: 10 }, (_, i) => ({
+        pipelineRunId: "run-1",
+        leadId: `lead-id-${i}`,
+      })),
+      skipDuplicates: true,
+    });
     expect(result.outputSummary).toEqual(
       expect.objectContaining({
         leadsFound: 10,
         source: "scraper",
         leadSearchId: "ls-1",
-      }),
-    );
-
-    // Lead references should have proper fields
-    const firstLead = result.contextPatch.leads?.[0];
-    expect(firstLead).toEqual(
-      expect.objectContaining({
-        id: "lead-id-0",
-        fullName: "Lead 0",
-        email: "lead0@example.com",
-        company: "Company 0",
-        title: "CTO",
       }),
     );
 
@@ -424,7 +428,7 @@ describe("LeadGenerationStep", () => {
 
     const result = await step.run(makeCtx(), {}, tools);
 
-    expect(result.contextPatch.leads).toEqual([]);
+    expect(result.outputSummary.leadsFound).toBe(0);
     expect(result.outputSummary.source).toBe("cancelled");
 
     // Search should be marked as failed with "Cancelled"
@@ -447,7 +451,6 @@ describe("LeadGenerationStep", () => {
 
     const result = await step.run(makeCtx(), {}, tools);
 
-    expect(result.contextPatch.leads).toHaveLength(7);
     expect(result.outputSummary.leadsFound).toBe(7);
     expect(result.outputSummary.source).toBe("scraper");
   });

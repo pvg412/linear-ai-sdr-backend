@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
 import { inject, injectable } from "inversify";
-import { MessageSender, OutreachChannel, OutreachStage } from "@prisma/client";
+import { MessageSender, OutreachChannel, OutreachStage, type PrismaClient, type Lead } from "@prisma/client";
 
+import { getPrisma } from "@/infra/prisma";
 import { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.types";
 import { LEAD_CONVERSATIONS_TYPES } from "@/modules/lead-conversations/lead-conversations.types";
@@ -35,7 +36,6 @@ import type {
   PipelineContext,
   PipelineStepResult,
   PipelineTools,
-  LeadReference,
 } from "@/modules/pipeline/schemas/pipeline.dto";
 
 /* ------------------------------------------------------------------ */
@@ -77,6 +77,7 @@ interface OutreachDraft {
 @injectable()
 export class OutreachStep implements PipelineStepHandler {
   readonly type = "outreach";
+  private readonly prisma: PrismaClient = getPrisma();
 
   constructor(
     @inject(AI_GRPC_CLIENT_TYPES.AiGrpcClient)
@@ -94,25 +95,31 @@ export class OutreachStep implements PipelineStepHandler {
     config: Record<string, unknown>,
     tools: PipelineTools,
   ): Promise<PipelineStepResult> {
-    const leads = ctx.data.leads ?? [];
     const channel = (config.channel as string) ?? "linkedin";
 
-    if (leads.length === 0) {
+    // ── Load active leads from PipelineRunLead ───────────────────────
+    const runLeads = await this.prisma.pipelineRunLead.findMany({
+      where: { pipelineRunId: ctx.pipelineRunId, excluded: false },
+      include: { lead: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (runLeads.length === 0) {
       tools.log.info(
         { pipelineRunId: ctx.pipelineRunId },
         "Outreach step: no leads to process",
       );
       tools.emitProgress("No leads to generate outreach for");
-      return { contextPatch: {}, outputSummary: { leadsProcessed: 0 } };
+      return { outputSummary: { leadsProcessed: 0 } };
     }
 
     tools.log.info(
-      { pipelineRunId: ctx.pipelineRunId, leadCount: leads.length, channel },
+      { pipelineRunId: ctx.pipelineRunId, leadCount: runLeads.length, channel },
       "Outreach step: starting message generation",
     );
 
     tools.emitProgress(
-      `Generating outreach messages for ${leads.length} lead(s) via ${channel}`,
+      `Generating outreach messages for ${runLeads.length} lead(s) via ${channel}`,
     );
 
     /* -- Process in batches ---------------------------------------- */
@@ -123,7 +130,7 @@ export class OutreachStep implements PipelineStepHandler {
     let totalMessages = 0;
     let processed = 0;
 
-    for (let i = 0; i < leads.length; i += batchSize) {
+    for (let i = 0; i < runLeads.length; i += batchSize) {
       if (await tools.checkCancelled()) {
         tools.log.info(
           { pipelineRunId: ctx.pipelineRunId },
@@ -132,11 +139,11 @@ export class OutreachStep implements PipelineStepHandler {
         break;
       }
 
-      const batch = leads.slice(i, i + batchSize);
+      const batch = runLeads.slice(i, i + batchSize);
 
       const batchResults = await Promise.all(
-        batch.map((lead) =>
-          this.processLead(lead, ctx, channel, tools),
+        batch.map((rl) =>
+          this.processLead(rl.lead, ctx, channel, tools),
         ),
       );
 
@@ -152,7 +159,7 @@ export class OutreachStep implements PipelineStepHandler {
 
       processed += batch.length;
       tools.emitProgress(
-        `Generated messages for ${processed}/${leads.length} leads`,
+        `Generated messages for ${processed}/${runLeads.length} leads`,
       );
     }
 
@@ -167,9 +174,8 @@ export class OutreachStep implements PipelineStepHandler {
     );
 
     return {
-      contextPatch: { outreachDrafts },
       outputSummary: {
-        leadsProcessed: leads.length,
+        leadsProcessed: runLeads.length,
         leadsSucceeded,
         leadsFailed,
         totalMessagesGenerated: totalMessages,
@@ -183,7 +189,7 @@ export class OutreachStep implements PipelineStepHandler {
   /* ---------------------------------------------------------------- */
 
   private async processLead(
-    lead: LeadReference,
+    lead: Lead,
     ctx: PipelineContext,
     channel: string,
     tools: PipelineTools,
@@ -240,7 +246,7 @@ export class OutreachStep implements PipelineStepHandler {
   /* ---------------------------------------------------------------- */
 
   private async parseContext(
-    lead: LeadReference,
+    lead: Lead,
     ctx: PipelineContext,
     channel: string,
     tools: PipelineTools,
@@ -278,7 +284,7 @@ export class OutreachStep implements PipelineStepHandler {
   /* ---------------------------------------------------------------- */
 
   private async generateMessages(
-    lead: LeadReference,
+    lead: Lead,
     ctx: PipelineContext,
     parsed: ParseOutreachContextResponse,
     tools: PipelineTools,
@@ -376,7 +382,7 @@ export class OutreachStep implements PipelineStepHandler {
   /* ---------------------------------------------------------------- */
 
   private async saveMessages(
-    lead: LeadReference,
+    lead: Lead,
     ctx: PipelineContext,
     variants: OutreachVariantJson[],
     parsed: ParseOutreachContextResponse,
@@ -405,6 +411,12 @@ export class OutreachStep implements PipelineStepHandler {
           createdBy: ctx.createdById,
           senderType: MessageSender.SALE_MANAGER,
         });
+
+        // Link the saved message to the pipeline run via junction table
+        await this.conversationsRepo.linkToPipelineRun(
+          msg.id,
+          ctx.pipelineRunId,
+        );
 
         savedMessages.push({
           messageId: msg.id,

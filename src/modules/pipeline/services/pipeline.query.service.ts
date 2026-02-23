@@ -1,46 +1,21 @@
 import { inject, injectable } from "inversify";
+import type { PrismaClient } from "@prisma/client";
 
+import { getPrisma } from "@/infra/prisma";
 import { PIPELINE_TYPES } from "@/modules/pipeline/pipeline.types";
 import type { PipelineRepository } from "@/modules/pipeline/persistence/pipeline.repository";
-import { listPipelineDefinitions } from "@/modules/pipeline/engine/pipeline.definitions";
+import {
+  getPipelineDefinition,
+  listPipelineDefinitions,
+} from "@/modules/pipeline/engine/pipeline.definitions";
 import type { PipelineDefinition } from "@/modules/pipeline/schemas/pipeline.dto";
-
-/* ------------------------------------------------------------------ */
-/*  Sanitization helpers                                               */
-/* ------------------------------------------------------------------ */
-
-/**
- * Strip internal fields from the stored pipeline definition snapshot
- * so that retry policies, timeouts, and step configs are never leaked
- * to API consumers.
- */
-function sanitizeDefinition(raw: unknown): unknown {
-  if (!raw || typeof raw !== "object") return raw;
-
-  const def = raw as Record<string, unknown>;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { defaults: _defaults, ...rest } = def;
-
-  if (Array.isArray(def.steps)) {
-    rest.steps = (def.steps as Record<string, unknown>[]).map((step) => ({
-      type: step.type,
-      id: step.id,
-      displayName: step.displayName,
-    }));
-  }
-
-  return rest;
-}
-
-/** Sanitize a single PipelineRun record in-place and return it. */
-function sanitizeRun<T extends { definition: unknown }>(run: T): T {
-  return { ...run, definition: sanitizeDefinition(run.definition) };
-}
 
 /* ------------------------------------------------------------------ */
 
 @injectable()
 export class PipelineQueryService {
+  private readonly prisma: PrismaClient = getPrisma();
+
   constructor(
     @inject(PIPELINE_TYPES.PipelineRepository)
     private readonly repo: PipelineRepository,
@@ -52,7 +27,222 @@ export class PipelineQueryService {
 
   async getRun(userId: string, pipelineRunId: string) {
     const run = await this.repo.getRunForUser(userId, pipelineRunId);
-    return sanitizeRun(run);
+
+    /* Build definition from code (was stored as JSON blob before) */
+    const codeDef = getPipelineDefinition(run.pipelineKey);
+    const definition = codeDef
+      ? {
+          key: codeDef.key,
+          version: codeDef.version,
+          displayName: codeDef.displayName,
+          steps: codeDef.steps.map((s) => ({
+            type: s.type,
+            id: s.id,
+            displayName: s.displayName,
+          })),
+        }
+      : {
+          key: run.pipelineKey,
+          version: run.pipelineVersion,
+          displayName: run.pipelineDisplayName,
+          steps: run.stepRuns.map((sr) => ({
+            type: sr.stepType,
+            id: sr.stepId,
+            displayName: sr.displayName,
+          })),
+        };
+
+    /* Fetch leads from PipelineRunLead + latest LeadScore */
+    const runLeads = await this.prisma.pipelineRunLead.findMany({
+      where: { pipelineRunId },
+      include: {
+        lead: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            company: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    /* Fetch final scores for these leads from this run */
+    const leadIds = runLeads.map((rl) => rl.leadId);
+    const scores = leadIds.length > 0
+      ? await this.prisma.leadScore.findMany({
+          where: {
+            pipelineRunId,
+            leadId: { in: leadIds },
+            stepInstanceId: "scoring-final",
+          },
+        })
+      : [];
+    const scoreMap = new Map(scores.map((s) => [s.leadId, s]));
+
+    /* Also fetch initial scoring stats for the run */
+    const initialScores = leadIds.length > 0
+      ? await this.prisma.leadScore.findMany({
+          where: {
+            pipelineRunId,
+            leadId: { in: leadIds },
+            stepInstanceId: "scoring-initial",
+          },
+        })
+      : [];
+
+    const runLeadMap = new Map(runLeads.map((rl) => [rl.leadId, rl]));
+
+    const leads = runLeads.map((rl) => {
+      const score = scoreMap.get(rl.leadId);
+      return {
+        id: rl.lead.id,
+        fullName: rl.lead.fullName,
+        email: rl.lead.email,
+        company: rl.lead.company,
+        excluded: rl.excluded,
+        finalScore: score?.finalScore ?? null,
+        icpFit: score?.icpFit ?? null,
+        signalStrength: score?.signalStrength ?? null,
+        icpReasoning: score?.reasoning ?? null,
+      };
+    });
+
+    /* Build initial scoring summary */
+    const scoringInitial = initialScores.length > 0
+      ? {
+          scored: initialScores.length,
+          passed: runLeads.filter((rl) => !rl.excluded).length,
+          rejected: runLeads.filter((rl) => rl.excluded).length,
+          averageScore: Math.round(
+            initialScores.reduce((sum, s) => sum + s.score, 0) / initialScores.length,
+          ),
+          details: initialScores.map((s) => {
+            const rl = runLeadMap.get(s.leadId);
+            return {
+              leadId: s.leadId,
+              fullName: rl?.lead.fullName ?? null,
+              company: rl?.lead.company ?? null,
+              score: s.score,
+              passed: !(rl?.excluded && rl.excludedByStepId === "scoring-initial"),
+              reasoning: s.reasoning ?? "",
+            };
+          }),
+        }
+      : null;
+
+    /* Build final scoring summary */
+    const scoringFinal = scores.length > 0
+      ? {
+          scored: scores.length,
+          averageFinalScore: Math.round(
+            scores.reduce((sum, s) => sum + (s.finalScore ?? 0), 0) / scores.length,
+          ),
+          details: scores.map((s) => {
+            const rl = runLeadMap.get(s.leadId);
+            return {
+              leadId: s.leadId,
+              fullName: rl?.lead.fullName ?? null,
+              company: rl?.lead.company ?? null,
+              icpFit: s.icpFit ?? 0,
+              finalScore: s.finalScore ?? 0,
+              icpReasoning: s.reasoning ?? "",
+              signalStrength: s.signalStrength ?? 0,
+            };
+          }),
+        }
+      : null;
+
+    /* Fetch company research results for enrichment summary */
+    const companyResearches = leadIds.length > 0
+      ? await this.prisma.companyResearch.findMany({
+          where: {
+            leadId: { in: leadIds },
+          },
+          include: { items: true },
+          orderBy: { createdAt: "desc" },
+        })
+      : [];
+
+    // Group by lead — take most recent research per lead
+    const enrichmentByLead = new Map<string, (typeof companyResearches)[number]>();
+    for (const cr of companyResearches) {
+      if (!enrichmentByLead.has(cr.leadId)) {
+        enrichmentByLead.set(cr.leadId, cr);
+      }
+    }
+
+    const enrichment = {
+      totalLeads: leadIds.length,
+      leadsWithResearch: enrichmentByLead.size,
+      companyResearch: Array.from(enrichmentByLead.entries()).map(([leadId, cr]) => {
+        const rl = runLeadMap.get(leadId);
+        return {
+          leadId,
+          fullName: rl?.lead.fullName ?? null,
+          company: cr.company,
+          companyDomain: cr.companyDomain,
+          status: cr.status,
+          items: cr.items.map((item) => ({
+            date: item.date,
+            summary: item.summary,
+            sourceUrl: item.sourceUrl,
+            category: item.category,
+          })),
+        };
+      }),
+    };
+
+    /* Fetch live outreach state from junction table */
+    const links = await this.repo.findOutreachDrafts(pipelineRunId);
+
+    const byLead = new Map<
+      string,
+      Array<typeof links[number]["message"]>
+    >();
+    for (const link of links) {
+      const { leadId } = link.message;
+      if (!byLead.has(leadId)) byLead.set(leadId, []);
+      byLead.get(leadId)!.push(link.message);
+    }
+
+    const outreach = Array.from(byLead.entries()).map(([leadId, messages]) => ({
+      leadId,
+      messages: messages.map((m) => ({
+        id: m.id,
+        body: m.body,
+        subject: m.subject,
+        channel: m.channel,
+        stage: m.stage,
+        tacticUsed: m.tacticUsed,
+        characterCount: m.characterCount,
+        wordCount: m.wordCount,
+        usageNote: m.usageNote,
+        sentAt: m.sentAt,
+        createdAt: m.createdAt,
+      })),
+    }));
+
+    return {
+      id: run.id,
+      status: run.status,
+      pipelineKey: run.pipelineKey,
+      pipelineVersion: run.pipelineVersion,
+      pipelineDisplayName: run.pipelineDisplayName,
+      definition,
+      leads,
+      scoringInitial,
+      scoringFinal,
+      enrichment,
+      outreach,
+      stepRuns: run.stepRuns,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      errorMessage: run.errorMessage,
+      errorStepId: run.errorStepId,
+      createdAt: run.createdAt,
+    };
   }
 
   /* ---------------------------------------------------------------- */
@@ -75,10 +265,7 @@ export class PipelineQueryService {
         | undefined,
     });
 
-    return {
-      ...result,
-      runs: result.runs.map(sanitizeRun),
-    };
+    return result;
   }
 
   /* ---------------------------------------------------------------- */

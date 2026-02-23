@@ -9,14 +9,8 @@ import type { PipelineRepository } from "@/modules/pipeline/persistence/pipeline
 import type { PipelineStepRegistry } from "@/modules/pipeline/engine/pipeline.registry";
 import type { PipelineBroadcaster } from "@/modules/pipeline/engine/pipeline.broadcaster";
 import {
-  applyContextPatch,
-  hydrateContext,
-} from "@/modules/pipeline/engine/pipeline.context";
-import {
   buildProgress,
   type PipelineContext,
-  type PipelineStepConfig,
-  type PipelineDefinition,
   type PipelineTools,
   type OnErrorPolicy,
   type RetryPolicy,
@@ -35,6 +29,24 @@ const DEFAULT_RETRY_POLICY: RetryPolicy = {
   backoffMs: 2000,
   backoffType: "exponential",
 };
+
+/* ------------------------------------------------------------------ */
+/*  Step-run shape (from DB include)                                  */
+/* ------------------------------------------------------------------ */
+
+interface StepRunRow {
+  stepId: string;
+  stepType: string;
+  stepIndex: number;
+  displayName: string;
+  enabled: boolean;
+  stepConfig: Prisma.JsonValue;
+  onError: string | null;
+  timeoutMs: number | null;
+  retryMaxAttempts: number | null;
+  retryBackoffMs: number | null;
+  retryBackoffType: string | null;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Executor                                                          */
@@ -78,10 +90,20 @@ export class PipelineExecutor {
       return;
     }
 
-    const definition = run.definition as unknown as PipelineDefinition;
-    const steps = definition.steps;
-    const enabledSteps = steps.filter((s) => s.enabled !== false);
+    /* Step execution params come from PipelineStepRun rows */
+    const stepRows = run.stepRuns as StepRunRow[];
+    const enabledSteps = stepRows.filter((s) => s.enabled);
     const totalSteps = enabledSteps.length;
+
+    /* Resolve default policies from the run's flat columns */
+    const defaultOnError = (run.defaultOnError as OnErrorPolicy) ?? "stop";
+    const defaultTimeoutMs = run.defaultTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
+    const defaultRetryPolicy: RetryPolicy = {
+      maxAttempts: run.defaultRetryMaxAttempts ?? DEFAULT_RETRY_POLICY.maxAttempts,
+      backoffMs: run.defaultRetryBackoffMs ?? DEFAULT_RETRY_POLICY.backoffMs,
+      backoffType: (run.defaultRetryBackoffType as RetryPolicy["backoffType"])
+        ?? DEFAULT_RETRY_POLICY.backoffType,
+    };
 
     /* 2. Mark run as RUNNING ---------------------------------------- */
     await this.repo.updateRunStatus(pipelineRunId, "RUNNING", {
@@ -90,39 +112,37 @@ export class PipelineExecutor {
 
     this.broadcaster.emitRunStarted(
       pipelineRunId,
-      definition.key,
+      run.pipelineKey,
       enabledSteps.map((s) => ({
-        stepId: s.id,
+        stepId: s.stepId,
         displayName: s.displayName,
-        stepType: s.type,
+        stepType: s.stepType,
       })),
     );
 
     lg.info(
-      { pipelineRunId, pipelineKey: definition.key, totalSteps },
+      { pipelineRunId, pipelineKey: run.pipelineKey, totalSteps },
       "Pipeline execution started",
     );
 
-    /* 3. Hydrate context from DB ------------------------------------ */
-    let ctx: PipelineContext = hydrateContext({
+    /* 3. Build immutable pipeline context --------------------------- */
+    const ctx: PipelineContext = {
       pipelineRunId,
-      pipelineKey: definition.key,
+      pipelineKey: run.pipelineKey,
       createdById: run.createdById,
       companyId: run.companyId,
-      input: run.input,
-      data: run.context ?? {},
-    });
+    };
 
     let completedSteps = 0;
     let lastFailedStepId: string | undefined;
 
     /* 4. Iterate steps sequentially --------------------------------- */
-    for (let i = 0; i < steps.length; i++) {
-      const stepConfig = steps[i];
+    for (let i = 0; i < stepRows.length; i++) {
+      const stepRow = stepRows[i];
 
       /* 4a. Check cancellation -------------------------------------- */
       if (await this.isCancelled(pipelineRunId)) {
-        lg.info({ pipelineRunId, stepId: stepConfig.id }, "Pipeline cancelled");
+        lg.info({ pipelineRunId, stepId: stepRow.stepId }, "Pipeline cancelled");
         await this.repo.cancelRemainingSteps(pipelineRunId, i);
         await this.repo.updateRunStatus(pipelineRunId, "CANCELLED", {
           finishedAt: new Date(),
@@ -130,41 +150,43 @@ export class PipelineExecutor {
         this.broadcaster.emitRunCancelled(
           pipelineRunId,
           buildProgress(completedSteps, totalSteps),
-          stepConfig.id,
+          stepRow.stepId,
         );
         return;
       }
 
       /* 4b. Check if step is disabled ------------------------------- */
-      /*    Disabled steps are completely transparent: no DB status   */
-      /*    update, no WS events, not counted in progress.           */
-      if (stepConfig.enabled === false) {
-        lg.info({ pipelineRunId, stepId: stepConfig.id }, "Step disabled; skipping silently");
+      if (!stepRow.enabled) {
+        lg.info({ pipelineRunId, stepId: stepRow.stepId }, "Step disabled; skipping silently");
         continue;
       }
 
       /* 4c. Resolve handler ----------------------------------------- */
-      const handler = this.registry.get(stepConfig.type);
+      const handler = this.registry.get(stepRow.stepType);
 
       /* 4d. Update current step tracking ---------------------------- */
-      await this.repo.updateRunCurrentStep(pipelineRunId, stepConfig.id, i);
+      await this.repo.updateRunCurrentStep(pipelineRunId, stepRow.stepId, i);
 
-      /* 4e. Execute the step with retry ----------------------------- */
-      const retryPolicy = stepConfig.retryPolicy
-        ?? definition.defaults?.retryPolicy
-        ?? DEFAULT_RETRY_POLICY;
-      const timeoutMs = stepConfig.timeoutMs
-        ?? definition.defaults?.timeoutMs
-        ?? DEFAULT_STEP_TIMEOUT_MS;
-      const onError: OnErrorPolicy = stepConfig.onError
-        ?? definition.defaults?.onError
-        ?? "stop";
+      /* 4e. Resolve execution params from step row or defaults ------ */
+      const retryPolicy: RetryPolicy = {
+        maxAttempts: stepRow.retryMaxAttempts ?? defaultRetryPolicy.maxAttempts,
+        backoffMs: stepRow.retryBackoffMs ?? defaultRetryPolicy.backoffMs,
+        backoffType: (stepRow.retryBackoffType as RetryPolicy["backoffType"])
+          ?? defaultRetryPolicy.backoffType,
+      };
+      const timeoutMs = stepRow.timeoutMs ?? defaultTimeoutMs;
+      const onError: OnErrorPolicy = (stepRow.onError as OnErrorPolicy) ?? defaultOnError;
+
+      const stepConfig = (stepRow.stepConfig as Record<string, unknown>) ?? {};
 
       const success = await this.executeStep({
         pipelineRunId,
-        stepConfig,
+        stepId: stepRow.stepId,
+        stepType: stepRow.stepType,
+        displayName: stepRow.displayName,
         handler,
         ctx,
+        stepConfig,
         retryPolicy,
         timeoutMs,
         completedSteps,
@@ -173,45 +195,33 @@ export class PipelineExecutor {
       });
 
       if (success) {
-        /* Re-read context from the DB after step (the step runner persists it) */
-        const updatedRun = await this.repo.getRunById(pipelineRunId);
-        if (updatedRun?.context) {
-          ctx = hydrateContext({
-            pipelineRunId,
-            pipelineKey: definition.key,
-            createdById: run.createdById,
-            companyId: run.companyId,
-            input: run.input,
-            data: updatedRun.context,
-          });
-        }
         completedSteps++;
       } else {
-        lastFailedStepId = stepConfig.id;
+        lastFailedStepId = stepRow.stepId;
 
         if (onError === "stop") {
           lg.error(
-            { pipelineRunId, stepId: stepConfig.id },
+            { pipelineRunId, stepId: stepRow.stepId },
             "Step failed with onError=stop; aborting pipeline",
           );
           await this.repo.cancelRemainingSteps(pipelineRunId, i + 1);
           await this.repo.updateRunStatus(pipelineRunId, "FAILED", {
             finishedAt: new Date(),
-            errorMessage: `Step "${stepConfig.displayName}" failed`,
-            errorStepId: stepConfig.id,
+            errorMessage: `Step "${stepRow.displayName}" failed`,
+            errorStepId: stepRow.stepId,
           });
           this.broadcaster.emitRunFailed(
             pipelineRunId,
-            `Step "${stepConfig.displayName}" failed`,
+            `Step "${stepRow.displayName}" failed`,
             buildProgress(completedSteps, totalSteps),
-            stepConfig.id,
+            stepRow.stepId,
           );
           return;
         }
 
         /* onError === "continue" → skip and proceed */
         lg.warn(
-          { pipelineRunId, stepId: stepConfig.id },
+          { pipelineRunId, stepId: stepRow.stepId },
           "Step failed with onError=continue; proceeding",
         );
         completedSteps++;
@@ -245,9 +255,12 @@ export class PipelineExecutor {
 
   private async executeStep(args: {
     pipelineRunId: string;
-    stepConfig: PipelineStepConfig;
+    stepId: string;
+    stepType: string;
+    displayName: string;
     handler: ReturnType<PipelineStepRegistry["get"]>;
     ctx: PipelineContext;
+    stepConfig: Record<string, unknown>;
     retryPolicy: RetryPolicy;
     timeoutMs: number;
     completedSteps: number;
@@ -256,9 +269,12 @@ export class PipelineExecutor {
   }): Promise<boolean> {
     const {
       pipelineRunId,
-      stepConfig,
+      stepId,
+      stepType,
+      displayName,
       handler,
       ctx: stepCtx,
+      stepConfig,
       retryPolicy,
       timeoutMs,
       completedSteps,
@@ -278,7 +294,7 @@ export class PipelineExecutor {
       const startedAt = new Date();
 
       /* Mark step as RUNNING */
-      await this.repo.updateStepStatus(pipelineRunId, stepConfig.id, "RUNNING", {
+      await this.repo.updateStepStatus(pipelineRunId, stepId, "RUNNING", {
         startedAt,
         attempts: attempt,
       });
@@ -286,9 +302,9 @@ export class PipelineExecutor {
       if (attempt === 1) {
         this.broadcaster.emitStepStarted(
           pipelineRunId,
-          stepConfig.id,
-          stepConfig.type,
-          stepConfig.displayName,
+          stepId,
+          stepType,
+          displayName,
           buildProgress(completedSteps, totalSteps),
         );
       }
@@ -300,7 +316,7 @@ export class PipelineExecutor {
         emitProgress: (message: string, data?: unknown) => {
           this.broadcaster.emitStepProgress(
             pipelineRunId,
-            stepConfig.id,
+            stepId,
             message,
             data,
           );
@@ -310,20 +326,17 @@ export class PipelineExecutor {
       try {
         /* Execute with timeout */
         const result = await this.withTimeout(
-          handler.run(stepCtx, stepConfig.config ?? {}, tools),
+          handler.run(stepCtx, stepConfig, tools),
           timeoutMs,
-          stepConfig.id,
+          stepId,
         );
-
-        /* Success: patch context and persist */
-        const newData = applyContextPatch(stepCtx.data, result.contextPatch);
 
         const finishedAt = new Date();
         const durationMs = finishedAt.getTime() - startedAt.getTime();
 
         await this.repo.updateStepStatus(
           pipelineRunId,
-          stepConfig.id,
+          stepId,
           "SUCCEEDED",
           {
             finishedAt,
@@ -332,22 +345,16 @@ export class PipelineExecutor {
           },
         );
 
-        /* Persist the updated context on the run */
-        await this.repo.updateRunContext(
-          pipelineRunId,
-          JSON.parse(JSON.stringify(newData)) as Prisma.InputJsonValue,
-        );
-
         this.broadcaster.emitStepSucceeded(
           pipelineRunId,
-          stepConfig.id,
+          stepId,
           result.outputSummary,
           buildProgress(completedSteps + 1, totalSteps),
           durationMs,
         );
 
         lg.info(
-          { pipelineRunId, stepId: stepConfig.id, attempt, durationMs },
+          { pipelineRunId, stepId, attempt, durationMs },
           "Step succeeded",
         );
 
@@ -358,7 +365,7 @@ export class PipelineExecutor {
         lg.warn(
           {
             pipelineRunId,
-            stepId: stepConfig.id,
+            stepId,
             attempt,
             maxAttempts,
             err: lastError.message,
@@ -380,20 +387,20 @@ export class PipelineExecutor {
     /* All attempts exhausted — mark step as failed */
     const errorMessage = lastError?.message ?? "Unknown error";
 
-    await this.repo.updateStepStatus(pipelineRunId, stepConfig.id, "FAILED", {
+    await this.repo.updateStepStatus(pipelineRunId, stepId, "FAILED", {
       finishedAt: new Date(),
       errorMessage,
     });
 
     this.broadcaster.emitStepFailed(
       pipelineRunId,
-      stepConfig.id,
+      stepId,
       errorMessage,
       buildProgress(completedSteps, totalSteps),
     );
 
     lg.error(
-      { pipelineRunId, stepId: stepConfig.id, error: errorMessage },
+      { pipelineRunId, stepId, error: errorMessage },
       "Step failed after all attempts",
     );
 

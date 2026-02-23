@@ -12,6 +12,9 @@ import {
   StartPipelineBodySchema,
   PipelineRunParamsSchema,
   ListPipelineRunsQuerySchema,
+  AcceptOutreachBodySchema,
+  CustomOutreachBodySchema,
+  OutreachMessageParamsSchema,
 } from "./schemas/pipeline.schemas";
 
 /* ------------------------------------------------------------------ */
@@ -124,6 +127,64 @@ export function registerPipelineRoutes(app: FastifyInstance): void {
     await commandService.cancelPipeline(userId, params.id);
 
     reply.code(204);
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  POST /pipelines/runs/:id/outreach/accept — accept a draft      */
+  /* ---------------------------------------------------------------- */
+
+  app.post("/pipelines/runs/:id/outreach/accept", async (req, reply) => {
+    const userId = requireRequestUserId(req);
+    const params = PipelineRunParamsSchema.parse(req.params);
+    const body = AcceptOutreachBodySchema.parse(req.body);
+
+    const message = await commandService.acceptOutreachDraft(
+      userId,
+      params.id,
+      body.messageId,
+    );
+
+    return reply.status(201).send(message);
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  POST /pipelines/runs/:id/outreach/custom — save edited draft   */
+  /* ---------------------------------------------------------------- */
+
+  app.post("/pipelines/runs/:id/outreach/custom", async (req, reply) => {
+    const userId = requireRequestUserId(req);
+    const params = PipelineRunParamsSchema.parse(req.params);
+    const body = CustomOutreachBodySchema.parse(req.body);
+
+    const message = await commandService.saveCustomOutreach(
+      userId,
+      params.id,
+      body.messageId,
+      body.body,
+      body.subject,
+    );
+
+    return reply.status(201).send(message);
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  DELETE /pipelines/runs/:id/outreach/:messageId — delete draft  */
+  /* ---------------------------------------------------------------- */
+
+  app.delete("/pipelines/runs/:id/outreach/:messageId", async (req, reply) => {
+    const userId = requireRequestUserId(req);
+    const params = OutreachMessageParamsSchema.parse(req.params);
+
+    await commandService.deleteOutreachDraft(
+      userId,
+      params.id,
+      params.messageId,
+    );
+
+    return reply.status(200).send({
+      success: true,
+      message: "Draft message deleted successfully",
+    });
   });
 
   /* ---------------------------------------------------------------- */

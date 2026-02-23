@@ -36,3 +36,28 @@ export const ListPipelineRunsQuerySchema = z.object({
 });
 
 export type ListPipelineRunsQuery = z.infer<typeof ListPipelineRunsQuerySchema>;
+
+/* ------------------------------------------------------------------ */
+/*  Outreach management schemas                                       */
+/* ------------------------------------------------------------------ */
+
+export const AcceptOutreachBodySchema = z.object({
+  messageId: z.string().min(1),
+});
+
+export type AcceptOutreachBody = z.infer<typeof AcceptOutreachBodySchema>;
+
+export const CustomOutreachBodySchema = z.object({
+  messageId: z.string().min(1),
+  body: z.string().min(1),
+  subject: z.string().optional(),
+});
+
+export type CustomOutreachBody = z.infer<typeof CustomOutreachBodySchema>;
+
+export const OutreachMessageParamsSchema = z.object({
+  id: z.string().min(1),
+  messageId: z.string().min(1),
+});
+
+export type OutreachMessageParams = z.infer<typeof OutreachMessageParamsSchema>;

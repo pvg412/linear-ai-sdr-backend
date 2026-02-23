@@ -44,42 +44,14 @@ export interface PipelineStepConfig {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Pipeline Input (what the user provides when starting a run)       */
+/*  Pipeline Context (immutable identity passed to every step)        */
 /* ------------------------------------------------------------------ */
-
-export interface PipelineInput {
-  leadIds?: string[];
-  filters?: Record<string, unknown>;
-  directoryId?: string;
-  [key: string]: unknown;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Pipeline Context (shared mutable state across steps)              */
-/* ------------------------------------------------------------------ */
-
-export interface PipelineContextData {
-  /** Lead references produced by lead-generation step */
-  leads?: LeadReference[];
-  /** Arbitrary per-step output keyed by step instance id */
-  [stepInstanceId: string]: unknown;
-}
-
-export interface LeadReference {
-  id: string;
-  fullName?: string | null;
-  email?: string | null;
-  company?: string | null;
-  [key: string]: unknown;
-}
 
 export interface PipelineContext {
   pipelineRunId: string;
   pipelineKey: string;
   createdById: string;
   companyId: string | null;
-  input: PipelineInput;
-  data: PipelineContextData;
 }
 
 /* ------------------------------------------------------------------ */
@@ -87,8 +59,6 @@ export interface PipelineContext {
 /* ------------------------------------------------------------------ */
 
 export interface PipelineStepResult {
-  /** Partial context to merge into the running PipelineContext.data */
-  contextPatch: Partial<PipelineContextData>;
   /** Small JSON-safe summary stored in PipelineStepRun.outputSummary for UI display */
   outputSummary: Record<string, unknown>;
 }

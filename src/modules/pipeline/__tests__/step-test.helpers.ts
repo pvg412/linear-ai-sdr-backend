@@ -1,7 +1,6 @@
 import { vi } from "vitest";
 
 import type {
-  LeadReference,
   PipelineContext,
   PipelineTools,
 } from "@/modules/pipeline/schemas/pipeline.dto";
@@ -16,8 +15,6 @@ export function makeCtx(overrides?: Partial<PipelineContext>): PipelineContext {
     pipelineKey: "test-pipeline",
     createdById: "user-1",
     companyId: "company-1",
-    input: {},
-    data: {},
     ...overrides,
   };
 }
@@ -39,33 +36,4 @@ export function makeTools(opts?: { cancelled?: boolean }): PipelineTools {
   };
 }
 
-/* ------------------------------------------------------------------ */
-/*  Lead references                                                    */
-/* ------------------------------------------------------------------ */
 
-export function makeLeadRef(
-  i: number,
-  extra?: Partial<LeadReference>,
-): LeadReference {
-  return {
-    id: `lead-${i}`,
-    fullName: `Lead ${i}`,
-    email: `lead${i}@example.com`,
-    company: `Company ${i}`,
-    linkedinUrl: `https://linkedin.com/in/lead-${i}`,
-    title: `Title ${i}`,
-    ...extra,
-  };
-}
-
-/**
- * Generate an array of N lead references with sequential IDs.
- */
-export function makeLeadRefs(
-  count: number,
-  extraFn?: (i: number) => Partial<LeadReference>,
-): LeadReference[] {
-  return Array.from({ length: count }, (_, i) =>
-    makeLeadRef(i, extraFn?.(i)),
-  );
-}

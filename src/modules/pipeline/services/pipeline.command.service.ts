@@ -1,6 +1,6 @@
 import { inject, injectable } from "inversify";
 import type { Queue } from "bullmq";
-import type { Prisma } from "@prisma/client";
+import { MessageSender, type Prisma } from "@prisma/client";
 
 import { UserFacingError } from "@/infra/userFacingError";
 import { loadEnv } from "@/config/env";
@@ -13,7 +13,6 @@ import type { PipelineStepRegistry } from "@/modules/pipeline/engine/pipeline.re
 import {
   getPipelineDefinition,
 } from "@/modules/pipeline/engine/pipeline.definitions";
-import type { PipelineInput } from "@/modules/pipeline/schemas/pipeline.dto";
 import { buildProgress } from "@/modules/pipeline/schemas/pipeline.dto";
 import {
   pipelineRunJobOptions,
@@ -21,6 +20,8 @@ import {
   type PipelineRunJobName,
 } from "@/infra/queue/pipeline-run/pipeline-run.queue";
 import { getPrisma } from "@/infra/prisma";
+import { LEAD_CONVERSATIONS_TYPES } from "@/modules/lead-conversations/lead-conversations.types";
+import type { LeadConversationsRepository } from "@/modules/lead-conversations/persistence/lead-conversations.repository";
 
 const env = loadEnv();
 
@@ -39,6 +40,8 @@ export class PipelineCommandService {
     private readonly registry: PipelineStepRegistry,
     @inject(QUEUE_TYPES.PipelineRunQueue)
     private readonly queue: Queue<PipelineRunJobData, void, PipelineRunJobName>,
+    @inject(LEAD_CONVERSATIONS_TYPES.LeadConversationsRepository)
+    private readonly conversationsRepo: LeadConversationsRepository,
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -48,7 +51,7 @@ export class PipelineCommandService {
   async startPipeline(
     userId: string,
     pipelineKey: string,
-    input: PipelineInput,
+    input: { leadIds?: string[]; directoryId?: string },
   ): Promise<{ pipelineRunId: string }> {
     /* 1. Resolve definition */
     const definition = getPipelineDefinition(pipelineKey);
@@ -117,18 +120,35 @@ export class PipelineCommandService {
     }
 
     /* 7. Create PipelineRun + PipelineStepRun records */
+    const defaults = definition.defaults;
     const run = await this.repo.createRun({
       pipelineKey: definition.key,
       pipelineVersion: definition.version,
       createdById: userId,
       companyId,
-      input: JSON.parse(JSON.stringify(input)) as Prisma.InputJsonValue,
-      definition: JSON.parse(JSON.stringify(definition)) as Prisma.InputJsonValue,
+      pipelineDisplayName: definition.displayName,
+      pipelineDescription: definition.description,
+      defaultOnError: defaults?.onError,
+      defaultTimeoutMs: defaults?.timeoutMs,
+      defaultRetryMaxAttempts: defaults?.retryPolicy?.maxAttempts,
+      defaultRetryBackoffMs: defaults?.retryPolicy?.backoffMs,
+      defaultRetryBackoffType: defaults?.retryPolicy?.backoffType,
+      inputDirectoryId: input.directoryId,
+      inputLeadIds: input.leadIds,
       steps: definition.steps.map((s, i) => ({
         stepId: s.id,
         stepType: s.type,
         stepIndex: i,
         displayName: s.displayName,
+        stepConfig: s.config
+          ? (JSON.parse(JSON.stringify(s.config)) as Prisma.InputJsonValue)
+          : undefined,
+        onError: s.onError,
+        timeoutMs: s.timeoutMs,
+        retryMaxAttempts: s.retryPolicy?.maxAttempts,
+        retryBackoffMs: s.retryPolicy?.backoffMs,
+        retryBackoffType: s.retryPolicy?.backoffType,
+        enabled: s.enabled,
       })),
     });
 
@@ -186,5 +206,162 @@ export class PipelineCommandService {
       buildProgress(completedSteps, totalSteps),
       run.currentStepId ?? undefined,
     );
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Accept Outreach Draft                                           */
+  /* ---------------------------------------------------------------- */
+
+  async acceptOutreachDraft(
+    userId: string,
+    pipelineRunId: string,
+    messageId: string,
+  ) {
+    /* 1. Ownership check */
+    await this.repo.getRunForUser(userId, pipelineRunId);
+
+    /* 2. Verify message belongs to this run */
+    const link = await this.repo.findOutreachLink(pipelineRunId, messageId);
+    if (!link) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "Outreach message not found in this pipeline run.",
+      });
+    }
+
+    const draft = link.message;
+
+    /* 3. One accepted message per lead per run */
+    const alreadyAccepted = await this.repo.hasAcceptedMessageForLead(
+      pipelineRunId,
+      draft.leadId,
+    );
+    if (alreadyAccepted) {
+      throw new UserFacingError({
+        code: "CONFLICT",
+        userMessage:
+          "A message has already been saved for this lead in this pipeline run.",
+      });
+    }
+
+    /* 4. Create finalized message (copy from draft, set sentAt) */
+    const finalMsg = await this.conversationsRepo.createMessage({
+      leadId: draft.leadId,
+      channel: draft.channel,
+      stage: draft.stage ?? undefined,
+      subject: draft.subject ?? undefined,
+      body: draft.body,
+      characterCount: draft.characterCount ?? undefined,
+      wordCount: draft.wordCount ?? undefined,
+      usageNote: draft.usageNote ?? undefined,
+      tacticUsed: draft.tacticUsed ?? undefined,
+      createdBy: userId,
+      senderType: MessageSender.SALE_MANAGER,
+      sentAt: new Date(),
+    });
+
+    /* 5. Link the finalized message to the pipeline run */
+    await this.conversationsRepo.linkToPipelineRun(
+      finalMsg.id,
+      pipelineRunId,
+    );
+
+    return finalMsg;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Save Custom (edited) Outreach                                   */
+  /* ---------------------------------------------------------------- */
+
+  async saveCustomOutreach(
+    userId: string,
+    pipelineRunId: string,
+    messageId: string,
+    body: string,
+    subject?: string,
+  ) {
+    /* 1. Ownership check */
+    await this.repo.getRunForUser(userId, pipelineRunId);
+
+    /* 2. Verify message belongs to this run */
+    const link = await this.repo.findOutreachLink(pipelineRunId, messageId);
+    if (!link) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "Outreach message not found in this pipeline run.",
+      });
+    }
+
+    const draft = link.message;
+
+    /* 3. One accepted message per lead per run */
+    const alreadyAccepted = await this.repo.hasAcceptedMessageForLead(
+      pipelineRunId,
+      draft.leadId,
+    );
+    if (alreadyAccepted) {
+      throw new UserFacingError({
+        code: "CONFLICT",
+        userMessage:
+          "A message has already been saved for this lead in this pipeline run.",
+      });
+    }
+
+    /* 4. Create finalized message with edited content */
+    const finalMsg = await this.conversationsRepo.createMessage({
+      leadId: draft.leadId,
+      channel: draft.channel,
+      stage: draft.stage ?? undefined,
+      subject: subject ?? draft.subject ?? undefined,
+      body,
+      characterCount: body.length,
+      wordCount: body.split(/\s+/).filter(Boolean).length,
+      usageNote: draft.usageNote ?? undefined,
+      tacticUsed: draft.tacticUsed ?? undefined,
+      createdBy: userId,
+      senderType: MessageSender.SALE_MANAGER,
+      sentAt: new Date(),
+    });
+
+    /* 5. Link the finalized message to the pipeline run */
+    await this.conversationsRepo.linkToPipelineRun(
+      finalMsg.id,
+      pipelineRunId,
+    );
+
+    return finalMsg;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Delete Outreach Draft                                           */
+  /* ---------------------------------------------------------------- */
+
+  async deleteOutreachDraft(
+    userId: string,
+    pipelineRunId: string,
+    messageId: string,
+  ): Promise<void> {
+    /* 1. Ownership check */
+    await this.repo.getRunForUser(userId, pipelineRunId);
+
+    /* 2. Verify message belongs to this run */
+    const link = await this.repo.findOutreachLink(pipelineRunId, messageId);
+    if (!link) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "Outreach message not found in this pipeline run.",
+      });
+    }
+
+    /* 3. Only drafts (sentAt = null) can be deleted */
+    if (link.message.sentAt !== null) {
+      throw new UserFacingError({
+        code: "BAD_REQUEST",
+        userMessage: "Cannot delete an already accepted message.",
+      });
+    }
+
+    /* 4. Delete message (junction row cascades) */
+    await this.repo.deleteOutreachMessage(messageId);
   }
 }

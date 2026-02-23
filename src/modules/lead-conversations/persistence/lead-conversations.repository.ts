@@ -312,4 +312,33 @@ export class LeadConversationsRepository {
 
     return earliestDate;
   }
+
+  /**
+   * Create a link between a pipeline run and an outreach message
+   * in the PipelineRunOutreachMessage junction table.
+   */
+  async linkToPipelineRun(
+    messageId: string,
+    pipelineRunId: string,
+  ): Promise<void> {
+    await this.prisma.pipelineRunOutreachMessage.create({
+      data: { pipelineRunId, messageId },
+    });
+  }
+
+  /**
+   * Create links between a pipeline run and multiple outreach messages
+   * in a single batch operation.
+   */
+  async linkManyToPipelineRun(
+    messageIds: string[],
+    pipelineRunId: string,
+  ): Promise<void> {
+    if (messageIds.length === 0) return;
+
+    await this.prisma.pipelineRunOutreachMessage.createMany({
+      data: messageIds.map((messageId) => ({ pipelineRunId, messageId })),
+      skipDuplicates: true,
+    });
+  }
 }

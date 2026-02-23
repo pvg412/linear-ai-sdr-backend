@@ -25,22 +25,15 @@ export class SignalsStep implements PipelineStepHandler {
     _config: Record<string, unknown>,
     tools: PipelineTools,
   ): Promise<PipelineStepResult> {
-    const leads = ctx.data.leads ?? [];
-
     tools.log.info(
-      { pipelineRunId: ctx.pipelineRunId, leadCount: leads.length },
+      { pipelineRunId: ctx.pipelineRunId },
       "Signals step skipped — not yet implemented",
     );
 
-    tools.emitProgress(
-      `Signals detection not yet available — passing ${leads.length} lead(s) through`,
-    );
+    tools.emitProgress("Signals detection not yet available — skipping");
 
-    // Leads pass through unchanged; no context mutation needed
     return Promise.resolve({
-      contextPatch: {},
       outputSummary: {
-        leadsAnalyzed: leads.length,
         signalsDetected: 0,
         skipped: true,
       },

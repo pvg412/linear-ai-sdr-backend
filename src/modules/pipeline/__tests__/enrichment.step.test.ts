@@ -5,7 +5,7 @@ import { EnrichmentStep } from "@/modules/pipeline/steps/enrichment.step";
 import type { CompanyResearchCommandService } from "@/modules/company-research/services/company-research.command.service";
 import type { ProfileEnrichmentCommandService } from "@/modules/profile-enrichment/services/profile-enrichment.command.service";
 
-import { makeCtx, makeTools, makeLeadRef, makeLeadRefs } from "./step-test.helpers";
+import { makeCtx, makeTools } from "./step-test.helpers";
 
 /* ------------------------------------------------------------------ */
 /*  Mock factories                                                     */
@@ -57,6 +57,9 @@ function createMockPrisma(opts?: {
   let researchPollCount = 0;
 
   return {
+    pipelineRunLead: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     leadEnrichmentRequest: {
       findMany: vi.fn().mockImplementation(
         (args: { where: { id: { in: string[] } } }) => {
@@ -145,8 +148,26 @@ describe("EnrichmentStep", () => {
   it("happy path: enqueues profile + company research, polls until COMPLETED", async () => {
     const { step, profileEnrichment, companyResearch, mockPrisma } = buildStep();
 
-    const leads = makeLeadRefs(2);
-    const ctx = makeCtx({ data: { leads } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue(
+      Array.from({ length: 2 }, (_, i) => ({
+        id: `prl-${i}`,
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: `lead-${i}`,
+        lead: {
+          id: `lead-${i}`,
+          fullName: `Lead ${i}`,
+          email: `lead${i}@example.com`,
+          company: `Company ${i}`,
+          linkedinUrl: `https://linkedin.com/in/lead-${i}`,
+          title: `Title ${i}`,
+        },
+        excluded: false,
+        excludedByStepId: null,
+      })),
+    );
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const runPromise = step.run(ctx, {}, tools);
@@ -172,19 +193,11 @@ describe("EnrichmentStep", () => {
         errors: 0,
       }),
     );
-
-    // Company research results should be in contextPatch
-    const enrichment = result.contextPatch.enrichmentResults as Record<string, unknown>;
-    expect(enrichment.companyResearch).toBeDefined();
-    const research = enrichment.companyResearch as Record<string, { company: string; items: unknown[] }>;
-    expect(research["lead-0"]).toBeDefined();
-    expect(research["lead-0"].items).toHaveLength(1);
-    expect(research["lead-1"]).toBeDefined();
   });
 
   it("empty leads array returns zero summary with no calls", async () => {
     const { step, profileEnrichment, companyResearch } = buildStep();
-    const ctx = makeCtx({ data: { leads: [] } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, {}, tools);
@@ -195,10 +208,28 @@ describe("EnrichmentStep", () => {
   });
 
   it("lead without linkedinUrl skips profile enrichment, does company research", async () => {
-    const { step, profileEnrichment, companyResearch } = buildStep();
+    const { step, profileEnrichment, companyResearch, mockPrisma } = buildStep();
 
-    const lead = makeLeadRef(0, { linkedinUrl: undefined });
-    const ctx = makeCtx({ data: { leads: [lead] } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue([
+      {
+        id: "prl-0",
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: "lead-0",
+        lead: {
+          id: "lead-0",
+          fullName: "Lead 0",
+          email: "lead0@example.com",
+          company: "Company 0",
+          linkedinUrl: undefined,
+          title: "Title 0",
+        },
+        excluded: false,
+        excludedByStepId: null,
+      },
+    ]);
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const runPromise = step.run(ctx, {}, tools);
@@ -212,10 +243,28 @@ describe("EnrichmentStep", () => {
   });
 
   it("lead without company skips company research, does profile enrichment", async () => {
-    const { step, profileEnrichment, companyResearch } = buildStep();
+    const { step, profileEnrichment, companyResearch, mockPrisma } = buildStep();
 
-    const lead = makeLeadRef(0, { company: undefined });
-    const ctx = makeCtx({ data: { leads: [lead] } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue([
+      {
+        id: "prl-0",
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: "lead-0",
+        lead: {
+          id: "lead-0",
+          fullName: "Lead 0",
+          email: "lead0@example.com",
+          company: undefined,
+          linkedinUrl: "https://linkedin.com/in/lead-0",
+          title: "Title 0",
+        },
+        excluded: false,
+        excludedByStepId: null,
+      },
+    ]);
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const runPromise = step.run(ctx, {}, tools);
@@ -231,8 +280,26 @@ describe("EnrichmentStep", () => {
   it("lead without both linkedinUrl and company enqueues nothing, no poll", async () => {
     const { step, profileEnrichment, companyResearch, mockPrisma } = buildStep();
 
-    const lead = makeLeadRef(0, { linkedinUrl: undefined, company: undefined });
-    const ctx = makeCtx({ data: { leads: [lead] } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue([
+      {
+        id: "prl-0",
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: "lead-0",
+        lead: {
+          id: "lead-0",
+          fullName: "Lead 0",
+          email: "lead0@example.com",
+          company: undefined,
+          linkedinUrl: undefined,
+          title: "Title 0",
+        },
+        excluded: false,
+        excludedByStepId: null,
+      },
+    ]);
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, {}, tools);
@@ -253,10 +320,28 @@ describe("EnrichmentStep", () => {
       ),
     } as unknown as ProfileEnrichmentCommandService;
 
-    const { step, companyResearch } = buildStep({ profileEnrichment });
+    const { step, companyResearch, mockPrisma } = buildStep({ profileEnrichment });
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue(
+      Array.from({ length: 1 }, (_, i) => ({
+        id: `prl-${i}`,
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: `lead-${i}`,
+        lead: {
+          id: `lead-${i}`,
+          fullName: `Lead ${i}`,
+          email: `lead${i}@example.com`,
+          company: `Company ${i}`,
+          linkedinUrl: `https://linkedin.com/in/lead-${i}`,
+          title: `Title ${i}`,
+        },
+        excluded: false,
+        excludedByStepId: null,
+      })),
+    );
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const runPromise = step.run(ctx, {}, tools);
@@ -276,10 +361,28 @@ describe("EnrichmentStep", () => {
       ),
     } as unknown as CompanyResearchCommandService;
 
-    const { step, profileEnrichment } = buildStep({ companyResearch });
+    const { step, profileEnrichment, mockPrisma } = buildStep({ companyResearch });
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue(
+      Array.from({ length: 1 }, (_, i) => ({
+        id: `prl-${i}`,
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: `lead-${i}`,
+        lead: {
+          id: `lead-${i}`,
+          fullName: `Lead ${i}`,
+          email: `lead${i}@example.com`,
+          company: `Company ${i}`,
+          linkedinUrl: `https://linkedin.com/in/lead-${i}`,
+          title: `Title ${i}`,
+        },
+        excluded: false,
+        excludedByStepId: null,
+      })),
+    );
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const runPromise = step.run(ctx, {}, tools);
@@ -293,10 +396,28 @@ describe("EnrichmentStep", () => {
   });
 
   it("includeProfileEnrichment: false skips profile enrichment", async () => {
-    const { step, profileEnrichment, companyResearch } = buildStep();
+    const { step, profileEnrichment, companyResearch, mockPrisma } = buildStep();
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue(
+      Array.from({ length: 1 }, (_, i) => ({
+        id: `prl-${i}`,
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: `lead-${i}`,
+        lead: {
+          id: `lead-${i}`,
+          fullName: `Lead ${i}`,
+          email: `lead${i}@example.com`,
+          company: `Company ${i}`,
+          linkedinUrl: `https://linkedin.com/in/lead-${i}`,
+          title: `Title ${i}`,
+        },
+        excluded: false,
+        excludedByStepId: null,
+      })),
+    );
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const runPromise = step.run(ctx, { includeProfileEnrichment: false }, tools);
@@ -309,10 +430,28 @@ describe("EnrichmentStep", () => {
   });
 
   it("includeCompanyResearch: false skips company research", async () => {
-    const { step, profileEnrichment, companyResearch } = buildStep();
+    const { step, profileEnrichment, companyResearch, mockPrisma } = buildStep();
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue(
+      Array.from({ length: 1 }, (_, i) => ({
+        id: `prl-${i}`,
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: `lead-${i}`,
+        lead: {
+          id: `lead-${i}`,
+          fullName: `Lead ${i}`,
+          email: `lead${i}@example.com`,
+          company: `Company ${i}`,
+          linkedinUrl: `https://linkedin.com/in/lead-${i}`,
+          title: `Title ${i}`,
+        },
+        excluded: false,
+        excludedByStepId: null,
+      })),
+    );
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const runPromise = step.run(ctx, { includeCompanyResearch: false }, tools);
@@ -332,8 +471,26 @@ describe("EnrichmentStep", () => {
 
     const { step } = buildStep({ prisma: mockPrisma });
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue(
+      Array.from({ length: 1 }, (_, i) => ({
+        id: `prl-${i}`,
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: `lead-${i}`,
+        lead: {
+          id: `lead-${i}`,
+          fullName: `Lead ${i}`,
+          email: `lead${i}@example.com`,
+          company: `Company ${i}`,
+          linkedinUrl: `https://linkedin.com/in/lead-${i}`,
+          title: `Title ${i}`,
+        },
+        excluded: false,
+        excludedByStepId: null,
+      })),
+    );
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const runPromise = step.run(ctx, {}, tools);
@@ -359,8 +516,26 @@ describe("EnrichmentStep", () => {
 
     const { step } = buildStep({ prisma: mockPrisma });
 
-    const leads = makeLeadRefs(2);
-    const ctx = makeCtx({ data: { leads } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue(
+      Array.from({ length: 2 }, (_, i) => ({
+        id: `prl-${i}`,
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: `lead-${i}`,
+        lead: {
+          id: `lead-${i}`,
+          fullName: `Lead ${i}`,
+          email: `lead${i}@example.com`,
+          company: `Company ${i}`,
+          linkedinUrl: `https://linkedin.com/in/lead-${i}`,
+          title: `Title ${i}`,
+        },
+        excluded: false,
+        excludedByStepId: null,
+      })),
+    );
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const runPromise = step.run(ctx, {}, tools);
@@ -385,8 +560,26 @@ describe("EnrichmentStep", () => {
 
     const { step } = buildStep({ prisma: mockPrisma });
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue(
+      Array.from({ length: 1 }, (_, i) => ({
+        id: `prl-${i}`,
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: `lead-${i}`,
+        lead: {
+          id: `lead-${i}`,
+          fullName: `Lead ${i}`,
+          email: `lead${i}@example.com`,
+          company: `Company ${i}`,
+          linkedinUrl: `https://linkedin.com/in/lead-${i}`,
+          title: `Title ${i}`,
+        },
+        excluded: false,
+        excludedByStepId: null,
+      })),
+    );
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const runPromise = step.run(ctx, {}, tools);
@@ -407,8 +600,26 @@ describe("EnrichmentStep", () => {
 
     const { step } = buildStep({ prisma: mockPrisma });
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue(
+      Array.from({ length: 1 }, (_, i) => ({
+        id: `prl-${i}`,
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: `lead-${i}`,
+        lead: {
+          id: `lead-${i}`,
+          fullName: `Lead ${i}`,
+          email: `lead${i}@example.com`,
+          company: `Company ${i}`,
+          linkedinUrl: `https://linkedin.com/in/lead-${i}`,
+          title: `Title ${i}`,
+        },
+        excluded: false,
+        excludedByStepId: null,
+      })),
+    );
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     // checkCancelled: false for enqueueing, true on poll iteration
@@ -435,9 +646,28 @@ describe("EnrichmentStep", () => {
   });
 
   it("batching: 12 leads with BATCH_SIZE=5 processes in 3 batches", async () => {
-    const { step } = buildStep();
-    const leads = makeLeadRefs(12);
-    const ctx = makeCtx({ data: { leads } });
+    const { step, mockPrisma } = buildStep();
+
+    mockPrisma.pipelineRunLead.findMany.mockResolvedValue(
+      Array.from({ length: 12 }, (_, i) => ({
+        id: `prl-${i}`,
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: `lead-${i}`,
+        lead: {
+          id: `lead-${i}`,
+          fullName: `Lead ${i}`,
+          email: `lead${i}@example.com`,
+          company: `Company ${i}`,
+          linkedinUrl: `https://linkedin.com/in/lead-${i}`,
+          title: `Title ${i}`,
+        },
+        excluded: false,
+        excludedByStepId: null,
+      })),
+    );
+
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const runPromise = step.run(ctx, {}, tools);

@@ -7,6 +7,7 @@ import type { PipelineRepository } from "@/modules/pipeline/persistence/pipeline
 import type { PipelineExecutor } from "@/modules/pipeline/engine/pipeline.executor";
 import type { PipelineBroadcaster } from "@/modules/pipeline/engine/pipeline.broadcaster";
 import type { PipelineStepRegistry } from "@/modules/pipeline/engine/pipeline.registry";
+import type { LeadConversationsRepository } from "@/modules/lead-conversations/persistence/lead-conversations.repository";
 
 /* ------------------------------------------------------------------ */
 /*  Mock factories                                                     */
@@ -33,7 +34,6 @@ function createMockRepo() {
     createRun: vi.fn().mockResolvedValue({ id: "run-123" }),
     updateRunStatus: vi.fn().mockResolvedValue({}),
     updateRunCurrentStep: vi.fn().mockResolvedValue({}),
-    updateRunContext: vi.fn().mockResolvedValue({}),
     updateStepStatus: vi.fn().mockResolvedValue({}),
     cancelRemainingSteps: vi.fn().mockResolvedValue({}),
   } as unknown as PipelineRepository;
@@ -73,6 +73,16 @@ function createMockRegistry() {
 
 function createMockQueue() {
   return { add: vi.fn().mockResolvedValue({ id: "job-1" }) };
+}
+
+function createMockConversationsRepo() {
+  return {
+    createMessage: vi.fn(),
+    findById: vi.fn(),
+    deleteMessage: vi.fn(),
+    linkToPipelineRun: vi.fn().mockResolvedValue(undefined),
+    linkManyToPipelineRun: vi.fn().mockResolvedValue(undefined),
+  } as unknown as LeadConversationsRepository;
 }
 
 function createMockPrisma() {
@@ -121,6 +131,7 @@ describe("PipelineCommandService", () => {
   let broadcaster: ReturnType<typeof createMockBroadcaster>;
   let registry: ReturnType<typeof createMockRegistry>;
   let queue: ReturnType<typeof createMockQueue>;
+  let conversationsRepo: ReturnType<typeof createMockConversationsRepo>;
   let mockPrisma: ReturnType<typeof createMockPrisma>;
 
   beforeEach(() => {
@@ -129,6 +140,7 @@ describe("PipelineCommandService", () => {
     broadcaster = createMockBroadcaster();
     registry = createMockRegistry();
     queue = createMockQueue();
+    conversationsRepo = createMockConversationsRepo();
     mockPrisma = createMockPrisma();
 
     service = new PipelineCommandService(
@@ -137,6 +149,7 @@ describe("PipelineCommandService", () => {
       broadcaster as unknown as PipelineBroadcaster,
       registry as unknown as PipelineStepRegistry,
       queue as never,
+      conversationsRepo,
     );
 
     /* Override the prisma field initialised via getPrisma() */
@@ -176,6 +189,7 @@ describe("PipelineCommandService", () => {
           pipelineVersion: 1,
           createdById: "user-1",
           companyId: "company-1",
+          pipelineDisplayName: "Full Lead Pipeline",
         }),
       );
 

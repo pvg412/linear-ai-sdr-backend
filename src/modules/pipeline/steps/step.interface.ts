@@ -7,8 +7,9 @@ import type {
 /**
  * Contract that every pipeline step handler must implement.
  *
- * Steps are **stateless** — all mutable state lives in the PipelineContext.
- * The registry maps a `type` string to exactly one handler instance.
+ * Steps write inter-step data directly to the database (e.g. PipelineRunLead,
+ * LeadScore, LeadConversationMessage). The returned PipelineStepResult only
+ * carries a small outputSummary for the UI.
  */
 export interface PipelineStepHandler {
   /** Unique handler type string, e.g. "lead-generation", "scoring" */
@@ -17,10 +18,10 @@ export interface PipelineStepHandler {
   /**
    * Execute the step.
    *
-   * @param ctx    Current pipeline context (read from `ctx.data`, write via return)
+   * @param ctx    Immutable pipeline identity (runId, key, userId, companyId)
    * @param config Per-instance configuration from the pipeline definition
    * @param tools  Logger, cancellation check, progress emitter
-   * @returns      Context patch + a small output summary for the UI
+   * @returns      A small output summary for the UI (stored in PipelineStepRun.outputSummary)
    */
   run(
     ctx: PipelineContext,

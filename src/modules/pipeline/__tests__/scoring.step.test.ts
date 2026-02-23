@@ -5,7 +5,7 @@ import { ScoringStep } from "@/modules/pipeline/steps/scoring.step";
 import type { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 import type { ServiceCatalogRepository } from "@/modules/service-catalog/persistence/service-catalog.repository";
 
-import { makeCtx, makeTools, makeLeadRefs } from "./step-test.helpers";
+import { makeCtx, makeTools } from "./step-test.helpers";
 
 /* ------------------------------------------------------------------ */
 /*  Mock factories                                                     */
@@ -50,12 +50,8 @@ function createMockServiceCatalogRepo(catalogs?: unknown[]) {
   } as unknown as ServiceCatalogRepository;
 }
 
-/**
- * Build a mock Prisma that covers lead.findMany + leadScore.createMany.
- * Returns lead records whose ids match the requested set.
- */
-function createMockPrisma(leadRecords?: Record<string, unknown>[]) {
-  const defaultLeads = Array.from({ length: 30 }, (_, i) => ({
+function makeDbLead(i: number) {
+  return {
     id: `lead-${i}`,
     fullName: `Lead ${i}`,
     title: `Title ${i}`,
@@ -73,18 +69,45 @@ function createMockPrisma(leadRecords?: Record<string, unknown>[]) {
     yearsInCompany: 5,
     totalExperienceYears: 10,
     currentPosition: `Position ${i}`,
-  }));
+  };
+}
 
-  const leads = leadRecords ?? defaultLeads;
+function makeRunLeads(count: number, leads?: ReturnType<typeof makeDbLead>[]) {
+  const dbLeads = leads ?? Array.from({ length: count }, (_, i) => makeDbLead(i));
+  return dbLeads.map((l) => ({
+    id: `prl-${l.id}`,
+    createdAt: new Date(),
+    pipelineRunId: "run-1",
+    leadId: l.id,
+    lead: l,
+    excluded: false,
+    excludedByStepId: null,
+  }));
+}
+
+/**
+ * Build a mock Prisma that covers pipelineRunLead.findMany + lead.findMany + leadScore.createMany.
+ */
+function createMockPrisma(opts?: {
+  leadCount?: number;
+  leadRecords?: ReturnType<typeof makeDbLead>[];
+}) {
+  const leads = opts?.leadRecords
+    ?? Array.from({ length: opts?.leadCount ?? 30 }, (_, i) => makeDbLead(i));
+  const runLeads = makeRunLeads(leads.length, leads);
 
   return {
     lead: {
       findMany: vi.fn().mockImplementation(
         (args: { where: { id: { in: string[] } } }) => {
           const ids = new Set(args.where.id.in);
-          return Promise.resolve(leads.filter((l) => ids.has(l.id as string)));
+          return Promise.resolve(leads.filter((l) => ids.has(l.id)));
         },
       ),
+    },
+    pipelineRunLead: {
+      findMany: vi.fn().mockResolvedValue(runLeads),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     leadScore: {
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -130,16 +153,15 @@ describe("ScoringStep", () => {
 
     const { step, mockPrisma } = buildStep({
       aiGrpcClient: createMockAiGrpcClient(scores),
+      prisma: createMockPrisma({ leadCount: 3 }),
     });
 
-    const leads = makeLeadRefs(3);
-    const ctx = makeCtx({ data: { leads } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, { _stepId: "scoring-initial" }, tools);
 
     // 2 leads pass threshold (60), 1 rejected
-    expect(result.contextPatch.leads).toHaveLength(2);
     expect(result.outputSummary).toEqual(
       expect.objectContaining({
         passedCount: 2,
@@ -147,11 +169,6 @@ describe("ScoringStep", () => {
         total: 3,
       }),
     );
-
-    // Sorted by score DESC: lead-0 (85) before lead-2 (70)
-    const passed = result.contextPatch.leads!;
-    expect(passed[0].id).toBe("lead-0");
-    expect(passed[1].id).toBe("lead-2");
 
     // DB persistence
     expect(mockPrisma.leadScore.createMany).toHaveBeenCalledWith(
@@ -163,11 +180,22 @@ describe("ScoringStep", () => {
         ]),
       }),
     );
+
+    // Rejected leads excluded in PipelineRunLead
+    expect(mockPrisma.pipelineRunLead.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          leadId: { in: ["lead-1"] },
+        }),
+        data: { excluded: true, excludedByStepId: "scoring-initial" },
+      }),
+    );
   });
 
   it("empty leads array returns zero summary with no calls", async () => {
-    const { step, aiGrpcClient, mockPrisma } = buildStep();
-    const ctx = makeCtx({ data: { leads: [] } });
+    const mockPrisma = createMockPrisma({ leadCount: 0 });
+    const { step, aiGrpcClient } = buildStep({ prisma: mockPrisma });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, { _stepId: "scoring-initial" }, tools);
@@ -194,26 +222,22 @@ describe("ScoringStep", () => {
       ),
     } as unknown as AiGrpcClient;
 
-    const { step } = buildStep({ aiGrpcClient });
-    const leads = makeLeadRefs(3);
-    const ctx = makeCtx({ data: { leads } });
+    const { step } = buildStep({
+      aiGrpcClient,
+      prisma: createMockPrisma({ leadCount: 3 }),
+    });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, { _stepId: "scoring-initial" }, tools);
 
     // lead-1 rejected (score=0), lead-0 and lead-2 pass
-    expect(result.contextPatch.leads).toHaveLength(2);
+    expect(result.outputSummary.passedCount).toBe(2);
+    expect(result.outputSummary.rejectedCount).toBe(1);
     expect(result.outputSummary.errors).toBe(1);
-
-    // The errored lead details should contain the error
-    const details = (
-      result.contextPatch["scoring-initial"] as { details: { leadId: string; error?: string }[] }
-    ).details;
-    const erroredLead = details.find((d) => d.leadId === "lead-1");
-    expect(erroredLead?.error).toContain("gRPC UNAVAILABLE");
   });
 
-  it("all leads below threshold results in empty leads array", async () => {
+  it("all leads below threshold results in all rejected", async () => {
     const scores: Record<string, { score: number; reasoning: string }> = {
       "lead-0": { score: 30, reasoning: "Low" },
       "lead-1": { score: 50, reasoning: "Below" },
@@ -221,23 +245,23 @@ describe("ScoringStep", () => {
 
     const { step } = buildStep({
       aiGrpcClient: createMockAiGrpcClient(scores),
+      prisma: createMockPrisma({ leadCount: 2 }),
     });
 
-    const leads = makeLeadRefs(2);
-    const ctx = makeCtx({ data: { leads } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, { _stepId: "scoring-initial" }, tools);
 
-    expect(result.contextPatch.leads).toHaveLength(0);
     expect(result.outputSummary.passedCount).toBe(0);
     expect(result.outputSummary.rejectedCount).toBe(2);
   });
 
   it("null companyId sends empty service catalogs to gRPC", async () => {
-    const { step, aiGrpcClient, serviceCatalogRepo } = buildStep();
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ companyId: null, data: { leads } });
+    const { step, aiGrpcClient, serviceCatalogRepo } = buildStep({
+      prisma: createMockPrisma({ leadCount: 1 }),
+    });
+    const ctx = makeCtx({ companyId: null });
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-initial" }, tools);
@@ -276,10 +300,10 @@ describe("ScoringStep", () => {
 
     const { step, aiGrpcClient } = buildStep({
       serviceCatalogRepo: createMockServiceCatalogRepo(catalogs),
+      prisma: createMockPrisma({ leadCount: 1 }),
     });
 
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-initial" }, tools);
@@ -301,9 +325,10 @@ describe("ScoringStep", () => {
   });
 
   it("cancellation mid-batch persists partial scores and returns cancelled result", async () => {
-    const { step, mockPrisma } = buildStep();
-    const leads = makeLeadRefs(25); // 3 batches of 10
-    const ctx = makeCtx({ data: { leads } });
+    const { step, mockPrisma } = buildStep({
+      prisma: createMockPrisma({ leadCount: 25 }),
+    });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     // checkCancelled is called: (1) before batch loop, (2) before batch 0, (3) before batch 1
@@ -316,19 +341,17 @@ describe("ScoringStep", () => {
 
     const result = await step.run(ctx, { _stepId: "scoring-initial" }, tools);
 
-    expect(result.contextPatch.leads).toEqual([]);
-    expect(
-      (result.contextPatch["scoring-initial"] as { cancelled?: boolean }).cancelled,
-    ).toBe(true);
+    expect(result.outputSummary.cancelled).toBe(true);
 
     // Partial scores should have been persisted (first batch of 10)
     expect(mockPrisma.leadScore.createMany).toHaveBeenCalled();
   });
 
   it("batching: 25 leads processes in 3 batches with progress per batch", async () => {
-    const { step } = buildStep();
-    const leads = makeLeadRefs(25);
-    const ctx = makeCtx({ data: { leads } });
+    const { step } = buildStep({
+      prisma: createMockPrisma({ leadCount: 25 }),
+    });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-initial" }, tools);
@@ -342,25 +365,34 @@ describe("ScoringStep", () => {
     expect(batchProgressCalls).toHaveLength(3);
   });
 
-  it("DB lead missing falls back to LeadReference fields", async () => {
-    // Prisma returns no leads — forces fallback to ref fields
-    const mockPrisma = createMockPrisma([]);
+  it("DB lead missing falls back to empty fields", async () => {
+    // pipelineRunLead returns a lead with null lead record
+    const mockPrisma = createMockPrisma({ leadCount: 1 });
+    // Override pipelineRunLead.findMany to return a record with no lead
+    vi.mocked(mockPrisma.pipelineRunLead.findMany).mockResolvedValue([
+      {
+        id: "prl-lead-0",
+        createdAt: new Date(),
+        pipelineRunId: "run-1",
+        leadId: "lead-0",
+        lead: undefined,
+        excluded: false,
+        excludedByStepId: null,
+      },
+    ]);
 
     const { step, aiGrpcClient } = buildStep({ prisma: mockPrisma });
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-initial" }, tools);
 
-    // gRPC should still be called with ref-based profile
+    // gRPC should still be called with empty-string fallback profile
     expect(aiGrpcClient.scoreLead).toHaveBeenCalledWith(
       expect.objectContaining({
         lead: expect.objectContaining({
           id: "lead-0",
-          fullName: "Lead 0",
-          company: "Company 0",
-          // Fields that come from DB should be empty strings
+          fullName: "",
           title: "",
           headline: "",
         }),
@@ -368,17 +400,16 @@ describe("ScoringStep", () => {
     );
   });
 
-  it("config._stepId used as context key", async () => {
-    const { step } = buildStep();
-    const leads = makeLeadRefs(1);
-    const ctx = makeCtx({ data: { leads } });
+  it("outputSummary contains scored count", async () => {
+    const { step } = buildStep({
+      prisma: createMockPrisma({ leadCount: 1 }),
+    });
+    const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, { _stepId: "scoring-initial" }, tools);
 
-    expect(result.contextPatch["scoring-initial"]).toBeDefined();
-    expect(
-      (result.contextPatch["scoring-initial"] as { scored: number }).scored,
-    ).toBe(1);
+    expect(result.outputSummary).toBeDefined();
+    expect(result.outputSummary.total).toBe(1);
   });
 });

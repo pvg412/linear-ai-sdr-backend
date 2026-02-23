@@ -1,6 +1,8 @@
 import { inject, injectable } from "inversify";
 import { LeadProvider, LeadSearchKind, Prisma } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 
+import { getPrisma } from "@/infra/prisma";
 import { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.types";
 import { UserFacingError } from "@/infra/userFacingError";
@@ -63,6 +65,7 @@ const MAX_POLL_ATTEMPTS = 30; // 30 × 30s = 15 min max
 @injectable()
 export class LeadGenerationStep implements PipelineStepHandler {
   readonly type = "lead-generation";
+  private readonly prisma: PrismaClient = getPrisma();
 
   constructor(
     @inject(AI_GRPC_CLIENT_TYPES.AiGrpcClient)
@@ -295,20 +298,19 @@ export class LeadGenerationStep implements PipelineStepHandler {
 
     await this.leadSearchRepo.markDone(leadSearch.id, leadIds.length);
 
+    // Insert leads into PipelineRunLead for downstream steps
+    await this.prisma.pipelineRunLead.createMany({
+      data: leadIds.map((leadId) => ({
+        pipelineRunId: ctx.pipelineRunId,
+        leadId,
+      })),
+      skipDuplicates: true,
+    });
+
     tools.emitProgress(`Saved ${leadIds.length} leads`);
 
     // ── Step 9: Return result ────────────────────────────────────────
-    const leadReferences = trimmed.map((lead, idx) => ({
-      id: leadIds[idx] ?? "",
-      fullName: lead.fullName ?? null,
-      email: lead.email ?? null,
-      company: lead.company ?? null,
-      linkedinUrl: lead.linkedinUrl ?? null,
-      title: lead.title ?? null,
-    }));
-
     return {
-      contextPatch: { leads: leadReferences },
       outputSummary: {
         leadsFound: leadIds.length,
         source: "scraper",
@@ -324,7 +326,6 @@ export class LeadGenerationStep implements PipelineStepHandler {
 
 function cancelledResult(): PipelineStepResult {
   return {
-    contextPatch: { leads: [] },
     outputSummary: { leadsFound: 0, source: "cancelled" },
   };
 }

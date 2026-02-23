@@ -351,6 +351,7 @@ model Lead {
   conversationMessages LeadConversationMessage[] @relation("ConversationLead")
   chatMessages         ChatMessage[]
   scores               LeadScore[]
+  pipelineRunLeads     PipelineRunLead[]
 
   @@unique([email])
   @@unique([linkedinUrl])
@@ -706,6 +707,8 @@ model LeadConversationMessage {
   chatMessageId String?
   chatMessage   ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: SetNull)
 
+  pipelineOutreachLinks PipelineRunOutreachMessage[]
+
   @@index([leadId, createdAt])
   @@index([createdBy])
   @@index([channel])
@@ -764,9 +767,15 @@ model PipelineRun {
   currentStepId    String?
   currentStepIndex Int?
 
-  input      Json?
-  context    Json?
-  definition Json
+  pipelineDisplayName     String
+  pipelineDescription     String?
+  defaultOnError          String?
+  defaultTimeoutMs        Int?
+  defaultRetryMaxAttempts Int?
+  defaultRetryBackoffMs   Int?
+  defaultRetryBackoffType String?
+  inputDirectoryId        String?
+  inputLeadIds            String[]
 
   startedAt  DateTime?
   finishedAt DateTime?
@@ -774,7 +783,9 @@ model PipelineRun {
   errorMessage String?
   errorStepId  String?
 
-  stepRuns PipelineStepRun[]
+  stepRuns              PipelineStepRun[]
+  pipelineRunLeads      PipelineRunLead[]
+  pipelineOutreachLinks PipelineRunOutreachMessage[]
 
   @@index([createdById])
   @@index([companyId, status])
@@ -797,6 +808,14 @@ model PipelineStepRun {
 
   status PipelineStepRunStatus @default(QUEUED)
 
+  stepConfig       Json?
+  onError          String?
+  timeoutMs        Int?
+  retryMaxAttempts Int?
+  retryBackoffMs   Int?
+  retryBackoffType String?
+  enabled          Boolean @default(true)
+
   attempts Int @default(0)
 
   startedAt  DateTime?
@@ -809,6 +828,26 @@ model PipelineStepRun {
   @@unique([pipelineRunId, stepId])
   @@index([pipelineRunId, stepIndex])
   @@index([status])
+}
+
+// ── Pipeline Run ↔ Lead link ─────────────────────────────────────────
+
+model PipelineRunLead {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  pipelineRunId String
+  pipelineRun   PipelineRun @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade)
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id])
+
+  excluded         Boolean @default(false)
+  excludedByStepId String?
+
+  @@unique([pipelineRunId, leadId])
+  @@index([pipelineRunId])
+  @@index([pipelineRunId, excluded])
 }
 
 // ── Lead Scoring ─────────────────────────────────────────────────────
@@ -834,4 +873,21 @@ model LeadScore {
   @@index([leadId])
   @@index([pipelineRunId])
   @@index([pipelineRunId, stepInstanceId])
+}
+
+// ── Pipeline Run ↔ Outreach Message link ─────────────────────────────
+
+model PipelineRunOutreachMessage {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  pipelineRunId String
+  pipelineRun   PipelineRun @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade)
+
+  messageId String
+  message   LeadConversationMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([pipelineRunId, messageId])
+  @@index([pipelineRunId])
+  @@index([messageId])
 }

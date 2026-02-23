@@ -16,13 +16,27 @@ export interface CreatePipelineRunInput {
   pipelineVersion: number;
   createdById: string;
   companyId: string | null;
-  input: Prisma.InputJsonValue | null;
-  definition: Prisma.InputJsonValue;
+  pipelineDisplayName: string;
+  pipelineDescription?: string;
+  defaultOnError?: string;
+  defaultTimeoutMs?: number;
+  defaultRetryMaxAttempts?: number;
+  defaultRetryBackoffMs?: number;
+  defaultRetryBackoffType?: string;
+  inputDirectoryId?: string;
+  inputLeadIds?: string[];
   steps: Array<{
     stepId: string;
     stepType: string;
     stepIndex: number;
     displayName: string;
+    stepConfig?: Prisma.InputJsonValue;
+    onError?: string;
+    timeoutMs?: number;
+    retryMaxAttempts?: number;
+    retryBackoffMs?: number;
+    retryBackoffType?: string;
+    enabled?: boolean;
   }>;
 }
 
@@ -45,9 +59,15 @@ export class PipelineRepository {
         pipelineVersion: input.pipelineVersion,
         createdById: input.createdById,
         companyId: input.companyId,
-        input: input.input ?? Prisma.DbNull,
-        definition: input.definition,
-        context: Prisma.DbNull,
+        pipelineDisplayName: input.pipelineDisplayName,
+        pipelineDescription: input.pipelineDescription,
+        defaultOnError: input.defaultOnError,
+        defaultTimeoutMs: input.defaultTimeoutMs,
+        defaultRetryMaxAttempts: input.defaultRetryMaxAttempts,
+        defaultRetryBackoffMs: input.defaultRetryBackoffMs,
+        defaultRetryBackoffType: input.defaultRetryBackoffType,
+        inputDirectoryId: input.inputDirectoryId,
+        inputLeadIds: input.inputLeadIds ?? [],
         stepRuns: {
           createMany: {
             data: input.steps.map((s) => ({
@@ -56,6 +76,13 @@ export class PipelineRepository {
               stepIndex: s.stepIndex,
               displayName: s.displayName,
               status: "QUEUED" as const,
+              stepConfig: s.stepConfig ?? Prisma.DbNull,
+              onError: s.onError,
+              timeoutMs: s.timeoutMs,
+              retryMaxAttempts: s.retryMaxAttempts,
+              retryBackoffMs: s.retryBackoffMs,
+              retryBackoffType: s.retryBackoffType,
+              enabled: s.enabled ?? true,
             })),
           },
         },
@@ -171,10 +198,38 @@ export class PipelineRepository {
     });
   }
 
-  async updateRunContext(runId: string, context: Prisma.InputJsonValue) {
-    return this.prisma.pipelineRun.update({
-      where: { id: runId },
-      data: { context },
+  /* ---------------------------------------------------------------- */
+  /*  PipelineRunLead                                                 */
+  /* ---------------------------------------------------------------- */
+
+  async createRunLeads(pipelineRunId: string, leadIds: string[]) {
+    if (leadIds.length === 0) return;
+    return this.prisma.pipelineRunLead.createMany({
+      data: leadIds.map((leadId) => ({ pipelineRunId, leadId })),
+      skipDuplicates: true,
+    });
+  }
+
+  async findActiveLeads(pipelineRunId: string) {
+    return this.prisma.pipelineRunLead.findMany({
+      where: { pipelineRunId, excluded: false },
+      include: { lead: true },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  async excludeLeads(
+    pipelineRunId: string,
+    leadIds: string[],
+    excludedByStepId: string,
+  ) {
+    if (leadIds.length === 0) return;
+    return this.prisma.pipelineRunLead.updateMany({
+      where: {
+        pipelineRunId,
+        leadId: { in: leadIds },
+      },
+      data: { excluded: true, excludedByStepId },
     });
   }
 
@@ -214,4 +269,59 @@ export class PipelineRepository {
       data: { status: "CANCELLED" },
     });
   }
+
+  /* ---------------------------------------------------------------- */
+  /*  Outreach — junction table queries                                */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Get all outreach messages linked to a pipeline run.
+   * Returns the junction rows with the full LeadConversationMessage included.
+   */
+  async findOutreachDrafts(pipelineRunId: string) {
+    return this.prisma.pipelineRunOutreachMessage.findMany({
+      where: { pipelineRunId },
+      include: { message: true },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  /**
+   * Find a specific junction link between a pipeline run and a message.
+   * Returns null if the message is not linked to this run.
+   */
+  async findOutreachLink(pipelineRunId: string, messageId: string) {
+    return this.prisma.pipelineRunOutreachMessage.findUnique({
+      where: { pipelineRunId_messageId: { pipelineRunId, messageId } },
+      include: { message: true },
+    });
+  }
+
+  /**
+   * Check whether an accepted (sentAt != null) message already exists
+   * for a given lead within a pipeline run.
+   */
+  async hasAcceptedMessageForLead(
+    pipelineRunId: string,
+    leadId: string,
+  ): Promise<boolean> {
+    const count = await this.prisma.pipelineRunOutreachMessage.count({
+      where: {
+        pipelineRunId,
+        message: { leadId, sentAt: { not: null } },
+      },
+    });
+    return count > 0;
+  }
+
+  /**
+   * Delete an outreach message. The junction row is removed
+   * automatically via onDelete: Cascade on the message relation.
+   */
+  async deleteOutreachMessage(messageId: string) {
+    return this.prisma.leadConversationMessage.delete({
+      where: { id: messageId },
+    });
+  }
+
 }
