@@ -324,4 +324,29 @@ export class PipelineRepository {
     });
   }
 
+  /**
+   * Delete all draft (sentAt=null) outreach messages for a specific lead
+   * within a pipeline run. Used after accept/custom to clean up unused variants.
+   * Junction rows are removed automatically via onDelete: Cascade.
+   */
+  async deleteDraftMessagesForLead(
+    pipelineRunId: string,
+    leadId: string,
+  ): Promise<void> {
+    // Find all draft message IDs for this lead in this run
+    const drafts = await this.prisma.pipelineRunOutreachMessage.findMany({
+      where: {
+        pipelineRunId,
+        message: { leadId, sentAt: null },
+      },
+      select: { messageId: true },
+    });
+
+    if (drafts.length === 0) return;
+
+    await this.prisma.leadConversationMessage.deleteMany({
+      where: { id: { in: drafts.map((d) => d.messageId) } },
+    });
+  }
+
 }

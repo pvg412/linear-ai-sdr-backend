@@ -266,6 +266,9 @@ export class PipelineCommandService {
       pipelineRunId,
     );
 
+    /* 6. Delete remaining drafts for this lead — no longer needed */
+    await this.repo.deleteDraftMessagesForLead(pipelineRunId, draft.leadId);
+
     return finalMsg;
   }
 
@@ -328,6 +331,9 @@ export class PipelineCommandService {
       finalMsg.id,
       pipelineRunId,
     );
+
+    /* 6. Delete remaining drafts for this lead — no longer needed */
+    await this.repo.deleteDraftMessagesForLead(pipelineRunId, draft.leadId);
 
     return finalMsg;
   }

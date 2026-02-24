@@ -97,6 +97,13 @@ export class OutreachStep implements PipelineStepHandler {
   ): Promise<PipelineStepResult> {
     const channel = (config.channel as string) ?? "linkedin";
 
+    // ── Load user customInstructions once ───────────────────────────
+    const user = await this.prisma.user.findUnique({
+      where: { id: ctx.createdById },
+      select: { customInstructions: true },
+    });
+    const customInstructions = user?.customInstructions ?? "";
+
     // ── Load active leads from PipelineRunLead ───────────────────────
     const runLeads = await this.prisma.pipelineRunLead.findMany({
       where: { pipelineRunId: ctx.pipelineRunId, excluded: false },
@@ -143,7 +150,7 @@ export class OutreachStep implements PipelineStepHandler {
 
       const batchResults = await Promise.all(
         batch.map((rl) =>
-          this.processLead(rl.lead, ctx, channel, tools),
+          this.processLead(rl.lead, ctx, channel, customInstructions, tools),
         ),
       );
 
@@ -192,17 +199,19 @@ export class OutreachStep implements PipelineStepHandler {
     lead: Lead,
     ctx: PipelineContext,
     channel: string,
+    customInstructions: string,
     tools: PipelineTools,
   ): Promise<OutreachDraft | null> {
     try {
       /* Step 1: Parse outreach context ----------------------------- */
-      const parsed = await this.parseContext(lead, ctx, channel, tools);
+      const parsed = await this.parseContext(lead, ctx, channel, customInstructions, tools);
 
       /* Step 2: Generate messages via ChatStream ------------------- */
       const variants = await this.generateMessages(
         lead,
         ctx,
         parsed,
+        customInstructions,
         tools,
       );
 
@@ -249,6 +258,7 @@ export class OutreachStep implements PipelineStepHandler {
     lead: Lead,
     ctx: PipelineContext,
     channel: string,
+    customInstructions: string,
     tools: PipelineTools,
   ): Promise<ParseOutreachContextResponse> {
     const suggestedChannel =
@@ -275,7 +285,7 @@ export class OutreachStep implements PipelineStepHandler {
       previousMessages: [],
       suggestedChannel,
       debug: false,
-      customInstructions: "",
+      customInstructions,
     });
   }
 
@@ -287,6 +297,7 @@ export class OutreachStep implements PipelineStepHandler {
     lead: Lead,
     ctx: PipelineContext,
     parsed: ParseOutreachContextResponse,
+    customInstructions: string,
     tools: PipelineTools,
   ): Promise<OutreachVariantJson[]> {
     const requestId = randomUUID();
@@ -295,13 +306,13 @@ export class OutreachStep implements PipelineStepHandler {
     const outreachContext: PbOutreachContext = {
       channel: parsed.channel,
       stage: parsed.stage,
-      dayInSequence: 0,
-      followUpNumber: 0,
+      dayInSequence: parsed.dayInSequence,
+      followUpNumber: parsed.followUpNumber,
       suggestedTactic: parsed.suggestedTactic,
       leadResponseType: PbLeadResponseType.LEAD_RESPONSE_TYPE_NO_RESPONSE,
       leadLastReply: "",
       previousMessages: [],
-      customInstructions: "",
+      customInstructions,
       assetPermissionGranted: false,
       assetToSend: "",
     };

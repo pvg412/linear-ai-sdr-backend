@@ -57,6 +57,10 @@ export class LeadConversationsRepository {
   ): Promise<{ messages: ConversationMessageResponse[]; total: number }> {
     const where = {
       leadId: input.leadId,
+      OR: [
+        { sentAt: { not: null } },
+        { repliedAt: { not: null } },
+      ],
     };
 
     const [messages, total] = await Promise.all([
