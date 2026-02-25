@@ -352,6 +352,7 @@ model Lead {
   chatMessages         ChatMessage[]
   scores               LeadScore[]
   pipelineRunLeads     PipelineRunLead[]
+  hiringSignals        HiringSignal[]
 
   @@unique([email])
   @@unique([linkedinUrl])
@@ -890,4 +891,55 @@ model PipelineRunOutreachMessage {
   @@unique([pipelineRunId, messageId])
   @@index([pipelineRunId])
   @@index([messageId])
+}
+
+// ── Hiring Signals ────────────────────────────────────────────────────
+
+/// Stores hiring signal detection results per lead per pipeline run.
+/// Multiple leads at the same company share identical signal data (deduped at write time).
+model HiringSignal {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  pipelineRunId String
+
+  /// Which signal provider produced this (e.g. "hirebase")
+  providerKey String
+
+  /// Company name that was queried
+  companyName String
+
+  /// Total number of open job listings found
+  openJobCount Int
+
+  /// Deduplicated job categories / departments actively hiring
+  departments String[]
+
+  /// Sample of job titles found (up to 10)
+  topJobTitles String[]
+
+  /// Full raw API response, preserved for future analysis
+  rawData Json
+
+  @@unique([pipelineRunId, leadId, providerKey])
+  @@index([leadId])
+  @@index([pipelineRunId])
+}
+
+/// Tracks daily API request counts per signal provider for soft rate limiting.
+/// Keyed by provider + UTC date string ("YYYY-MM-DD") so counters reset at midnight UTC.
+model SignalProviderDailyUsage {
+  id           String @id @default(cuid())
+  providerKey  String
+
+  /// UTC date string, e.g. "2026-02-24"
+  date         String
+
+  requestCount Int @default(0)
+
+  @@unique([providerKey, date])
+  @@index([providerKey, date])
 }
