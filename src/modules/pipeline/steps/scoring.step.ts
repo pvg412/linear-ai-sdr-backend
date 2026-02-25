@@ -236,6 +236,26 @@ export class ScoringStep implements PipelineStepHandler {
         threshold: SCORING_THRESHOLD,
         errors: errorCount,
       },
+      data: {
+        scoringInitial: {
+          scored: scoredLeads.length,
+          passed: passedCount,
+          rejected: rejectedCount,
+          averageScore,
+          details: scoredLeads.map((s) => {
+            const lead = leadMap.get(s.leadId);
+            return {
+              leadId: s.leadId,
+              fullName: lead?.fullName ?? null,
+              company: lead?.company ?? null,
+              score: s.score,
+              passed: s.score >= SCORING_THRESHOLD,
+              reasoning: s.reasoning,
+            };
+          }),
+        },
+        excludedLeadIds: rejectedLeadIds,
+      },
     };
   }
 

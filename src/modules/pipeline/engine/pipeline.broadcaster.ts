@@ -126,6 +126,7 @@ export class PipelineBroadcaster {
     pipelineRunId: string,
     stepId: string,
     outputSummary: Record<string, unknown>,
+    data: Record<string, unknown> | undefined,
     progress: ProgressInfo,
     durationMs: number,
   ): void {
@@ -134,6 +135,7 @@ export class PipelineBroadcaster {
       pipelineRunId,
       stepId,
       outputSummary,
+      ...(data ? { data } : {}),
       progress,
       durationMs,
       ts: now(),

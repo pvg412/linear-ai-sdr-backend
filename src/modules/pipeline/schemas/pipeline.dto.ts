@@ -61,6 +61,13 @@ export interface PipelineContext {
 export interface PipelineStepResult {
   /** Small JSON-safe summary stored in PipelineStepRun.outputSummary for UI display */
   outputSummary: Record<string, unknown>;
+
+  /**
+   * Detailed step output sent via WebSocket but NOT persisted to DB.
+   * Shape matches the corresponding section of the GET /pipelines/runs/:id response
+   * so the frontend can render results in real-time without polling.
+   */
+  data?: Record<string, unknown>;
 }
 
 /* ------------------------------------------------------------------ */

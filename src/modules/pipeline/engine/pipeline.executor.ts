@@ -349,6 +349,7 @@ export class PipelineExecutor {
           pipelineRunId,
           stepId,
           result.outputSummary,
+          result.data,
           buildProgress(completedSteps + 1, totalSteps),
           durationMs,
         );

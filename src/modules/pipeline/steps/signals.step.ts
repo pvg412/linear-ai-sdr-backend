@@ -83,7 +83,7 @@ export class SignalsStep implements PipelineStepHandler {
     // ── 2. Load active leads ─────────────────────────────────────────
     const runLeads = await this.prisma.pipelineRunLead.findMany({
       where: { pipelineRunId: ctx.pipelineRunId, excluded: false },
-      include: { lead: { select: { id: true, company: true, companyDomain: true } } },
+      include: { lead: { select: { id: true, fullName: true, company: true, companyDomain: true } } },
       orderBy: { createdAt: "asc" },
     });
 
@@ -117,6 +117,12 @@ export class SignalsStep implements PipelineStepHandler {
     let companiesWithSignals = 0;
     let totalOpenRoles = 0;
 
+    /** Collect per-lead signal details for WS data */
+    const signalDetailsByLead = new Map<
+      string,
+      { openJobCount: number; departments: Set<string>; topJobTitles: Set<string> }
+    >();
+
     for (const group of companyGroups.values()) {
       if (await tools.checkCancelled()) {
         tools.log.info(
@@ -134,10 +140,30 @@ export class SignalsStep implements PipelineStepHandler {
 
       if (companyResults.length > 0) {
         companiesWithSignals++;
-        totalOpenRoles += companyResults.reduce(
+        const companyOpenRoles = companyResults.reduce(
           (sum, r) => sum + r.openJobCount,
           0,
         );
+        totalOpenRoles += companyOpenRoles;
+
+        // Aggregate signal details per lead
+        const allDepts = new Set(companyResults.flatMap((r) => r.departments));
+        const allTitles = new Set(companyResults.flatMap((r) => r.topJobTitles));
+
+        for (const leadId of group.leadIds) {
+          const existing = signalDetailsByLead.get(leadId);
+          if (existing) {
+            existing.openJobCount += companyOpenRoles;
+            allDepts.forEach((d) => existing.departments.add(d));
+            allTitles.forEach((t) => existing.topJobTitles.add(t));
+          } else {
+            signalDetailsByLead.set(leadId, {
+              openJobCount: companyOpenRoles,
+              departments: new Set(allDepts),
+              topJobTitles: new Set(allTitles),
+            });
+          }
+        }
 
         await this.persistSignals(
           companyResults,
@@ -176,12 +202,38 @@ export class SignalsStep implements PipelineStepHandler {
       "Signals step completed",
     );
 
+    // ── Build per-lead signal details for WS data ────────────────────
+    const leadById = new Map(
+      runLeads.map((rl) => [rl.lead.id, rl.lead]),
+    );
+
+    const signalDetails = Array.from(signalDetailsByLead.entries()).map(
+      ([leadId, sig]) => {
+        const lead = leadById.get(leadId);
+        return {
+          leadId,
+          fullName: lead?.fullName ?? null,
+          company: lead?.company ?? null,
+          openJobCount: sig.openJobCount,
+          departments: Array.from(sig.departments),
+          topJobTitles: Array.from(sig.topJobTitles).slice(0, 10),
+        };
+      },
+    );
+
     return {
       outputSummary: {
         companiesChecked,
         companiesWithSignals,
         totalOpenRoles,
         leadsProcessed: runLeads.length,
+      },
+      data: {
+        signals: {
+          leadsWithSignals: signalDetailsByLead.size,
+          totalOpenRoles,
+          details: signalDetails,
+        },
       },
     };
   }
@@ -271,7 +323,7 @@ export class SignalsStep implements PipelineStepHandler {
 /* ------------------------------------------------------------------ */
 
 type RunLead = {
-  lead: { id: string; company: string | null; companyDomain: string | null };
+  lead: { id: string; fullName: string | null; company: string | null; companyDomain: string | null };
 };
 
 function buildCompanyGroups(runLeads: RunLead[]): Map<string, CompanyGroup> {

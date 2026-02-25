@@ -190,6 +190,19 @@ function buildStep(overrides?: {
     pipelineRunLead: {
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    lead: {
+      findMany: vi.fn().mockImplementation(
+        (args: { where: { id: { in: string[] } } }) =>
+          Promise.resolve(
+            args.where.id.in.map((id, i) => ({
+              id,
+              fullName: `Lead ${i}`,
+              email: `lead${i}@example.com`,
+              company: `Company ${i}`,
+            })),
+          ),
+      ),
+    },
   };
 
   Object.defineProperty(step, "prisma", {

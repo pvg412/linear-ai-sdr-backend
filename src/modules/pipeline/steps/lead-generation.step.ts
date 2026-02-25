@@ -309,12 +309,31 @@ export class LeadGenerationStep implements PipelineStepHandler {
 
     tools.emitProgress(`Saved ${leadIds.length} leads`);
 
-    // ── Step 9: Return result ────────────────────────────────────────
+    // ── Step 9: Fetch saved leads for WS data ────────────────────────
+    const savedLeads = await this.prisma.lead.findMany({
+      where: { id: { in: leadIds } },
+      select: { id: true, fullName: true, email: true, company: true },
+    });
+
+    // ── Step 10: Return result ───────────────────────────────────────
     return {
       outputSummary: {
         leadsFound: leadIds.length,
         source: "scraper",
         leadSearchId: leadSearch.id,
+      },
+      data: {
+        leads: savedLeads.map((l) => ({
+          id: l.id,
+          fullName: l.fullName,
+          email: l.email,
+          company: l.company,
+          excluded: false,
+          finalScore: null,
+          icpFit: null,
+          signalStrength: null,
+          icpReasoning: null,
+        })),
       },
     };
   }

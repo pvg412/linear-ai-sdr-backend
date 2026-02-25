@@ -228,6 +228,12 @@ export class EnrichmentStep implements PipelineStepHandler {
       "Enrichment step completed",
     );
 
+    // ── Build lead lookup for enrichment data ─────────────────────────
+
+    const leadLookup = new Map(
+      runLeads.map((rl) => [rl.leadId, rl.lead]),
+    );
+
     // ── Return result ────────────────────────────────────────────────
 
     return {
@@ -236,6 +242,25 @@ export class EnrichmentStep implements PipelineStepHandler {
         profileRequests,
         companyResearchRequests,
         errors: errorCount,
+      },
+      data: {
+        enrichment: {
+          totalLeads: runLeads.length,
+          leadsWithResearch: Object.keys(companyResearchByLead).length,
+          companyResearch: Object.entries(companyResearchByLead).map(
+            ([leadId, research]) => {
+              const lead = leadLookup.get(leadId);
+              return {
+                leadId,
+                fullName: lead?.fullName ?? null,
+                company: research.company,
+                companyDomain: lead?.companyDomain ?? null,
+                status: "COMPLETED",
+                items: research.items,
+              };
+            },
+          ),
+        },
       },
     };
   }

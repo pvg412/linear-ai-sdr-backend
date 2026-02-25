@@ -87,8 +87,9 @@ export class HirebaseProvider implements SignalProvider {
         sort_order: "desc",
         page: 1,
         limit: JOBS_PER_REQUEST,
-        hide_recruiting_agencies: "true",
       });
+
+      console.log(response)
 
       // ── 3. Map to generic result ────────────────────────────────────
       const jobs = response.jobs ?? [];

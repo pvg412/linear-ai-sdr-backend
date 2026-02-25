@@ -70,6 +70,8 @@ export interface PipelineStepSucceededEvent {
   pipelineRunId: string;
   stepId: string;
   outputSummary: Record<string, unknown>;
+  /** Detailed step result matching the shape of GET /pipelines/runs/:id sections */
+  data?: Record<string, unknown>;
   progress: ProgressInfo;
   durationMs: number;
   ts: string;

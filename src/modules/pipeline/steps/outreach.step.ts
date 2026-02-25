@@ -188,6 +188,22 @@ export class OutreachStep implements PipelineStepHandler {
         totalMessagesGenerated: totalMessages,
         channel,
       },
+      data: {
+        outreach: outreachDrafts.map((draft) => ({
+          leadId: draft.leadId,
+          messages: draft.messages.map((m) => ({
+            id: m.messageId,
+            body: m.body,
+            subject: m.subject,
+            channel: m.channel,
+            stage: m.stage,
+            tacticUsed: m.tactic,
+            characterCount: m.characterCount,
+            wordCount: m.wordCount,
+            usageNote: m.usageNote,
+          })),
+        })),
+      },
     };
   }
 

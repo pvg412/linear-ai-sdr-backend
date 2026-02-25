@@ -194,6 +194,57 @@ export class PipelineQueryService {
       }),
     };
 
+    /* Fetch hiring signal results for this run */
+    const hiringSignalRows = leadIds.length > 0
+      ? await this.prisma.hiringSignal.findMany({
+          where: { pipelineRunId, leadId: { in: leadIds } },
+          orderBy: { createdAt: "asc" },
+        })
+      : [];
+
+    // Group by leadId — one row per (lead, provider); since the first provider
+    // covers most cases, merge all providers into a single per-lead record.
+    const signalsByLead = new Map<string, typeof hiringSignalRows>();
+    for (const row of hiringSignalRows) {
+      const existing = signalsByLead.get(row.leadId);
+      if (existing) {
+        existing.push(row);
+      } else {
+        signalsByLead.set(row.leadId, [row]);
+      }
+    }
+
+    const signalDetails = Array.from(signalsByLead.entries()).map(
+      ([leadId, rows]) => {
+        const rl = runLeadMap.get(leadId);
+        // Sum job counts across providers (normally just one provider)
+        const totalJobs = rows.reduce(
+          (sum: number, r) => sum + r.openJobCount,
+          0,
+        );
+        const departments = Array.from(
+          new Set(rows.flatMap((r) => r.departments as string[])),
+        );
+        const topJobTitles = Array.from(
+          new Set(rows.flatMap((r) => r.topJobTitles as string[])),
+        ).slice(0, 10);
+        return {
+          leadId,
+          fullName: rl?.lead.fullName ?? null,
+          company: rows[0]?.companyName ?? rl?.lead.company ?? null,
+          openJobCount: totalJobs,
+          departments,
+          topJobTitles,
+        };
+      },
+    );
+
+    const signals = {
+      leadsWithSignals: signalsByLead.size,
+      totalOpenRoles: signalDetails.reduce((sum, s) => sum + s.openJobCount, 0),
+      details: signalDetails,
+    };
+
     /* Fetch live outreach state from junction table */
     const links = await this.repo.findOutreachDrafts(pipelineRunId);
 
@@ -235,6 +286,7 @@ export class PipelineQueryService {
       scoringInitial,
       scoringFinal,
       enrichment,
+      signals,
       outreach,
       stepRuns: run.stepRuns,
       startedAt: run.startedAt,
