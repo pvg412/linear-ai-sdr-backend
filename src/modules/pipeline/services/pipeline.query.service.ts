@@ -223,10 +223,10 @@ export class PipelineQueryService {
           0,
         );
         const departments = Array.from(
-          new Set(rows.flatMap((r) => r.departments as string[])),
+          new Set(rows.flatMap((r) => r.departments)),
         );
         const topJobTitles = Array.from(
-          new Set(rows.flatMap((r) => r.topJobTitles as string[])),
+          new Set(rows.flatMap((r) => r.topJobTitles)),
         ).slice(0, 10);
         return {
           leadId,
