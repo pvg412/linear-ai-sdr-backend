@@ -126,7 +126,15 @@ export class CompanyResearchRunnerService {
                 sourceUrl: string;
                 category: string;
               }>;
+              citations: string[];
             };
+
+            if (perplexityResult.items.length === 0) {
+              lg.warn(
+                {},
+                "Perplexity returned no items (all may have been filtered by URL validation)",
+              );
+            }
 
             for (const item of perplexityResult.items) {
               allItems.push({

@@ -17,6 +17,7 @@ import { registerProfileEnrichmentModule } from "./modules/profile-enrichment/pr
 import { registerLeadConversationsModule } from "./modules/lead-conversations/lead-conversations.module";
 import { registerDatasetImportModule } from "./modules/dataset-import/dataset-import.module";
 import { registerServiceCatalogModule } from "./modules/service-catalog/service-catalog.module";
+import { registerAdminModule } from "./modules/admin/admin.module";
 import { registerHiringSignalsModule } from "./capabilities/hiring-signals/hiring-signals.module";
 import { registerPipelineModule } from "./modules/pipeline/pipeline.module";
 
@@ -38,6 +39,7 @@ registerProfileEnrichmentModule(container);
 registerLeadConversationsModule(container);
 registerDatasetImportModule(container);
 registerServiceCatalogModule(container);
+registerAdminModule(container); // before hiring-signals — providers depend on ServiceToggleService
 registerHiringSignalsModule(container);
 registerPipelineModule(container);
 

@@ -3,6 +3,7 @@ import { Perplexity } from "@perplexity-ai/perplexity_ai";
 import { loadEnv } from "@/config/env";
 import { UserFacingError } from "@/infra/userFacingError";
 import { ensureLogger } from "@/infra/observability";
+import { validateSearchResults } from "../utils/url-validator";
 
 const PERPLEXITY_TIMEOUT_MS = 30000; // 30 seconds
 const PERPLEXITY_MAX_RETRIES = 3;
@@ -156,7 +157,7 @@ Requirements:
 - Prioritize recent information that indicates buying signals or timing opportunities
 - Each summary must be sales-relevant (helps with outreach timing or personalization)
 - Limit summaries to 2 sentences maximum
-- Always include sourceUrl for each item
+- Always include sourceUrl for each item — use the EXACT full URL from the source page, do NOT shorten, modify, or reconstruct URLs
 - Return up to ${options.maxResults || 5} items total`;
 
     const userPrompt = `Research "${options.companyName}" for sales intelligence. Find:
@@ -270,10 +271,30 @@ IMPORTANT: For each item, extract the ACTUAL PUBLICATION DATE from the article (
       };
 
       const extendedResponse = response as unknown as PerplexityResponse;
+      const citations = extendedResponse.citations || [];
+      const rawItems = parsed.items || [];
+
+      // Validate sourceUrls: match against real citations, then HEAD-check the rest
+      const { items: validatedItems, stats } = await validateSearchResults(
+        rawItems,
+        citations,
+        lg,
+      );
+
+      lg.info(
+        {
+          companyName: options.companyName,
+          totalItems: stats.totalItems,
+          citationMatched: stats.citationMatched,
+          headCheckPassed: stats.headCheckPassed,
+          removed: stats.removed,
+        },
+        "Perplexity URL validation completed",
+      );
 
       return {
-        items: parsed.items || [],
-        citations: extendedResponse.citations || [],
+        items: validatedItems as PerplexitySearchResult["items"],
+        citations,
       };
     } catch (error) {
       if (error instanceof UserFacingError) throw error;

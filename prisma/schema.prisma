@@ -222,6 +222,8 @@ model User {
 
   pipelineRuns PipelineRun[] @relation("PipelineRunCreatedBy")
 
+  serviceTogglesUpdated ServiceToggle[] @relation("ServiceToggleUpdatedBy")
+
   @@unique([companyName])
   @@index([role])
   @@index([isActive])
@@ -927,6 +929,35 @@ model HiringSignal {
   @@unique([pipelineRunId, leadId, providerKey])
   @@index([leadId])
   @@index([pipelineRunId])
+}
+
+/// Admin-managed runtime toggles for external service providers.
+/// Display names are UI-safe and never reveal the actual vendor.
+model ServiceToggle {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// Internal key, never exposed to UI (e.g. "hirebase")
+  serviceKey  String   @unique
+
+  /// UI-facing name (e.g. "Hiring Intelligence")
+  displayName String
+
+  /// Optional description shown in admin UI
+  description String?
+
+  /// Grouping category for UI (e.g. "intelligence", "social")
+  category    String
+
+  /// Whether the service is enabled at runtime
+  enabled     Boolean  @default(true)
+
+  /// Who last toggled this service
+  updatedById String?
+  updatedBy   User?    @relation("ServiceToggleUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([serviceKey])
 }
 
 /// Tracks daily API request counts per signal provider for soft rate limiting.

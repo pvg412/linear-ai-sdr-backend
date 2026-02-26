@@ -23,6 +23,8 @@ import { registerLeadConversationsRoutes } from "./modules/lead-conversations/co
 import { registerDatasetImportRoutes } from "./modules/dataset-import/dataset-import.controller";
 import { registerServiceCatalogRoutes } from "./modules/service-catalog/service-catalog.controller";
 import { registerPipelineRoutes } from "./modules/pipeline/pipeline.controller";
+import { registerAdminRoutes } from "./modules/admin/admin.controller";
+import { initAdminModule } from "./modules/admin/admin.module";
 import { UserFacingError } from "./infra/userFacingError";
 
 function getStatusCodeFromErrorCode(code: string): number {
@@ -146,6 +148,9 @@ export async function buildServer() {
   const authService = new AuthService();
   await authService.ensureInitialAdmin(env, app.log);
 
+  // Seed service toggles and load cache before any adapter resolves
+  await initAdminModule(container);
+
   // Protect everything else
   app.addHook("onRequest", createAuthGuard(env));
 
@@ -159,6 +164,7 @@ export async function buildServer() {
   registerDatasetImportRoutes(app);
   registerServiceCatalogRoutes(app);
   registerPipelineRoutes(app);
+  registerAdminRoutes(app);
 
   return { app, env };
 }

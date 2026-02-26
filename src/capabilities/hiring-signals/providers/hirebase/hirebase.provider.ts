@@ -1,6 +1,7 @@
 import { injectable } from "inversify";
 
 import { getPrisma } from "@/infra/prisma";
+import type { ServiceToggleService } from "@/modules/admin/services/service-toggle.service";
 
 import type {
   SignalProvider,
@@ -54,15 +55,19 @@ function utcDateString(): string {
 export class HirebaseProvider implements SignalProvider {
   readonly key = PROVIDER_KEY;
 
+  private readonly apiKey: string;
   private readonly client: HirebaseClient;
   private readonly prisma = getPrisma();
+  private readonly serviceToggle: ServiceToggleService;
 
-  constructor(private readonly apiKey: string) {
+  constructor(apiKey: string, serviceToggle: ServiceToggleService) {
+    this.apiKey = apiKey;
     this.client = new HirebaseClient(apiKey);
+    this.serviceToggle = serviceToggle;
   }
 
   isEnabled(): boolean {
-    return Boolean(this.apiKey);
+    return Boolean(this.apiKey) && this.serviceToggle.isServiceEnabledSync("hirebase");
   }
 
   async detectHiringSignals(
