@@ -21,8 +21,8 @@ interface ServiceDefinition {
 const SERVICE_DEFINITIONS: ServiceDefinition[] = [
   {
     serviceKey: "hirebase",
-    displayName: "Hiring Intelligence",
-    description: "Detects open positions and hiring trends",
+    displayName: "Hiring",
+    description: "Detects open positions",
     category: "intelligence",
   },
   // ── Future services ──────────────────────────────────────────────
