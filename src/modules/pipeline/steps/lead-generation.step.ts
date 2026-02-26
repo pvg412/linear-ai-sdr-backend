@@ -44,7 +44,19 @@ import type {
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const HARDCODED_USER_TEXT = "Can you find 10 CTOs?";
+const ROLES = [
+  "Founder",
+  "Co-Founder",
+  "CEO",
+  "CTO",
+  "VP Engineering",
+  "Director of Engineering",
+  "Head of Product",
+  "CPO",
+  "VP Product",
+  "Head of Innovation",
+];
+const HARDCODED_USER_TEXT = `Can you find 10 people with the following roles: ${ROLES.join(", ")}?`;
 const LEAD_LIMIT = 10;
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 const MAX_POLL_ATTEMPTS = 30; // 30 × 30s = 15 min max
