@@ -62,6 +62,7 @@ export class PipelineQueryService {
             fullName: true,
             email: true,
             company: true,
+            linkedinUrl: true,
           },
         },
       },
@@ -101,6 +102,7 @@ export class PipelineQueryService {
         fullName: rl.lead.fullName,
         email: rl.lead.email,
         company: rl.lead.company,
+        linkedinUrl: rl.lead.linkedinUrl,
         excluded: rl.excluded,
         finalScore: score?.finalScore ?? null,
         icpFit: score?.icpFit ?? null,
@@ -176,28 +178,32 @@ export class PipelineQueryService {
     const enrichment = {
       totalLeads: leadIds.length,
       leadsWithResearch: enrichmentByLead.size,
-      companyResearch: Array.from(enrichmentByLead.entries()).map(([leadId, cr]) => {
-        const rl = runLeadMap.get(leadId);
-        return {
-          leadId,
-          fullName: rl?.lead.fullName ?? null,
-          company: cr.company,
-          companyDomain: cr.companyDomain,
-          status: cr.status,
-          items: cr.items.map((item) => ({
-            date: item.date,
-            summary: item.summary,
-            sourceUrl: item.sourceUrl,
-            category: item.category,
-          })),
-        };
-      }),
+      companyResearch: Array.from(enrichmentByLead.entries())
+        .map(([leadId, cr]) => {
+          const rl = runLeadMap.get(leadId);
+          return {
+            leadId,
+            fullName: rl?.lead.fullName ?? null,
+            company: cr.company,
+            companyDomain: cr.companyDomain,
+            status: cr.status,
+            items: cr.items.map((item) => ({
+              date: item.date,
+              summary: item.summary,
+              sourceUrl: item.sourceUrl,
+              category: item.category,
+            })),
+          };
+        })
+        // Sort: leads with research items first, then by item count desc
+        .sort((a, b) => b.items.length - a.items.length),
     };
 
-    /* Fetch hiring signal results for this run */
+    /* Fetch hiring signal results for this run (with normalised job listings) */
     const hiringSignalRows = leadIds.length > 0
       ? await this.prisma.hiringSignal.findMany({
           where: { pipelineRunId, leadId: { in: leadIds } },
+          include: { jobs: { include: { locations: true } } },
           orderBy: { createdAt: "asc" },
         })
       : [];
@@ -228,6 +234,31 @@ export class PipelineQueryService {
         const topJobTitles = Array.from(
           new Set(rows.flatMap((r) => r.topJobTitles)),
         ).slice(0, 10);
+
+        // Flatten job listings from all providers for this lead
+        const jobs = rows.flatMap((r) =>
+          r.jobs.map((j) => ({
+            id: j.id,
+            externalId: j.externalId,
+            jobTitle: j.jobTitle,
+            team: j.team,
+            jobType: j.jobType,
+            locationType: j.locationType,
+            datePosted: j.datePosted,
+            companyName: j.companyName,
+            companySlug: j.companySlug,
+            requirementsSummary: j.requirementsSummary,
+            skills: j.skills,
+            technologies: j.technologies,
+            jobCategories: j.jobCategories,
+            locations: j.locations.map((l) => ({
+              city: l.city,
+              region: l.region,
+              country: l.country,
+            })),
+          })),
+        );
+
         return {
           leadId,
           fullName: rl?.lead.fullName ?? null,
@@ -235,9 +266,13 @@ export class PipelineQueryService {
           openJobCount: totalJobs,
           departments,
           topJobTitles,
+          jobs,
         };
       },
     );
+
+    // Sort: leads with signals (openJobCount > 0) first, then by count desc
+    signalDetails.sort((a, b) => b.openJobCount - a.openJobCount);
 
     const signals = {
       leadsWithSignals: signalsByLead.size,
@@ -258,22 +293,32 @@ export class PipelineQueryService {
       byLead.get(leadId)!.push(link.message);
     }
 
-    const outreach = Array.from(byLead.entries()).map(([leadId, messages]) => ({
-      leadId,
-      messages: messages.map((m) => ({
-        id: m.id,
-        body: m.body,
-        subject: m.subject,
-        channel: m.channel,
-        stage: m.stage,
-        tacticUsed: m.tacticUsed,
-        characterCount: m.characterCount,
-        wordCount: m.wordCount,
-        usageNote: m.usageNote,
-        sentAt: m.sentAt,
-        createdAt: m.createdAt,
-      })),
-    }));
+    const outreach = Array.from(byLead.entries())
+      .map(([leadId, messages]) => {
+        const rl = runLeadMap.get(leadId);
+        const score = scoreMap.get(leadId);
+        return {
+          leadId,
+          linkedinUrl: rl?.lead.linkedinUrl ?? null,
+          icpFit: score?.icpFit ?? null,
+          finalScore: score?.finalScore ?? null,
+          signalStrength: score?.signalStrength ?? null,
+          messages: messages.map((m) => ({
+            id: m.id,
+            body: m.body,
+            subject: m.subject,
+            channel: m.channel,
+            stage: m.stage,
+            tacticUsed: m.tacticUsed,
+            characterCount: m.characterCount,
+            wordCount: m.wordCount,
+            usageNote: m.usageNote,
+            sentAt: m.sentAt,
+            createdAt: m.createdAt,
+          })),
+        };
+      })
+      .sort((a, b) => (b.finalScore ?? -1) - (a.finalScore ?? -1));
 
     return {
       id: run.id,

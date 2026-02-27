@@ -324,7 +324,7 @@ export class LeadGenerationStep implements PipelineStepHandler {
     // ── Step 9: Fetch saved leads for WS data ────────────────────────
     const savedLeads = await this.prisma.lead.findMany({
       where: { id: { in: leadIds } },
-      select: { id: true, fullName: true, email: true, company: true },
+      select: { id: true, fullName: true, email: true, company: true, linkedinUrl: true },
     });
 
     // ── Step 10: Return result ───────────────────────────────────────
@@ -340,6 +340,7 @@ export class LeadGenerationStep implements PipelineStepHandler {
           fullName: l.fullName,
           email: l.email,
           company: l.company,
+          linkedinUrl: l.linkedinUrl,
           excluded: false,
           finalScore: null,
           icpFit: null,

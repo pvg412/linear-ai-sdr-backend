@@ -7,6 +7,7 @@ import type {
   SignalProvider,
   SignalSearchInput,
   HiringSignalResult,
+  SignalJobDto,
 } from "@/capabilities/hiring-signals/signal-provider.dto";
 import { HirebaseClient } from "./hirebase.client";
 import {
@@ -94,20 +95,38 @@ export class HirebaseProvider implements SignalProvider {
         limit: JOBS_PER_REQUEST,
       });
 
-      console.log(response)
-
       // ── 3. Map to generic result ────────────────────────────────────
-      const jobs = response.jobs ?? [];
-      const openJobCount = response.total_count ?? jobs.length;
+      const rawJobs = response.jobs ?? [];
+      const openJobCount = response.total_count ?? rawJobs.length;
 
       const departments = Array.from(
-        new Set(jobs.flatMap((j) => j.job_categories ?? [])),
+        new Set(rawJobs.flatMap((j) => j.job_categories ?? [])),
       );
 
-      const topJobTitles = jobs
+      const topJobTitles = rawJobs
         .map((j) => j.job_title)
         .filter((t): t is string => Boolean(t))
         .slice(0, MAX_TOP_JOB_TITLES);
+
+      const jobs: SignalJobDto[] = rawJobs.map((j) => ({
+        externalId: j._id ?? null,
+        jobTitle: j.job_title ?? null,
+        team: j.team ?? null,
+        jobType: j.job_type ?? null,
+        locationType: j.location_type ?? null,
+        datePosted: j.date_posted ?? null,
+        companyName: j.company_name ?? null,
+        companySlug: j.company_slug ?? null,
+        requirementsSummary: j.requirements_summary ?? null,
+        skills: j.skills ?? [],
+        technologies: j.technologies ?? [],
+        jobCategories: j.job_categories ?? [],
+        locations: (j.locations ?? []).map((l) => ({
+          city: l.city ?? null,
+          region: l.region ?? null,
+          country: l.country ?? null,
+        })),
+      }));
 
       return {
         providerKey: PROVIDER_KEY,
@@ -115,7 +134,7 @@ export class HirebaseProvider implements SignalProvider {
         openJobCount,
         departments,
         topJobTitles,
-        rawData: response,
+        jobs,
       };
     } catch (e) {
       if (e instanceof HirebaseRateLimitError) {

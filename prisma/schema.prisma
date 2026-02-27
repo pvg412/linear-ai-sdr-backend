@@ -914,21 +914,64 @@ model HiringSignal {
   /// Company name that was queried
   companyName String
 
-  /// Total number of open job listings found
+  /// Total number of open job listings found (API total_count; may exceed returned jobs due to pagination)
   openJobCount Int
 
-  /// Deduplicated job categories / departments actively hiring
+  /// Deduplicated job categories / departments actively hiring (denormalized summary)
   departments String[]
 
-  /// Sample of job titles found (up to 10)
+  /// Sample of job titles found (up to 10, denormalized summary)
   topJobTitles String[]
 
-  /// Full raw API response, preserved for future analysis
-  rawData Json
+  /// Normalised job listings returned by the provider
+  jobs HiringSignalJob[]
 
   @@unique([pipelineRunId, leadId, providerKey])
   @@index([leadId])
   @@index([pipelineRunId])
+}
+
+/// Individual job listing returned by a hiring-signal provider.
+model HiringSignalJob {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  hiringSignalId String
+  hiringSignal   HiringSignal @relation(fields: [hiringSignalId], references: [id], onDelete: Cascade)
+
+  /// External ID from the provider (e.g. Hirebase _id)
+  externalId String?
+
+  jobTitle            String?
+  team                String?
+  jobType             String? /// e.g. "Full Time", "Part Time", "Contract"
+  locationType        String? /// e.g. "In-Person", "Remote", "Hybrid"
+  datePosted          String? /// ISO date string
+  companyName         String?
+  companySlug         String?
+  requirementsSummary String? @db.Text
+
+  skills        String[]
+  technologies  String[]
+  jobCategories String[]
+
+  locations HiringSignalJobLocation[]
+
+  @@index([hiringSignalId])
+}
+
+/// Location associated with a hiring signal job listing.
+model HiringSignalJobLocation {
+  id String @id @default(cuid())
+
+  jobId String
+  job   HiringSignalJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  city    String?
+  region  String?
+  country String?
+
+  @@index([jobId])
 }
 
 /// Admin-managed runtime toggles for external service providers.

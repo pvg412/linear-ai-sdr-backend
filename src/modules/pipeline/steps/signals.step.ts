@@ -1,11 +1,12 @@
 import { injectable, multiInject, optional } from "inversify";
-import type { PrismaClient, Prisma } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "@/infra/prisma";
 import { HIRING_SIGNAL_TYPES } from "@/capabilities/hiring-signals/hiring-signals.types";
 import type {
   SignalProvider,
   HiringSignalResult,
+  SignalJobDto,
 } from "@/capabilities/hiring-signals/signal-provider.dto";
 
 import type { PipelineStepHandler } from "./step.interface";
@@ -120,7 +121,7 @@ export class SignalsStep implements PipelineStepHandler {
     /** Collect per-lead signal details for WS data */
     const signalDetailsByLead = new Map<
       string,
-      { openJobCount: number; departments: Set<string>; topJobTitles: Set<string> }
+      { openJobCount: number; departments: Set<string>; topJobTitles: Set<string>; jobs: SignalJobDto[] }
     >();
 
     for (const group of companyGroups.values()) {
@@ -149,6 +150,7 @@ export class SignalsStep implements PipelineStepHandler {
         // Aggregate signal details per lead
         const allDepts = new Set(companyResults.flatMap((r) => r.departments));
         const allTitles = new Set(companyResults.flatMap((r) => r.topJobTitles));
+        const allJobs = companyResults.flatMap((r) => r.jobs);
 
         for (const leadId of group.leadIds) {
           const existing = signalDetailsByLead.get(leadId);
@@ -156,11 +158,13 @@ export class SignalsStep implements PipelineStepHandler {
             existing.openJobCount += companyOpenRoles;
             allDepts.forEach((d) => existing.departments.add(d));
             allTitles.forEach((t) => existing.topJobTitles.add(t));
+            existing.jobs.push(...allJobs);
           } else {
             signalDetailsByLead.set(leadId, {
               openJobCount: companyOpenRoles,
               departments: new Set(allDepts),
               topJobTitles: new Set(allTitles),
+              jobs: [...allJobs],
             });
           }
         }
@@ -217,9 +221,31 @@ export class SignalsStep implements PipelineStepHandler {
           openJobCount: sig.openJobCount,
           departments: Array.from(sig.departments),
           topJobTitles: Array.from(sig.topJobTitles).slice(0, 10),
+          jobs: sig.jobs.map((j) => ({
+            externalId: j.externalId ?? null,
+            jobTitle: j.jobTitle ?? null,
+            team: j.team ?? null,
+            jobType: j.jobType ?? null,
+            locationType: j.locationType ?? null,
+            datePosted: j.datePosted ?? null,
+            companyName: j.companyName ?? null,
+            companySlug: j.companySlug ?? null,
+            requirementsSummary: j.requirementsSummary ?? null,
+            skills: j.skills,
+            technologies: j.technologies,
+            jobCategories: j.jobCategories,
+            locations: j.locations.map((l) => ({
+              city: l.city ?? null,
+              region: l.region ?? null,
+              country: l.country ?? null,
+            })),
+          })),
         };
       },
     );
+
+    // Sort: leads with signals (openJobCount > 0) first, then by count desc
+    signalDetails.sort((a, b) => b.openJobCount - a.openJobCount);
 
     return {
       outputSummary: {
@@ -288,8 +314,12 @@ export class SignalsStep implements PipelineStepHandler {
   }
 
   /**
-   * Writes one `HiringSignal` row per (lead, provider) pair.
-   * `skipDuplicates` prevents errors if the step is retried.
+   * Writes one `HiringSignal` row per (lead, provider) pair, including
+   * nested `HiringSignalJob` and `HiringSignalJobLocation` records.
+   *
+   * Existing duplicates (same pipelineRunId + leadId + providerKey) are
+   * skipped by querying first, since Prisma nested creates don't support
+   * `skipDuplicates`.
    */
   private async persistSignals(
     results: HiringSignalResult[],
@@ -298,23 +328,67 @@ export class SignalsStep implements PipelineStepHandler {
   ): Promise<void> {
     if (results.length === 0 || leadIds.length === 0) return;
 
-    const rows = results.flatMap((result) =>
-      leadIds.map((leadId) => ({
-        leadId,
+    // Check which (leadId, providerKey) combos already exist for this run
+    const existing = await this.prisma.hiringSignal.findMany({
+      where: {
         pipelineRunId,
-        providerKey: result.providerKey,
-        companyName: result.companyName,
-        openJobCount: result.openJobCount,
-        departments: result.departments,
-        topJobTitles: result.topJobTitles,
-        rawData: result.rawData as Prisma.InputJsonValue,
-      })),
+        leadId: { in: leadIds },
+        providerKey: { in: results.map((r) => r.providerKey) },
+      },
+      select: { leadId: true, providerKey: true },
+    });
+
+    const existingKeys = new Set(
+      existing.map((e) => `${e.leadId}:${e.providerKey}`),
     );
 
-    await this.prisma.hiringSignal.createMany({
-      data: rows,
-      skipDuplicates: true,
-    });
+    // Build create operations only for new combinations
+    const creates = results.flatMap((result) =>
+      leadIds
+        .filter(
+          (leadId) => !existingKeys.has(`${leadId}:${result.providerKey}`),
+        )
+        .map((leadId) =>
+          this.prisma.hiringSignal.create({
+            data: {
+              lead: { connect: { id: leadId } },
+              pipelineRunId,
+              providerKey: result.providerKey,
+              companyName: result.companyName,
+              openJobCount: result.openJobCount,
+              departments: result.departments,
+              topJobTitles: result.topJobTitles,
+              jobs: {
+                create: result.jobs.map((job) => ({
+                  externalId: job.externalId,
+                  jobTitle: job.jobTitle,
+                  team: job.team,
+                  jobType: job.jobType,
+                  locationType: job.locationType,
+                  datePosted: job.datePosted,
+                  companyName: job.companyName,
+                  companySlug: job.companySlug,
+                  requirementsSummary: job.requirementsSummary,
+                  skills: job.skills,
+                  technologies: job.technologies,
+                  jobCategories: job.jobCategories,
+                  locations: {
+                    create: job.locations.map((loc) => ({
+                      city: loc.city,
+                      region: loc.region,
+                      country: loc.country,
+                    })),
+                  },
+                })),
+              },
+            },
+          }),
+        ),
+    );
+
+    if (creates.length > 0) {
+      await this.prisma.$transaction(creates);
+    }
   }
 }
 

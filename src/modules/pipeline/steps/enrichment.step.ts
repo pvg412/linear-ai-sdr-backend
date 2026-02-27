@@ -236,6 +236,21 @@ export class EnrichmentStep implements PipelineStepHandler {
 
     // ── Return result ────────────────────────────────────────────────
 
+    const companyResearchList = Object.entries(companyResearchByLead)
+      .map(([leadId, research]) => {
+        const lead = leadLookup.get(leadId);
+        return {
+          leadId,
+          fullName: lead?.fullName ?? null,
+          company: research.company,
+          companyDomain: lead?.companyDomain ?? null,
+          status: "COMPLETED",
+          items: research.items,
+        };
+      })
+      // Sort: leads with research items first, then by item count desc
+      .sort((a, b) => b.items.length - a.items.length);
+
     return {
       outputSummary: {
         totalLeads: runLeads.length,
@@ -247,19 +262,7 @@ export class EnrichmentStep implements PipelineStepHandler {
         enrichment: {
           totalLeads: runLeads.length,
           leadsWithResearch: Object.keys(companyResearchByLead).length,
-          companyResearch: Object.entries(companyResearchByLead).map(
-            ([leadId, research]) => {
-              const lead = leadLookup.get(leadId);
-              return {
-                leadId,
-                fullName: lead?.fullName ?? null,
-                company: research.company,
-                companyDomain: lead?.companyDomain ?? null,
-                status: "COMPLETED",
-                items: research.items,
-              };
-            },
-          ),
+          companyResearch: companyResearchList,
         },
       },
     };

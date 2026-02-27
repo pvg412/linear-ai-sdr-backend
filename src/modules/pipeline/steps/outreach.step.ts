@@ -57,6 +57,10 @@ interface OutreachDraftMessage {
 interface OutreachDraft {
   leadId: string;
   fullName: string | null;
+  linkedinUrl: string | null;
+  icpFit: number | null;
+  finalScore: number | null;
+  signalStrength: number | null;
   messages: OutreachDraftMessage[];
 }
 
@@ -129,6 +133,19 @@ export class OutreachStep implements PipelineStepHandler {
       `Generating outreach messages for ${runLeads.length} lead(s) via ${channel}`,
     );
 
+    /* -- Load final scores for these leads ------------------------- */
+    const leadIds = runLeads.map((rl) => rl.leadId);
+    const finalScores = leadIds.length > 0
+      ? await this.prisma.leadScore.findMany({
+          where: {
+            pipelineRunId: ctx.pipelineRunId,
+            leadId: { in: leadIds },
+            stepInstanceId: "scoring-final",
+          },
+        })
+      : [];
+    const scoreMap = new Map(finalScores.map((s) => [s.leadId, s]));
+
     /* -- Process in batches ---------------------------------------- */
     const batchSize = OUTREACH_CONSTANTS.BATCH_SIZE;
     const outreachDrafts: OutreachDraft[] = [];
@@ -150,7 +167,7 @@ export class OutreachStep implements PipelineStepHandler {
 
       const batchResults = await Promise.all(
         batch.map((rl) =>
-          this.processLead(rl.lead, ctx, channel, customInstructions, tools),
+          this.processLead(rl.lead, ctx, channel, customInstructions, scoreMap, tools),
         ),
       );
 
@@ -180,6 +197,11 @@ export class OutreachStep implements PipelineStepHandler {
       "Outreach step completed",
     );
 
+    // Sort drafts by finalScore descending (highest first, nulls last)
+    outreachDrafts.sort(
+      (a, b) => (b.finalScore ?? -1) - (a.finalScore ?? -1),
+    );
+
     return {
       outputSummary: {
         leadsProcessed: runLeads.length,
@@ -191,6 +213,10 @@ export class OutreachStep implements PipelineStepHandler {
       data: {
         outreach: outreachDrafts.map((draft) => ({
           leadId: draft.leadId,
+          linkedinUrl: draft.linkedinUrl,
+          icpFit: draft.icpFit,
+          finalScore: draft.finalScore,
+          signalStrength: draft.signalStrength,
           messages: draft.messages.map((m) => ({
             id: m.messageId,
             body: m.body,
@@ -216,6 +242,7 @@ export class OutreachStep implements PipelineStepHandler {
     ctx: PipelineContext,
     channel: string,
     customInstructions: string,
+    scoreMap: Map<string, { icpFit: number | null; finalScore: number | null; signalStrength: number | null }>,
     tools: PipelineTools,
   ): Promise<OutreachDraft | null> {
     try {
@@ -248,9 +275,14 @@ export class OutreachStep implements PipelineStepHandler {
         tools,
       );
 
+      const score = scoreMap.get(lead.id);
       return {
         leadId: lead.id,
         fullName: lead.fullName ?? null,
+        linkedinUrl: lead.linkedinUrl ?? null,
+        icpFit: score?.icpFit ?? null,
+        finalScore: score?.finalScore ?? null,
+        signalStrength: score?.signalStrength ?? null,
         messages: savedMessages,
       };
     } catch (err) {

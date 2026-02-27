@@ -15,6 +15,32 @@ export interface SignalSearchInput {
   leadId: string;
 }
 
+export interface SignalJobLocationDto {
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+}
+
+export interface SignalJobDto {
+  /** External ID from the provider (e.g. Hirebase _id). */
+  externalId?: string | null;
+  jobTitle?: string | null;
+  team?: string | null;
+  /** e.g. "Full Time", "Part Time", "Contract" */
+  jobType?: string | null;
+  /** e.g. "In-Person", "Remote", "Hybrid" */
+  locationType?: string | null;
+  /** ISO date string, e.g. "2025-12-05" */
+  datePosted?: string | null;
+  companyName?: string | null;
+  companySlug?: string | null;
+  requirementsSummary?: string | null;
+  skills: string[];
+  technologies: string[];
+  jobCategories: string[];
+  locations: SignalJobLocationDto[];
+}
+
 export interface HiringSignalResult {
   /** Opaque provider identifier, e.g. "hirebase". Never surfaced to the frontend. */
   providerKey: string;
@@ -26,8 +52,8 @@ export interface HiringSignalResult {
   departments: string[];
   /** Sample of job titles (up to 10), ordered by recency. */
   topJobTitles: string[];
-  /** Full raw API response object, stored for future analysis. */
-  rawData: unknown;
+  /** Normalised job listings returned by the provider. */
+  jobs: SignalJobDto[];
 }
 
 export interface SignalProvider {
