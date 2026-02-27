@@ -11,6 +11,7 @@ import type { ServiceCatalogRepository } from "@/modules/service-catalog/persist
 import { CompanySize as ProtoCompanySize } from "@/generated/aisdr/v1/ai_sdr";
 import type {
   CompanyResearchItemProto,
+  HiringSignalProto,
   LeadProfileProto,
   ScoreLeadFinalResponse,
   ServiceCatalogProto,
@@ -35,18 +36,27 @@ const {
   BATCH_SIZE,
   ICP_FIT_WEIGHT,
   SIGNAL_STRENGTH_WEIGHT,
-  SIGNAL_STRENGTH_STUB,
 } = FINAL_SCORING_CONSTANTS;
+
+/** stepInstanceId written by the initial scoring step. */
+const INITIAL_SCORING_STEP_ID = "scoring-initial";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
+
+/** ICP fit data loaded from the initial scoring step's LeadScore row. */
+interface InitialScoreData {
+  score: number;
+  reasoning: string | null;
+}
 
 interface FinalScoredLead {
   leadId: string;
   icpFit: number;
   icpReasoning: string;
   signalStrength: number;
+  signalReasoning: string;
   finalScore: number;
   error?: string;
 }
@@ -61,21 +71,25 @@ interface FinalScoringProgress {
 /* ------------------------------------------------------------------ */
 
 /**
- * Final scoring step — AI-powered lead scoring with enrichment context.
+ * Final scoring step — combines ICP fit with AI-evaluated signal strength.
  *
- * Unlike the initial scoring step, this step sends enriched lead
- * profiles AND company research data to the AI via the `ScoreLeadFinal`
- * gRPC method for a higher-fidelity ICP fit evaluation.
+ * ICP fit (0-100) is taken from the initial scoring step's `LeadScore`
+ * record (stepInstanceId = "scoring-initial"). This step does NOT
+ * re-evaluate ICP fit.
+ *
+ * Signal strength (0-100) is computed by the AI via the `ScoreLeadFinal`
+ * gRPC method, which receives the lead profile, service catalogs,
+ * company research, and hiring signals for context.
  *
  * The composite final score is:
  *   finalScore = round(icpFit * ICP_FIT_WEIGHT + signalStrength * SIGNAL_STRENGTH_WEIGHT)
  *
- * Signal strength is currently a stub value (SIGNAL_STRENGTH_STUB)
- * until the signals step is fully implemented.
+ * If a lead has no initial score, icpFit defaults to 0.
+ * If a lead's company has no hiring signals, signalStrength depends on
+ * the AI's evaluation of other context (likely 0).
  *
  * All leads pass through (no threshold filtering) — the purpose of
- * final scoring is ranking, not elimination. Leads are sorted by
- * finalScore DESC in the output.
+ * final scoring is ranking, not elimination.
  */
 @injectable()
 export class FinalScoringStep implements PipelineStepHandler {
@@ -158,8 +172,30 @@ export class FinalScoringStep implements PipelineStepHandler {
 
     if (await tools.checkCancelled()) return cancelledResult();
 
-    // ── Step 4: Batch-parallel final scoring ─────────────────────────
-    tools.emitProgress("Final scoring leads via AI...", { total: runLeads.length });
+    // ── Step 4: Load ICP fit from initial scoring ────────────────────
+    tools.emitProgress("Loading initial ICP scores...");
+
+    const initialScoresByLead = await this.loadInitialScores(leadIds, ctx.pipelineRunId);
+
+    tools.log.info(
+      { leadsWithInitialScore: initialScoresByLead.size },
+      "Initial ICP scores loaded for final scoring",
+    );
+
+    // ── Step 5: Load hiring signals ─────────────────────────────────
+    tools.emitProgress("Loading hiring signals...");
+
+    const hiringSignalsByLead = await this.loadHiringSignals(leadIds, ctx.pipelineRunId);
+
+    tools.log.info(
+      { leadsWithSignals: hiringSignalsByLead.size },
+      "Hiring signals loaded for final scoring",
+    );
+
+    if (await tools.checkCancelled()) return cancelledResult();
+
+    // ── Step 6: Batch-parallel signal strength scoring ───────────────
+    tools.emitProgress("Evaluating signal strength via AI...", { total: runLeads.length });
 
     const scoredLeads: FinalScoredLead[] = [];
 
@@ -176,14 +212,18 @@ export class FinalScoringStep implements PipelineStepHandler {
       const batch = batches[batchIdx];
 
       const batchResults = await Promise.all(
-        batch.map((rl) =>
-          this.scoreOneLead(
+        batch.map((rl) => {
+          const initial = initialScoresByLead.get(rl.leadId);
+          return this.scoreOneLead(
             rl.leadId,
             leadMap,
+            initial?.score ?? 0,
+            initial?.reasoning ?? "",
             serviceCatalogsProto,
             companyResearchByLead.get(rl.leadId) ?? [],
-          ),
-        ),
+            hiringSignalsByLead.get(rl.leadId),
+          );
+        }),
       );
 
       scoredLeads.push(...batchResults);
@@ -199,12 +239,12 @@ export class FinalScoringStep implements PipelineStepHandler {
       );
     }
 
-    // ── Step 5: Persist all scores to DB ─────────────────────────────
+    // ── Step 7: Persist all scores to DB ─────────────────────────────
     tools.emitProgress("Saving final scores to database...");
 
     await this.persistScores(scoredLeads, ctx.pipelineRunId, stepInstanceId);
 
-    // ── Step 6: Log summary ────────────────────────────────────────────
+    // ── Step 8: Log summary ────────────────────────────────────────────
     const totalFinalScore = scoredLeads.reduce((sum, s) => sum + s.finalScore, 0);
     const averageFinalScore = scoredLeads.length > 0
       ? Math.round(totalFinalScore / scoredLeads.length)
@@ -227,7 +267,7 @@ export class FinalScoringStep implements PipelineStepHandler {
       { completed: scoredLeads.length, total: runLeads.length },
     );
 
-    // ── Step 7: Return result ────────────────────────────────────────
+    // ── Step 9: Return result ────────────────────────────────────────
     return {
       outputSummary: {
         total: scoredLeads.length,
@@ -260,23 +300,27 @@ export class FinalScoringStep implements PipelineStepHandler {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Score a single lead via gRPC ScoreLeadFinal, then compute the
-   * composite finalScore from icpFit + signalStrength.
+   * Evaluate signal strength for a single lead via gRPC ScoreLeadFinal,
+   * then compute the composite finalScore from icpFit + signalStrength.
    *
-   * On error, returns icpFit=0 with the error message as reasoning —
-   * the lead still passes through (no filtering) but will rank last.
+   * `icpFit` and `icpReasoning` are loaded from the initial scoring
+   * step's LeadScore row and passed in — the AI is NOT asked to
+   * re-evaluate ICP fit here.
+   *
+   * On gRPC error, the initial icpFit is preserved but signalStrength
+   * is set to 0. The lead still passes through (no filtering).
    */
   private async scoreOneLead(
     leadId: string,
     leadMap: Map<string, Lead>,
+    icpFit: number,
+    icpReasoning: string,
     serviceCatalogs: ServiceCatalogProto[],
     companyResearchItems: CompanyResearchItemProto[],
+    hiringSignals?: HiringSignalProto,
   ): Promise<FinalScoredLead> {
     const fullLead = leadMap.get(leadId);
     const profile = buildLeadProfile(leadId, fullLead);
-
-    // TODO: Replace with real signal strength once signals.step.ts is implemented
-    const signalStrength = SIGNAL_STRENGTH_STUB;
 
     try {
       const resp: ScoreLeadFinalResponse = await this.aiGrpcClient.scoreLeadFinal({
@@ -284,31 +328,66 @@ export class FinalScoringStep implements PipelineStepHandler {
         lead: profile,
         serviceCatalogs,
         companyResearchItems,
+        hiringSignals,
       });
 
-      const icpFit = clampScore(resp.icpFit);
+      const signalStrength = clampScore(resp.signalStrength);
       const finalScore = computeFinalScore(icpFit, signalStrength);
 
       return {
         leadId,
         icpFit,
-        icpReasoning: resp.icpReasoning ?? "",
+        icpReasoning,
         signalStrength,
+        signalReasoning: resp.signalReasoning ?? "",
         finalScore,
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      const finalScore = computeFinalScore(0, signalStrength);
+      const finalScore = computeFinalScore(icpFit, 0);
 
       return {
         leadId,
-        icpFit: 0,
-        icpReasoning: `Final scoring failed: ${msg}`,
-        signalStrength,
+        icpFit,
+        icpReasoning,
+        signalStrength: 0,
+        signalReasoning: `Signal scoring failed: ${msg}`,
         finalScore,
         error: msg,
       };
     }
+  }
+
+  /**
+   * Load ICP fit scores from the initial scoring step's LeadScore rows.
+   * Returns a map of leadId -> { score, reasoning }.
+   *
+   * Only loads records with stepInstanceId = "scoring-initial" for the
+   * current pipeline run. Leads without an initial score will be absent
+   * from the map (caller defaults icpFit to 0).
+   */
+  private async loadInitialScores(
+    leadIds: string[],
+    pipelineRunId: string,
+  ): Promise<Map<string, InitialScoreData>> {
+    const scores = await this.prisma.leadScore.findMany({
+      where: {
+        leadId: { in: leadIds },
+        pipelineRunId,
+        stepInstanceId: INITIAL_SCORING_STEP_ID,
+      },
+      select: { leadId: true, score: true, reasoning: true },
+    });
+
+    const result = new Map<string, InitialScoreData>();
+    for (const s of scores) {
+      // If duplicates exist (shouldn't), first wins
+      if (!result.has(s.leadId)) {
+        result.set(s.leadId, { score: s.score, reasoning: s.reasoning });
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -346,6 +425,75 @@ export class FinalScoringStep implements PipelineStepHandler {
     }
 
     return result;
+  }
+
+  /**
+   * Load hiring signals for the given lead IDs within a pipeline run.
+   * Aggregates signals from all providers per lead into a single
+   * HiringSignalProto suitable for the gRPC request.
+   *
+   * Returns a map of leadId -> HiringSignalProto (only for leads that
+   * have at least one signal).
+   */
+  private async loadHiringSignals(
+    leadIds: string[],
+    pipelineRunId: string,
+  ): Promise<Map<string, HiringSignalProto>> {
+    const signals = await this.prisma.hiringSignal.findMany({
+      where: {
+        leadId: { in: leadIds },
+        pipelineRunId,
+      },
+      include: {
+        jobs: {
+          include: { locations: true },
+        },
+      },
+    });
+
+    // Group by leadId and merge results from multiple providers
+    const byLead = new Map<string, HiringSignalProto>();
+
+    for (const signal of signals) {
+      const existing = byLead.get(signal.leadId);
+
+      const signalJobs = signal.jobs.map((job) => ({
+        jobTitle: job.jobTitle ?? "",
+        team: job.team ?? "",
+        jobType: job.jobType ?? "",
+        locationType: job.locationType ?? "",
+        datePosted: job.datePosted ?? "",
+        requirementsSummary: job.requirementsSummary ?? "",
+        skills: job.skills,
+        technologies: job.technologies,
+        jobCategories: job.jobCategories,
+        locations: job.locations.map((loc) => ({
+          city: loc.city ?? "",
+          region: loc.region ?? "",
+          country: loc.country ?? "",
+        })),
+      }));
+
+      if (existing) {
+        // Merge: sum job counts, union departments/titles, concat jobs
+        existing.openJobCount += signal.openJobCount;
+        const deptSet = new Set([...existing.departments, ...signal.departments]);
+        existing.departments = Array.from(deptSet);
+        const titleSet = new Set([...existing.topJobTitles, ...signal.topJobTitles]);
+        existing.topJobTitles = Array.from(titleSet).slice(0, 10);
+        existing.jobs.push(...signalJobs);
+      } else {
+        byLead.set(signal.leadId, {
+          companyName: signal.companyName,
+          openJobCount: signal.openJobCount,
+          departments: [...signal.departments],
+          topJobTitles: signal.topJobTitles.slice(0, 10),
+          jobs: signalJobs,
+        });
+      }
+    }
+
+    return byLead;
   }
 
   /**

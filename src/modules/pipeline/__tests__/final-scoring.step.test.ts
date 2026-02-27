@@ -13,23 +13,33 @@ import { makeCtx, makeTools } from "./step-test.helpers";
 
 const ICP_FIT_WEIGHT = 0.7;
 const SIGNAL_STRENGTH_WEIGHT = 0.3;
-const SIGNAL_STRENGTH_STUB = 50;
+
+/** Default signal strength returned by the mock gRPC when no override is set */
+const DEFAULT_SIGNAL_STRENGTH = 40;
+
+/** Default ICP score stored in mock initial LeadScore records */
+const DEFAULT_ICP_SCORE = 75;
 
 /* ------------------------------------------------------------------ */
 /*  Mock factories                                                     */
 /* ------------------------------------------------------------------ */
 
+interface SignalOverride {
+  signalStrength?: number;
+  signalReasoning?: string;
+}
+
 function createMockAiGrpcClient(
-  icpOverrides?: Record<string, { icpFit: number; icpReasoning: string }>,
+  overrides?: Record<string, SignalOverride>,
 ) {
   return {
     scoreLeadFinal: vi.fn().mockImplementation(
       (req: { lead: { id: string } }) => {
-        const override = icpOverrides?.[req.lead.id];
+        const override = overrides?.[req.lead.id];
         return Promise.resolve({
           requestId: "resp-1",
-          icpFit: override?.icpFit ?? 75,
-          icpReasoning: override?.icpReasoning ?? "Good ICP fit",
+          signalStrength: override?.signalStrength ?? DEFAULT_SIGNAL_STRENGTH,
+          signalReasoning: override?.signalReasoning ?? "Moderate hiring activity",
         });
       },
     ),
@@ -125,15 +135,103 @@ function makeRunLeads(count: number, leads?: ReturnType<typeof makeDbLead>[]) {
   }));
 }
 
+/** Hiring signal factory for test data */
+function makeHiringSignal(leadId: string, opts?: {
+  openJobCount?: number;
+  departments?: string[];
+  topJobTitles?: string[];
+  providerKey?: string;
+  companyName?: string;
+  jobs?: {
+    jobTitle?: string;
+    team?: string;
+    datePosted?: string;
+    skills?: string[];
+    technologies?: string[];
+    jobCategories?: string[];
+    locations?: { city?: string; region?: string; country?: string }[];
+  }[];
+}) {
+  return {
+    id: `hs-${leadId}`,
+    createdAt: new Date(),
+    leadId,
+    pipelineRunId: "run-1",
+    providerKey: opts?.providerKey ?? "test-provider",
+    companyName: opts?.companyName ?? "Test Company",
+    openJobCount: opts?.openJobCount ?? 5,
+    departments: opts?.departments ?? ["Engineering"],
+    topJobTitles: opts?.topJobTitles ?? ["Software Engineer"],
+    jobs: (opts?.jobs ?? [{ jobTitle: "Software Engineer", datePosted: "2026-02-01" }]).map((j, idx) => ({
+      id: `hsj-${leadId}-${idx}`,
+      createdAt: new Date(),
+      hiringSignalId: `hs-${leadId}`,
+      externalId: null,
+      jobTitle: j.jobTitle ?? null,
+      team: j.team ?? null,
+      jobType: null,
+      locationType: null,
+      datePosted: j.datePosted ?? null,
+      companyName: null,
+      companySlug: null,
+      requirementsSummary: null,
+      skills: j.skills ?? [],
+      technologies: j.technologies ?? [],
+      jobCategories: j.jobCategories ?? [],
+      locations: (j.locations ?? []).map((l, li) => ({
+        id: `hsjl-${leadId}-${idx}-${li}`,
+        jobId: `hsj-${leadId}-${idx}`,
+        city: l.city ?? null,
+        region: l.region ?? null,
+        country: l.country ?? null,
+      })),
+    })),
+  };
+}
+
+/**
+ * Build initial scoring LeadScore records. By default, creates one
+ * per lead with DEFAULT_ICP_SCORE and a reasoning string.
+ */
+function makeInitialScores(
+  leads: ReturnType<typeof makeDbLead>[],
+  overrides?: Record<string, { score: number; reasoning: string }>,
+) {
+  return leads.map((l) => {
+    const ovr = overrides?.[l.id];
+    return {
+      id: `ls-init-${l.id}`,
+      createdAt: new Date(),
+      leadId: l.id,
+      pipelineRunId: "run-1",
+      stepInstanceId: "scoring-initial",
+      score: ovr?.score ?? DEFAULT_ICP_SCORE,
+      reasoning: ovr?.reasoning ?? "Good ICP fit",
+      icpFit: null,
+      signalStrength: null,
+      finalScore: null,
+    };
+  });
+}
+
 function createMockPrisma(opts?: {
   leadCount?: number;
   leads?: ReturnType<typeof makeDbLead>[];
   companyResearches?: ReturnType<typeof makeCompanyResearch>[];
+  hiringSignals?: ReturnType<typeof makeHiringSignal>[];
+  /** Override initial ICP scores per lead. If omitted, all leads get DEFAULT_ICP_SCORE. */
+  initialScoreOverrides?: Record<string, { score: number; reasoning: string }>;
+  /** Set to true to simulate leads without initial scores. */
+  noInitialScores?: boolean;
 }) {
   const leads = opts?.leads
     ?? Array.from({ length: opts?.leadCount ?? 30 }, (_, i) => makeDbLead(i));
   const runLeads = makeRunLeads(leads.length, leads);
   const companyResearches = opts?.companyResearches ?? [];
+  const hiringSignals = opts?.hiringSignals ?? [];
+  const initialScores = opts?.noInitialScores
+    ? []
+    : makeInitialScores(leads, opts?.initialScoreOverrides);
 
   return {
     lead: {
@@ -150,7 +248,11 @@ function createMockPrisma(opts?: {
     companyResearch: {
       findMany: vi.fn().mockResolvedValue(companyResearches),
     },
+    hiringSignal: {
+      findMany: vi.fn().mockResolvedValue(hiringSignals),
+    },
     leadScore: {
+      findMany: vi.fn().mockResolvedValue(initialScores),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
   };
@@ -185,21 +287,26 @@ describe("FinalScoringStep", () => {
     vi.restoreAllMocks();
   });
 
-  it("happy path: scores leads with company research and persists all component fields", async () => {
-    const icpOverrides: Record<string, { icpFit: number; icpReasoning: string }> = {
-      "lead-0": { icpFit: 90, icpReasoning: "Excellent ICP match" },
-      "lead-1": { icpFit: 60, icpReasoning: "Moderate fit" },
-      "lead-2": { icpFit: 40, icpReasoning: "Weak fit" },
-    };
-
+  it("happy path: combines ICP from initial scoring with signal strength from AI", async () => {
     const companyResearches = [
       makeCompanyResearch("lead-0"),
       makeCompanyResearch("lead-1"),
     ];
 
     const { step, aiGrpcClient, mockPrisma } = buildStep({
-      aiGrpcClient: createMockAiGrpcClient(icpOverrides),
-      prisma: createMockPrisma({ leadCount: 3, companyResearches }),
+      aiGrpcClient: createMockAiGrpcClient({
+        "lead-0": { signalStrength: 60 },
+        "lead-1": { signalStrength: 30 },
+      }),
+      prisma: createMockPrisma({
+        leadCount: 3,
+        companyResearches,
+        initialScoreOverrides: {
+          "lead-0": { score: 90, reasoning: "Excellent ICP match" },
+          "lead-1": { score: 60, reasoning: "Moderate fit" },
+          "lead-2": { score: 40, reasoning: "Weak fit" },
+        },
+      }),
     });
 
     const ctx = makeCtx();
@@ -210,7 +317,7 @@ describe("FinalScoringStep", () => {
     // All 3 leads pass through (no filtering)
     expect(result.outputSummary.total).toBe(3);
 
-    // gRPC called for each lead
+    // gRPC called for each lead (signal strength evaluation)
     expect(aiGrpcClient.scoreLeadFinal).toHaveBeenCalledTimes(3);
 
     // lead-0 has company research items passed to gRPC
@@ -220,15 +327,15 @@ describe("FinalScoringStep", () => {
     expect(call0).toBeDefined();
     expect((call0![0] as { companyResearchItems: unknown[] }).companyResearchItems).toHaveLength(2);
 
-    // DB persistence includes all component fields
+    // DB persistence includes all component fields: ICP from initial scoring + signal from AI
     expect(mockPrisma.leadScore.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.arrayContaining([
           expect.objectContaining({
             leadId: "lead-0",
             icpFit: 90,
-            signalStrength: SIGNAL_STRENGTH_STUB,
-            finalScore: Math.round(90 * ICP_FIT_WEIGHT + SIGNAL_STRENGTH_STUB * SIGNAL_STRENGTH_WEIGHT),
+            signalStrength: 60,
+            finalScore: Math.round(90 * ICP_FIT_WEIGHT + 60 * SIGNAL_STRENGTH_WEIGHT),
           }),
         ]),
       }),
@@ -250,7 +357,6 @@ describe("FinalScoringStep", () => {
   });
 
   it("lead with no company research sends empty items to gRPC", async () => {
-    // No company research records at all
     const { step, aiGrpcClient } = buildStep({
       prisma: createMockPrisma({ leadCount: 1, companyResearches: [] }),
     });
@@ -276,7 +382,6 @@ describe("FinalScoringStep", () => {
       createdAt: new Date("2026-02-01"),
       items: [{ date: "2026-01-20", summary: "Recent news", sourceUrl: "https://recent.com", category: "NEWS", source: "perplexity" }],
     });
-    // Newer comes first since findMany orders by createdAt desc
     newerResearch.id = "cr-lead-0-new";
 
     const { step, aiGrpcClient } = buildStep({
@@ -288,7 +393,6 @@ describe("FinalScoringStep", () => {
 
     await step.run(ctx, { _stepId: "scoring-final" }, tools);
 
-    // Only the newer research item should be sent
     const call = (aiGrpcClient.scoreLeadFinal as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
     const items = (call[0] as { companyResearchItems: { summary: string }[] }).companyResearchItems;
     expect(items).toHaveLength(1);
@@ -315,15 +419,13 @@ describe("FinalScoringStep", () => {
     const call = (aiGrpcClient.scoreLeadFinal as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
     const items = (call[0] as { companyResearchItems: { index: number; sourceName: string; summary: string }[] }).companyResearchItems;
     expect(items).toHaveLength(2);
-    // index is 1-based
     expect(items[0].index).toBe(1);
     expect(items[1].index).toBe(2);
-    // sourceName mapped from source
     expect(items[0].sourceName).toBe("perplexity");
     expect(items[1].sourceName).toBe("linkedin");
   });
 
-  it("gRPC error on one lead gives icpFit=0 but lead still passes through", async () => {
+  it("gRPC error preserves ICP fit from initial scoring, sets signalStrength=0", async () => {
     const aiGrpcClient = {
       scoreLeadFinal: vi.fn().mockImplementation(
         (req: { lead: { id: string } }) => {
@@ -332,8 +434,8 @@ describe("FinalScoringStep", () => {
           }
           return Promise.resolve({
             requestId: "r",
-            icpFit: 80,
-            icpReasoning: "Good",
+            signalStrength: 40,
+            signalReasoning: "Some hiring",
           });
         },
       ),
@@ -341,32 +443,42 @@ describe("FinalScoringStep", () => {
 
     const { step, mockPrisma } = buildStep({
       aiGrpcClient,
-      prisma: createMockPrisma({ leadCount: 3 }),
+      prisma: createMockPrisma({
+        leadCount: 3,
+        initialScoreOverrides: {
+          "lead-1": { score: 85, reasoning: "Great ICP" },
+        },
+      }),
     });
     const ctx = makeCtx();
     const tools = makeTools();
 
     const result = await step.run(ctx, { _stepId: "scoring-final" }, tools);
 
-    // All 3 leads pass through (no filtering in final scoring)
+    // All 3 leads pass through
     expect(result.outputSummary.total).toBe(3);
     expect(result.outputSummary.errors).toBe(1);
 
-    // Errored lead (lead-1) should be persisted with icpFit=0
+    // Errored lead (lead-1) keeps its ICP fit (85), signalStrength=0
     expect(mockPrisma.leadScore.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.arrayContaining([
           expect.objectContaining({
             leadId: "lead-1",
-            icpFit: 0,
+            icpFit: 85,
+            signalStrength: 0,
+            finalScore: Math.round(85 * ICP_FIT_WEIGHT + 0 * SIGNAL_STRENGTH_WEIGHT),
           }),
         ]),
       }),
     );
   });
 
-  it("signal strength uses SIGNAL_STRENGTH_STUB (50)", async () => {
+  it("signal strength comes from gRPC response", async () => {
     const { step, mockPrisma } = buildStep({
+      aiGrpcClient: createMockAiGrpcClient({
+        "lead-0": { signalStrength: 80, signalReasoning: "Strong hiring" },
+      }),
       prisma: createMockPrisma({ leadCount: 1 }),
     });
     const ctx = makeCtx();
@@ -378,19 +490,72 @@ describe("FinalScoringStep", () => {
       expect.objectContaining({
         data: [
           expect.objectContaining({
-            signalStrength: 50,
+            signalStrength: 80,
           }),
         ],
       }),
     );
   });
 
-  it("finalScore math: icpFit=80, signal=50 gives round(80*0.7 + 50*0.3) = 71", async () => {
+  it("ICP fit comes from initial scoring LeadScore, not from gRPC", async () => {
+    const { step, mockPrisma } = buildStep({
+      prisma: createMockPrisma({
+        leadCount: 1,
+        initialScoreOverrides: {
+          "lead-0": { score: 92, reasoning: "Perfect ICP match" },
+        },
+      }),
+    });
+    const ctx = makeCtx();
+    const tools = makeTools();
+
+    await step.run(ctx, { _stepId: "scoring-final" }, tools);
+
+    expect(mockPrisma.leadScore.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            icpFit: 92,
+            reasoning: "Perfect ICP match",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("lead without initial score defaults to icpFit=0", async () => {
+    const { step, mockPrisma } = buildStep({
+      prisma: createMockPrisma({ leadCount: 1, noInitialScores: true }),
+    });
+    const ctx = makeCtx();
+    const tools = makeTools();
+
+    await step.run(ctx, { _stepId: "scoring-final" }, tools);
+
+    expect(mockPrisma.leadScore.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            icpFit: 0,
+            signalStrength: DEFAULT_SIGNAL_STRENGTH,
+            finalScore: Math.round(0 * ICP_FIT_WEIGHT + DEFAULT_SIGNAL_STRENGTH * SIGNAL_STRENGTH_WEIGHT),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("finalScore math: icpFit=80, signal=60 gives round(80*0.7 + 60*0.3) = 74", async () => {
     const { step, mockPrisma } = buildStep({
       aiGrpcClient: createMockAiGrpcClient({
-        "lead-0": { icpFit: 80, icpReasoning: "Good" },
+        "lead-0": { signalStrength: 60 },
       }),
-      prisma: createMockPrisma({ leadCount: 1 }),
+      prisma: createMockPrisma({
+        leadCount: 1,
+        initialScoreOverrides: {
+          "lead-0": { score: 80, reasoning: "Good" },
+        },
+      }),
     });
 
     const ctx = makeCtx();
@@ -403,23 +568,23 @@ describe("FinalScoringStep", () => {
         data: [
           expect.objectContaining({
             leadId: "lead-0",
-            finalScore: 71, // round(80 * 0.7 + 50 * 0.3) = round(56 + 15) = 71
+            finalScore: 74, // round(80 * 0.7 + 60 * 0.3) = round(56 + 18) = 74
           }),
         ],
       }),
     );
   });
 
-  it("all leads persisted with correct ICP scores", async () => {
-    const icpOverrides: Record<string, { icpFit: number; icpReasoning: string }> = {
-      "lead-0": { icpFit: 50, icpReasoning: "Low" },
-      "lead-1": { icpFit: 90, icpReasoning: "High" },
-      "lead-2": { icpFit: 70, icpReasoning: "Medium" },
-    };
-
+  it("all leads persisted with correct ICP scores from initial scoring", async () => {
     const { step, mockPrisma } = buildStep({
-      aiGrpcClient: createMockAiGrpcClient(icpOverrides),
-      prisma: createMockPrisma({ leadCount: 3 }),
+      prisma: createMockPrisma({
+        leadCount: 3,
+        initialScoreOverrides: {
+          "lead-0": { score: 50, reasoning: "Low" },
+          "lead-1": { score: 90, reasoning: "High" },
+          "lead-2": { score: 70, reasoning: "Medium" },
+        },
+      }),
     });
 
     const ctx = makeCtx();
@@ -463,11 +628,15 @@ describe("FinalScoringStep", () => {
     const ctx = makeCtx();
     const tools = makeTools();
 
-    // checkCancelled calls: (1) before batch loop, (2) before batch 0, (3) before batch 1
+    // checkCancelled calls:
+    //   (1) after company research loaded
+    //   (2) after hiring signals loaded
+    //   (3) before batch 0
+    //   (4) before batch 1 — cancel here
     let callCount = 0;
     vi.mocked(tools.checkCancelled).mockImplementation(() => {
       callCount++;
-      return Promise.resolve(callCount >= 3);
+      return Promise.resolve(callCount >= 4);
     });
 
     const result = await step.run(ctx, { _stepId: "scoring-final" }, tools);
@@ -495,15 +664,21 @@ describe("FinalScoringStep", () => {
 
   it("score column stores finalScore for backward compatibility", async () => {
     const expectedIcpFit = 80;
+    const expectedSignalStrength = 70;
     const expectedFinalScore = Math.round(
-      expectedIcpFit * ICP_FIT_WEIGHT + SIGNAL_STRENGTH_STUB * SIGNAL_STRENGTH_WEIGHT,
+      expectedIcpFit * ICP_FIT_WEIGHT + expectedSignalStrength * SIGNAL_STRENGTH_WEIGHT,
     );
 
     const { step, mockPrisma } = buildStep({
       aiGrpcClient: createMockAiGrpcClient({
-        "lead-0": { icpFit: expectedIcpFit, icpReasoning: "Good" },
+        "lead-0": { signalStrength: expectedSignalStrength },
       }),
-      prisma: createMockPrisma({ leadCount: 1 }),
+      prisma: createMockPrisma({
+        leadCount: 1,
+        initialScoreOverrides: {
+          "lead-0": { score: expectedIcpFit, reasoning: "Good" },
+        },
+      }),
     });
 
     const ctx = makeCtx();
@@ -517,6 +692,75 @@ describe("FinalScoringStep", () => {
           expect.objectContaining({
             score: expectedFinalScore,
             finalScore: expectedFinalScore,
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("hiring signals are loaded from DB and passed to gRPC", async () => {
+    const signals = [
+      makeHiringSignal("lead-0", {
+        openJobCount: 8,
+        departments: ["Engineering", "Product"],
+        topJobTitles: ["Backend Engineer", "PM"],
+        jobs: [
+          { jobTitle: "Backend Engineer", datePosted: "2026-02-20", skills: ["Node.js"], technologies: ["AWS"] },
+        ],
+      }),
+    ];
+
+    const { step, aiGrpcClient } = buildStep({
+      prisma: createMockPrisma({ leadCount: 2, hiringSignals: signals }),
+    });
+    const ctx = makeCtx();
+    const tools = makeTools();
+
+    await step.run(ctx, { _stepId: "scoring-final" }, tools);
+
+    // lead-0 should have hiringSignals populated
+    const call0 = (aiGrpcClient.scoreLeadFinal as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: unknown[]) => (c[0] as { lead: { id: string } }).lead.id === "lead-0",
+    );
+    expect(call0).toBeDefined();
+    const req0 = call0![0] as { hiringSignals?: { openJobCount: number; departments: string[] } };
+    expect(req0.hiringSignals).toBeDefined();
+    expect(req0.hiringSignals!.openJobCount).toBe(8);
+    expect(req0.hiringSignals!.departments).toEqual(["Engineering", "Product"]);
+
+    // lead-1 should have no hiring signals (undefined)
+    const call1 = (aiGrpcClient.scoreLeadFinal as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: unknown[]) => (c[0] as { lead: { id: string } }).lead.id === "lead-1",
+    );
+    expect(call1).toBeDefined();
+    const req1 = call1![0] as { hiringSignals?: unknown };
+    expect(req1.hiringSignals).toBeUndefined();
+  });
+
+  it("lead with no hiring signals gets signalStrength from AI (may be 0)", async () => {
+    const { step, mockPrisma } = buildStep({
+      aiGrpcClient: createMockAiGrpcClient({
+        "lead-0": { signalStrength: 0, signalReasoning: "No hiring signals" },
+      }),
+      prisma: createMockPrisma({
+        leadCount: 1,
+        hiringSignals: [],
+        initialScoreOverrides: {
+          "lead-0": { score: 80, reasoning: "Good" },
+        },
+      }),
+    });
+    const ctx = makeCtx();
+    const tools = makeTools();
+
+    await step.run(ctx, { _stepId: "scoring-final" }, tools);
+
+    expect(mockPrisma.leadScore.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            signalStrength: 0,
+            finalScore: Math.round(80 * ICP_FIT_WEIGHT + 0 * SIGNAL_STRENGTH_WEIGHT),
           }),
         ],
       }),

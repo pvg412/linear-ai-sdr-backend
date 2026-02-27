@@ -130,8 +130,7 @@ export const ENRICHMENT_CONSTANTS = {
  * Final lead scoring pipeline step constants
  *
  * Final scoring combines ICP fit (from AI via gRPC) with signal strength
- * into a weighted composite score. Signal strength is currently a stub
- * value until the signals step is implemented.
+ * (also from AI) into a weighted composite score.
  */
 export const FINAL_SCORING_CONSTANTS = {
   /** Number of leads processed in parallel per batch */
@@ -140,8 +139,6 @@ export const FINAL_SCORING_CONSTANTS = {
   ICP_FIT_WEIGHT: 0.7,
   /** Weight of signal strength in composite score (0-1) */
   SIGNAL_STRENGTH_WEIGHT: 0.3,
-  /** Stub value for signal strength until signals step is implemented */
-  SIGNAL_STRENGTH_STUB: 50,
 } as const;
 
 /**
