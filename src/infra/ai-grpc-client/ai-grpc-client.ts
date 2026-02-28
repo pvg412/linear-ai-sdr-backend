@@ -116,12 +116,12 @@ export class AiGrpcClient {
 
     this.timeouts = {
       pingMs: opts.timeouts?.pingMs ?? 1500,
-      parseMs: opts.timeouts?.parseMs ?? 40_000,
-      upsertMs: opts.timeouts?.upsertMs ?? 60_000,
-      deleteMs: opts.timeouts?.deleteMs ?? 60_000,
-      companyResearchMs: opts.timeouts?.companyResearchMs ?? 60_000,
-      scoreLeadMs: opts.timeouts?.scoreLeadMs ?? 30_000,
-      scoreLeadFinalMs: opts.timeouts?.scoreLeadFinalMs ?? 30_000,
+      parseMs: opts.timeouts?.parseMs ?? 120_000,
+      upsertMs: opts.timeouts?.upsertMs ?? 120_000,
+      deleteMs: opts.timeouts?.deleteMs ?? 120_000,
+      companyResearchMs: opts.timeouts?.companyResearchMs ?? 120_000,
+      scoreLeadMs: opts.timeouts?.scoreLeadMs ?? 120_000,
+      scoreLeadFinalMs: opts.timeouts?.scoreLeadFinalMs ?? 120_000,
     };
 
     const insecure = opts.insecure ?? true;

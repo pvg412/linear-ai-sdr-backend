@@ -1,5 +1,6 @@
 import { inject, injectable } from "inversify";
 import type { PrismaClient, Lead } from "@prisma/client";
+import { EnrichmentFieldStatus } from "@prisma/client";
 
 import { COMPANY_RESEARCH_TYPES } from "@/modules/company-research/company-research.types";
 import type { CompanyResearchCommandService } from "@/modules/company-research/services/company-research.command.service";
@@ -164,6 +165,22 @@ export class EnrichmentStep implements PipelineStepHandler {
       );
 
       await this.pollForCompletion(enrichmentIds, companyResearchIds, tools);
+    }
+
+    // ── Phase 2.5: Auto-approve enrichment field changes ────────────
+    //
+    // In pipeline mode the manual review step is automated: all pending
+    // field changes from profile enrichment are approved so that
+    // lead data is updated before downstream steps (outreach, etc.).
+    // This also triggers RAG re-indexing via the existing
+    // reviewFieldChanges() → leadRagIndexSync path.
+
+    if (enrichmentIds.length > 0) {
+      await this.autoApproveEnrichmentFieldChanges(
+        enrichmentIds,
+        ctx.createdById,
+        tools,
+      );
     }
 
     // ── Phase 3: Fetch completed company research results ──────────
@@ -389,6 +406,88 @@ export class EnrichmentStep implements PipelineStepHandler {
       { enrichmentIds: enrichmentIds.length, companyResearchIds: companyResearchIds.length },
       "All enrichment jobs completed",
     );
+  }
+
+  /**
+   * Auto-approve all pending enrichment field changes for leads
+   * that reached AWAITING_REVIEW status during this pipeline run.
+   *
+   * Uses the existing `reviewFieldChanges()` method from
+   * ProfileEnrichmentCommandService so that:
+   * - Field values are applied to the Lead model
+   * - Enrichment request status transitions to COMPLETED
+   * - hasPendingEnrichment flag is cleared
+   * - RAG re-indexing is triggered (via leadRagIndexSync)
+   *
+   * Errors on individual leads are logged and swallowed — one lead
+   * failing auto-approve must not block the rest.
+   */
+  private async autoApproveEnrichmentFieldChanges(
+    enrichmentIds: string[],
+    userId: string,
+    tools: PipelineTools,
+  ): Promise<void> {
+    // Find enrichment requests that reached AWAITING_REVIEW
+    const awaitingReview = await this.prisma.leadEnrichmentRequest.findMany({
+      where: {
+        id: { in: enrichmentIds },
+        status: "AWAITING_REVIEW",
+      },
+      include: {
+        fieldChanges: {
+          where: { status: EnrichmentFieldStatus.PENDING },
+        },
+      },
+    });
+
+    if (awaitingReview.length === 0) {
+      tools.log.info({}, "No enrichment requests awaiting review — skipping auto-approve");
+      return;
+    }
+
+    tools.emitProgress(
+      `Auto-approving enrichment for ${awaitingReview.length} lead(s)...`,
+    );
+
+    let approvedCount = 0;
+    let failedCount = 0;
+
+    for (const request of awaitingReview) {
+      if (request.fieldChanges.length === 0) continue;
+
+      try {
+        const decisions = request.fieldChanges.map((fc) => ({
+          fieldChangeId: fc.id,
+          action: "approve" as const,
+        }));
+
+        await this.profileEnrichment.reviewFieldChanges(
+          userId,
+          request.leadId,
+          decisions,
+        );
+
+        approvedCount++;
+      } catch (err) {
+        failedCount++;
+        const msg = err instanceof Error ? err.message : String(err);
+        tools.log.warn(
+          { leadId: request.leadId, enrichmentRequestId: request.id, error: msg },
+          "Auto-approve failed for enrichment request (non-fatal)",
+        );
+      }
+    }
+
+    tools.log.info(
+      { awaitingReview: awaitingReview.length, approved: approvedCount, failed: failedCount },
+      "Enrichment auto-approve completed",
+    );
+
+    if (approvedCount > 0) {
+      tools.emitProgress(
+        `Auto-approved enrichment for ${approvedCount} lead(s)`,
+      );
+    }
   }
 }
 

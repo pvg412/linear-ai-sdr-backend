@@ -4,6 +4,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ScoringStep } from "@/modules/pipeline/steps/scoring.step";
 import type { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 import type { ServiceCatalogRepository } from "@/modules/service-catalog/persistence/service-catalog.repository";
+import type { LeadRagIndexSyncService } from "@/modules/lead-rag/services/lead-rag-index-sync.service";
 
 import { makeCtx, makeTools } from "./step-test.helpers";
 
@@ -88,6 +89,14 @@ function makeRunLeads(count: number, leads?: ReturnType<typeof makeDbLead>[]) {
 /**
  * Build a mock Prisma that covers pipelineRunLead.findMany + lead.findMany + leadScore.createMany.
  */
+function createMockRagSync() {
+  return {
+    enqueueUpsertLead: vi.fn().mockResolvedValue(undefined),
+    enqueueUpsertLeads: vi.fn().mockResolvedValue(undefined),
+    enqueueDeleteLead: vi.fn().mockResolvedValue(undefined),
+  } as unknown as LeadRagIndexSyncService;
+}
+
 function createMockPrisma(opts?: {
   leadCount?: number;
   leadRecords?: ReturnType<typeof makeDbLead>[];
@@ -104,6 +113,7 @@ function createMockPrisma(opts?: {
           return Promise.resolve(leads.filter((l) => ids.has(l.id)));
         },
       ),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     pipelineRunLead: {
       findMany: vi.fn().mockResolvedValue(runLeads),
@@ -118,21 +128,23 @@ function createMockPrisma(opts?: {
 function buildStep(overrides?: {
   aiGrpcClient?: AiGrpcClient;
   serviceCatalogRepo?: ServiceCatalogRepository;
+  ragSync?: LeadRagIndexSyncService;
   prisma?: ReturnType<typeof createMockPrisma>;
 }) {
   const aiGrpcClient = overrides?.aiGrpcClient ?? createMockAiGrpcClient();
   const serviceCatalogRepo =
     overrides?.serviceCatalogRepo ?? createMockServiceCatalogRepo();
+  const ragSync = overrides?.ragSync ?? createMockRagSync();
   const mockPrisma = overrides?.prisma ?? createMockPrisma();
 
-  const step = new ScoringStep(aiGrpcClient, serviceCatalogRepo);
+  const step = new ScoringStep(aiGrpcClient, serviceCatalogRepo, ragSync);
 
   Object.defineProperty(step, "prisma", {
     value: mockPrisma,
     writable: true,
   });
 
-  return { step, aiGrpcClient, serviceCatalogRepo, mockPrisma };
+  return { step, aiGrpcClient, serviceCatalogRepo, ragSync, mockPrisma };
 }
 
 /* ------------------------------------------------------------------ */

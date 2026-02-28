@@ -8,6 +8,9 @@ import { getPrisma } from "@/infra/prisma";
 import { SERVICE_CATALOG_TYPES } from "@/modules/service-catalog/service-catalog.types";
 import type { ServiceCatalogRepository } from "@/modules/service-catalog/persistence/service-catalog.repository";
 
+import { LEAD_RAG_TYPES } from "@/modules/lead-rag/lead-rag.types";
+import type { LeadRagIndexSyncService } from "@/modules/lead-rag/services/lead-rag-index-sync.service";
+
 import { CompanySize as ProtoCompanySize } from "@/generated/aisdr/v1/ai_sdr";
 import type {
   LeadProfileProto,
@@ -75,6 +78,8 @@ export class ScoringStep implements PipelineStepHandler {
     private readonly aiGrpcClient: AiGrpcClient,
     @inject(SERVICE_CATALOG_TYPES.ServiceCatalogRepository)
     private readonly serviceCatalogRepo: ServiceCatalogRepository,
+    @inject(LEAD_RAG_TYPES.LeadRagIndexSyncService)
+    private readonly ragSync: LeadRagIndexSyncService,
   ) {}
 
   async run(
@@ -200,7 +205,33 @@ export class ScoringStep implements PipelineStepHandler {
       });
     }
 
-    // ── Step 6: Log summary ──────────────────────────────────────────
+    // ── Step 6: Mark passed leads as verified & index in RAG ─────────
+    const passedLeadIds = scoredLeads
+      .filter((s) => s.score >= SCORING_THRESHOLD)
+      .map((s) => s.leadId);
+
+    if (passedLeadIds.length > 0) {
+      // Mark as verified — pipeline scoring replaces manual verification
+      await this.prisma.lead.updateMany({
+        where: { id: { in: passedLeadIds } },
+        data: { isVerified: true },
+      });
+
+      // Index passed leads in RAG for downstream outreach context
+      tools.emitProgress(`Indexing ${passedLeadIds.length} leads in RAG...`);
+
+      await this.ragSync.enqueueUpsertLeads(ctx.createdById, passedLeadIds, {
+        reason: "pipeline_scoring_passed",
+        log: tools.log,
+      });
+
+      tools.log.info(
+        { indexed: passedLeadIds.length, pipelineRunId: ctx.pipelineRunId },
+        "Passed leads marked verified and enqueued for RAG indexing",
+      );
+    }
+
+    // ── Step 7: Log summary ──────────────────────────────────────────
     const totalScore = scoredLeads.reduce((sum, s) => sum + s.score, 0);
     const averageScore = scoredLeads.length > 0
       ? Math.round(totalScore / scoredLeads.length)

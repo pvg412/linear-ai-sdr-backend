@@ -21,6 +21,7 @@ function createMockProfileEnrichment() {
           message: "Enqueued",
         }),
     ),
+    reviewFieldChanges: vi.fn().mockResolvedValue(undefined),
   } as unknown as ProfileEnrichmentCommandService;
 }
 
@@ -62,7 +63,15 @@ function createMockPrisma(opts?: {
     },
     leadEnrichmentRequest: {
       findMany: vi.fn().mockImplementation(
-        (args: { where: { id: { in: string[] } } }) => {
+        (args: { where: { id: { in: string[] }; status?: string }; include?: unknown }) => {
+          // Phase 2.5 auto-approve query: status === "AWAITING_REVIEW" with include fieldChanges
+          if (args.where.status === "AWAITING_REVIEW") {
+            // Return empty array by default — no requests awaiting review.
+            // Tests that exercise auto-approve can override this mock.
+            return Promise.resolve([]);
+          }
+
+          // Phase 2 polling query: select { id, status }
           const idx = enrichmentPollCount++;
           return Promise.resolve(
             args.where.id.in.map((id) => {
@@ -497,8 +506,8 @@ describe("EnrichmentStep", () => {
     await vi.advanceTimersByTimeAsync(10_000);
     const result = await runPromise;
 
-    // Should complete after 1 poll cycle (AWAITING_REVIEW is terminal)
-    expect(mockPrisma.leadEnrichmentRequest.findMany).toHaveBeenCalledTimes(1);
+    // 1 poll cycle + 1 Phase 2.5 auto-approve query
+    expect(mockPrisma.leadEnrichmentRequest.findMany).toHaveBeenCalledTimes(2);
     expect(result.outputSummary.totalLeads).toBe(1);
   });
 
@@ -547,8 +556,8 @@ describe("EnrichmentStep", () => {
 
     const result = await runPromise;
 
-    // Enrichment polled twice (second poll for remaining lead-1)
-    expect(mockPrisma.leadEnrichmentRequest.findMany).toHaveBeenCalledTimes(2);
+    // Enrichment polled twice (second poll for remaining lead-1) + 1 Phase 2.5 auto-approve query
+    expect(mockPrisma.leadEnrichmentRequest.findMany).toHaveBeenCalledTimes(3);
     expect(result.outputSummary.totalLeads).toBe(2);
   });
 
@@ -586,8 +595,8 @@ describe("EnrichmentStep", () => {
     await vi.advanceTimersByTimeAsync(10_000);
     const result = await runPromise;
 
-    // Should exit after 1 poll (FAILED is terminal)
-    expect(mockPrisma.leadEnrichmentRequest.findMany).toHaveBeenCalledTimes(1);
+    // 1 poll cycle + 1 Phase 2.5 auto-approve query
+    expect(mockPrisma.leadEnrichmentRequest.findMany).toHaveBeenCalledTimes(2);
     expect(result.outputSummary.totalLeads).toBe(1);
   });
 
