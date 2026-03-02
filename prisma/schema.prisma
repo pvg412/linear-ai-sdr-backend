@@ -181,6 +181,10 @@ enum PipelineStepRunStatus {
   CANCELLED
 }
 
+enum MonitoredSourceChannel {
+  REDDIT
+}
+
 model User {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -222,7 +226,8 @@ model User {
 
   pipelineRuns PipelineRun[] @relation("PipelineRunCreatedBy")
 
-  serviceTogglesUpdated ServiceToggle[] @relation("ServiceToggleUpdatedBy")
+  serviceTogglesUpdated  ServiceToggle[]  @relation("ServiceToggleUpdatedBy")
+  monitoredSourcesUpdated MonitoredSource[] @relation("MonitoredSourceUpdatedBy")
 
   @@unique([companyName])
   @@index([role])
@@ -355,6 +360,7 @@ model Lead {
   scores               LeadScore[]
   pipelineRunLeads     PipelineRunLead[]
   hiringSignals        HiringSignal[]
+  redditSignals        RedditSignal[]
 
   @@unique([email])
   @@unique([linkedinUrl])
@@ -1016,4 +1022,100 @@ model SignalProviderDailyUsage {
 
   @@unique([providerKey, date])
   @@index([providerKey, date])
+}
+
+/// Admin-managed list of monitored sources across social channels.
+/// Each row represents a single target (e.g. a subreddit, a Twitter handle)
+/// that signal providers scan when looking for company mentions.
+model MonitoredSource {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// Which platform/channel this source belongs to
+  channel     MonitoredSourceChannel
+
+  /// Identifier within the channel (e.g. subreddit name "web3", handle "company")
+  value       String
+
+  /// Optional human-readable description for admin UI
+  description String?
+
+  /// Whether this source is active for monitoring
+  enabled     Boolean  @default(true)
+
+  /// Who last updated this source
+  updatedById String?
+  updatedBy   User?    @relation("MonitoredSourceUpdatedBy", fields: [updatedById], references: [id])
+
+  @@unique([channel, value])
+  @@index([channel, enabled])
+}
+
+/// Stores Reddit signal detection results per lead per pipeline run.
+/// Multiple leads at the same company share identical signal data (deduped at write time).
+model RedditSignal {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  leadId        String
+  lead          Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  pipelineRunId String
+
+  /// Which signal provider produced this (e.g. "reddit-apify")
+  providerKey   String
+
+  /// Company name that was queried
+  companyName   String
+
+  /// Total posts/comments mentioning the company
+  totalMentions   Int
+
+  /// Total posts/comments by the company account (reserved for future profile scraping)
+  totalActivities Int
+
+  /// Subreddits where matches were found (denormalized summary)
+  subredditsFound String[]
+
+  /// Individual Reddit posts/comments found
+  posts RedditSignalPost[]
+
+  @@unique([pipelineRunId, leadId, providerKey])
+  @@index([leadId])
+  @@index([pipelineRunId])
+}
+
+/// Individual Reddit post or comment found by a Reddit signal provider.
+model RedditSignalPost {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  redditSignalId String
+  redditSignal   RedditSignal @relation(fields: [redditSignalId], references: [id], onDelete: Cascade)
+
+  /// Subreddit name where this was found (without "r/" prefix)
+  subreddit    String
+
+  /// "post" or "comment"
+  postType     String
+
+  /// "mention" (found via keyword search) or "activity" (company's own post)
+  signalType   String
+
+  title        String?
+  content      String?  @db.Text
+  author       String?
+  url          String?
+
+  /// Reddit score (upvotes - downvotes)
+  score        Int?
+
+  /// Number of comments on this post
+  numComments  Int?
+
+  /// UTC date string when the post was created, e.g. "2026-01-15"
+  createdUtc   String?
+
+  @@index([redditSignalId])
 }

@@ -25,17 +25,17 @@ const SERVICE_DEFINITIONS: ServiceDefinition[] = [
     description: "Detects open positions",
     category: "intelligence",
   },
+  {
+    serviceKey: "reddit-scraper",
+    displayName: "Reddit",
+    description: "Monitors discussion subreddit for signals",
+    category: "social",
+  },
   // ── Future services ──────────────────────────────────────────────
   // {
   //   serviceKey: "twitter-scraper",
   //   displayName: "Social Pulse",
   //   description: "Tracks social media activity and trends",
-  //   category: "social",
-  // },
-  // {
-  //   serviceKey: "reddit-scraper",
-  //   displayName: "Forum Insights",
-  //   description: "Monitors discussion forums for signals",
   //   category: "social",
   // },
 ];

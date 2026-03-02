@@ -19,6 +19,7 @@ import { registerDatasetImportModule } from "./modules/dataset-import/dataset-im
 import { registerServiceCatalogModule } from "./modules/service-catalog/service-catalog.module";
 import { registerAdminModule } from "./modules/admin/admin.module";
 import { registerHiringSignalsModule } from "./capabilities/hiring-signals/hiring-signals.module";
+import { registerRedditSignalsModule } from "./capabilities/reddit-signals/reddit-signals.module";
 import { registerPipelineModule } from "./modules/pipeline/pipeline.module";
 
 const container = new Container();
@@ -41,6 +42,7 @@ registerDatasetImportModule(container);
 registerServiceCatalogModule(container);
 registerAdminModule(container); // before hiring-signals — providers depend on ServiceToggleService
 registerHiringSignalsModule(container);
+registerRedditSignalsModule(container);
 registerPipelineModule(container);
 
 export { container };

@@ -12,6 +12,7 @@ import { CompanySize as ProtoCompanySize } from "@/generated/aisdr/v1/ai_sdr";
 import type {
   CompanyResearchItemProto,
   HiringSignalProto,
+  RedditSignalProto,
   LeadProfileProto,
   ScoreLeadFinalResponse,
   ServiceCatalogProto,
@@ -192,6 +193,16 @@ export class FinalScoringStep implements PipelineStepHandler {
       "Hiring signals loaded for final scoring",
     );
 
+    // ── Step 5b: Load Reddit signals ────────────────────────────────
+    tools.emitProgress("Loading Reddit signals...");
+
+    const redditSignalsByLead = await this.loadRedditSignals(leadIds, ctx.pipelineRunId);
+
+    tools.log.info(
+      { leadsWithRedditSignals: redditSignalsByLead.size },
+      "Reddit signals loaded for final scoring",
+    );
+
     if (await tools.checkCancelled()) return cancelledResult();
 
     // ── Step 6: Batch-parallel signal strength scoring ───────────────
@@ -222,6 +233,7 @@ export class FinalScoringStep implements PipelineStepHandler {
             serviceCatalogsProto,
             companyResearchByLead.get(rl.leadId) ?? [],
             hiringSignalsByLead.get(rl.leadId),
+            redditSignalsByLead.get(rl.leadId),
           );
         }),
       );
@@ -318,6 +330,7 @@ export class FinalScoringStep implements PipelineStepHandler {
     serviceCatalogs: ServiceCatalogProto[],
     companyResearchItems: CompanyResearchItemProto[],
     hiringSignals?: HiringSignalProto,
+    redditSignals?: RedditSignalProto,
   ): Promise<FinalScoredLead> {
     const fullLead = leadMap.get(leadId);
     const profile = buildLeadProfile(leadId, fullLead);
@@ -329,6 +342,7 @@ export class FinalScoringStep implements PipelineStepHandler {
         serviceCatalogs,
         companyResearchItems,
         hiringSignals,
+        redditSignals,
       });
 
       const signalStrength = clampScore(resp.signalStrength);
@@ -489,6 +503,74 @@ export class FinalScoringStep implements PipelineStepHandler {
           departments: [...signal.departments],
           topJobTitles: signal.topJobTitles.slice(0, 10),
           jobs: signalJobs,
+        });
+      }
+    }
+
+    return byLead;
+  }
+
+  /**
+   * Load Reddit signals for the given lead IDs within a pipeline run.
+   * Aggregates signals from all providers per lead into a single
+   * RedditSignalProto suitable for the gRPC request.
+   *
+   * Returns a map of leadId -> RedditSignalProto (only for leads that
+   * have at least one signal).
+   */
+  private async loadRedditSignals(
+    leadIds: string[],
+    pipelineRunId: string,
+  ): Promise<Map<string, RedditSignalProto>> {
+    const signals = await this.prisma.redditSignal.findMany({
+      where: {
+        leadId: { in: leadIds },
+        pipelineRunId,
+      },
+      include: { posts: true },
+    });
+
+    const byLead = new Map<string, RedditSignalProto>();
+
+    for (const signal of signals) {
+      const signalPosts = signal.posts.map((post: {
+        subreddit: string;
+        postType: string;
+        signalType: string;
+        title: string | null;
+        content: string | null;
+        author: string | null;
+        url: string | null;
+        score: number | null;
+        numComments: number | null;
+        createdUtc: string | null;
+      }) => ({
+        subreddit: post.subreddit,
+        postType: post.postType,
+        signalType: post.signalType,
+        title: post.title ?? "",
+        content: post.content ?? "",
+        author: post.author ?? "",
+        url: post.url ?? "",
+        score: post.score ?? 0,
+        numComments: post.numComments ?? 0,
+        createdUtc: post.createdUtc ?? "",
+      }));
+
+      const existing = byLead.get(signal.leadId);
+      if (existing) {
+        existing.totalMentions += signal.totalMentions;
+        existing.totalActivities += signal.totalActivities;
+        const subSet = new Set([...existing.subredditsFound, ...signal.subredditsFound]);
+        existing.subredditsFound = Array.from(subSet);
+        existing.posts.push(...signalPosts);
+      } else {
+        byLead.set(signal.leadId, {
+          companyName: signal.companyName,
+          totalMentions: signal.totalMentions,
+          totalActivities: signal.totalActivities,
+          subredditsFound: [...signal.subredditsFound],
+          posts: signalPosts,
         });
       }
     }

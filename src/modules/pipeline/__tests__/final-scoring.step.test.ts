@@ -251,6 +251,9 @@ function createMockPrisma(opts?: {
     hiringSignal: {
       findMany: vi.fn().mockResolvedValue(hiringSignals),
     },
+    redditSignal: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     leadScore: {
       findMany: vi.fn().mockResolvedValue(initialScores),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),

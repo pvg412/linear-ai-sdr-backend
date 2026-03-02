@@ -11,6 +11,13 @@ import {
   UpdateServiceToggleBodySchema,
   ServiceToggleParamsSchema,
 } from "./schemas/service-toggle.schemas";
+import type { MonitoredSourceService } from "./services/monitored-source.service";
+import {
+  CreateMonitoredSourceBodySchema,
+  UpdateMonitoredSourceBodySchema,
+  MonitoredSourceParamsSchema,
+  MonitoredSourceQuerySchema,
+} from "./schemas/monitored-source.schemas";
 
 function requireAdmin(role: string): void {
   if (role !== UserRole.ADMIN) {
@@ -24,6 +31,9 @@ function requireAdmin(role: string): void {
 export function registerAdminRoutes(app: FastifyInstance): void {
   const toggleService = container.get<ServiceToggleService>(
     ADMIN_TYPES.ServiceToggleService,
+  );
+  const monitoredSourceService = container.get<MonitoredSourceService>(
+    ADMIN_TYPES.MonitoredSourceService,
   );
 
   // ── GET /admin/service-toggles ──────────────────────────────────
@@ -45,5 +55,39 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     const { enabled } = UpdateServiceToggleBodySchema.parse(req.body);
 
     return toggleService.setEnabled(id, enabled, user.id);
+  });
+
+  // ── GET /admin/monitored-sources ────────────────────────────────
+
+  app.get("/admin/monitored-sources", async (req) => {
+    const user = requireRequestUser(req);
+    requireAdmin(user.role);
+
+    const { channel } = MonitoredSourceQuerySchema.parse(req.query);
+
+    return monitoredSourceService.list(channel);
+  });
+
+  // ── POST /admin/monitored-sources ───────────────────────────────
+
+  app.post("/admin/monitored-sources", async (req) => {
+    const user = requireRequestUser(req);
+    requireAdmin(user.role);
+
+    const body = CreateMonitoredSourceBodySchema.parse(req.body);
+
+    return monitoredSourceService.create(body, user.id);
+  });
+
+  // ── PATCH /admin/monitored-sources/:id ──────────────────────────
+
+  app.patch("/admin/monitored-sources/:id", async (req) => {
+    const user = requireRequestUser(req);
+    requireAdmin(user.role);
+
+    const { id } = MonitoredSourceParamsSchema.parse(req.params);
+    const { enabled } = UpdateMonitoredSourceBodySchema.parse(req.body);
+
+    return monitoredSourceService.setEnabled(id, enabled, user.id);
   });
 }

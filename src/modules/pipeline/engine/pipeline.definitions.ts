@@ -45,6 +45,7 @@ export const DEFAULT_COMPANY_PIPELINE: PipelineDefinition = {
       id: "signals",
       displayName: "Signals Detection",
       config: {},
+      timeoutMs: 10 * 60 * 1000, // 10 min (Reddit scraper: up to 120s per subreddit)
     },
     {
       type: "final-scoring",

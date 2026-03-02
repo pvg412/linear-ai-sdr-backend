@@ -3,6 +3,8 @@ import type { Container } from "inversify";
 import { ADMIN_TYPES } from "./admin.types";
 import { ServiceToggleRepository } from "./persistence/service-toggle.repository";
 import { ServiceToggleService } from "./services/service-toggle.service";
+import { MonitoredSourceRepository } from "./persistence/monitored-source.repository";
+import { MonitoredSourceService } from "./services/monitored-source.service";
 
 export function registerAdminModule(container: Container): void {
   container
@@ -13,6 +15,16 @@ export function registerAdminModule(container: Container): void {
   container
     .bind(ADMIN_TYPES.ServiceToggleService)
     .to(ServiceToggleService)
+    .inSingletonScope();
+
+  container
+    .bind(ADMIN_TYPES.MonitoredSourceRepository)
+    .to(MonitoredSourceRepository)
+    .inSingletonScope();
+
+  container
+    .bind(ADMIN_TYPES.MonitoredSourceService)
+    .to(MonitoredSourceService)
     .inSingletonScope();
 }
 
