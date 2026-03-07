@@ -20,6 +20,11 @@ import { buildCompanyGroups, pluralise } from "./signals/signals.helpers";
 import { HiringSignalProcessor } from "./signals/hiring-signal.processor";
 import { RedditSignalProcessor } from "./signals/reddit-signal.processor";
 import { CrunchbaseSignalProcessor } from "./signals/crunchbase-signal.processor";
+import {
+  ALL_SIGNAL_CATEGORIES,
+  SIGNAL_CATEGORY_PHASE_MAP,
+  type ResolvedCategoryConfig,
+} from "./signals/signal-category.map";
 
 /**
  * Signals step — hiring + Reddit + Crunchbase signal detection.
@@ -80,6 +85,38 @@ export class SignalsStep implements PipelineStepHandler {
       return { outputSummary: { skipped: true, reason: "no_providers" } };
     }
 
+    // ── 1b. Load company signal category configuration ───────────────
+    const categoryConfigs = await this.loadCategoryConfigs(ctx.companyId);
+    const disabledPhases = new Set(
+      categoryConfigs
+        .filter((c) => !c.enabled)
+        .map((c) => SIGNAL_CATEGORY_PHASE_MAP[c.category]),
+    );
+
+    const hiringEnabled = enabledHiring.length > 0 && !disabledPhases.has("hiring");
+    const redditEnabled = enabledReddit.length > 0 && !disabledPhases.has("reddit");
+    const crunchbaseEnabled = enabledCrunchbase.length > 0 && !disabledPhases.has("crunchbase");
+
+    if (!hiringEnabled && !redditEnabled && !crunchbaseEnabled) {
+      tools.log.info(
+        { pipelineRunId: ctx.pipelineRunId },
+        "Signals step: all categories disabled by company config, skipping",
+      );
+      tools.emitProgress("Signal check skipped — all signal categories disabled");
+      return { outputSummary: { skipped: true, reason: "all_categories_disabled" } };
+    }
+
+    tools.log.info(
+      {
+        pipelineRunId: ctx.pipelineRunId,
+        hiringEnabled,
+        redditEnabled,
+        crunchbaseEnabled,
+        disabledPhases: [...disabledPhases],
+      },
+      "Signals step: category configuration resolved",
+    );
+
     // ── 2. Load active leads ─────────────────────────────────────────
     const runLeads = await this.prisma.pipelineRunLead.findMany({
       where: { pipelineRunId: ctx.pipelineRunId, excluded: false },
@@ -101,7 +138,7 @@ export class SignalsStep implements PipelineStepHandler {
 
     // ── 3. Load active subreddits for Reddit providers ───────────────
     let activeSubreddits: string[] = [];
-    if (enabledReddit.length > 0) {
+    if (redditEnabled) {
       const sources = await this.prisma.monitoredSource.findMany({
         where: { channel: "REDDIT", enabled: true },
         select: { value: true },
@@ -125,19 +162,19 @@ export class SignalsStep implements PipelineStepHandler {
 
     tools.emitProgress("Checking signals...", { companies: uniqueCompanies });
 
-    // ── 5. Run signal phases ─────────────────────────────────────────
+    // ── 5. Run signal phases (only for enabled categories) ───────────
     let cancelled = false;
 
-    // Phase A: Hiring
-    const hiringResult = enabledHiring.length > 0
+    // Phase A: Hiring (category: HIRING)
+    const hiringResult = hiringEnabled
       ? await new HiringSignalProcessor(this.prisma, enabledHiring)
           .process(companyGroups, ctx.pipelineRunId, tools)
       : null;
 
     if (hiringResult?.cancelled) cancelled = true;
 
-    // Phase B: Reddit
-    const redditResult = !cancelled && enabledReddit.length > 0 && activeSubreddits.length > 0
+    // Phase B: Reddit (category: COMMUNITY)
+    const redditResult = !cancelled && redditEnabled && activeSubreddits.length > 0
       ? await new RedditSignalProcessor(this.prisma, enabledReddit)
           .process(companyGroups, activeSubreddits, ctx.pipelineRunId, tools)
       : null;
@@ -147,8 +184,8 @@ export class SignalsStep implements PipelineStepHandler {
     // Check cancellation between Reddit and Crunchbase (matches original behaviour)
     if (!cancelled) cancelled = await tools.checkCancelled();
 
-    // Phase C: Crunchbase
-    const crunchbaseResult = !cancelled && enabledCrunchbase.length > 0
+    // Phase C: Crunchbase (category: FUNDING)
+    const crunchbaseResult = !cancelled && crunchbaseEnabled
       ? await new CrunchbaseSignalProcessor(this.prisma, enabledCrunchbase)
           .process(companyGroups, ctx.pipelineRunId, tools)
       : null;
@@ -250,5 +287,41 @@ export class SignalsStep implements PipelineStepHandler {
         },
       },
     };
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Private helpers                                                  */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Load the company's signal category configuration.
+   * Returns a ResolvedCategoryConfig for every category. Categories
+   * without a saved config get defaults (enabled: true, description: null).
+   */
+  private async loadCategoryConfigs(
+    companyId: string | null,
+  ): Promise<ResolvedCategoryConfig[]> {
+    if (!companyId) {
+      return ALL_SIGNAL_CATEGORIES.map((cat) => ({
+        category: cat,
+        enabled: true,
+        description: null,
+      }));
+    }
+
+    const saved = await this.prisma.signalCategoryConfig.findMany({
+      where: { companyId },
+    });
+
+    const savedMap = new Map(saved.map((s) => [s.category, s]));
+
+    return ALL_SIGNAL_CATEGORIES.map((cat) => {
+      const config = savedMap.get(cat);
+      return {
+        category: cat,
+        enabled: config?.enabled ?? true,
+        description: config?.description ?? null,
+      };
+    });
   }
 }

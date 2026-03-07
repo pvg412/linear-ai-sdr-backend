@@ -229,6 +229,8 @@ model User {
   serviceTogglesUpdated  ServiceToggle[]  @relation("ServiceToggleUpdatedBy")
   monitoredSourcesUpdated MonitoredSource[] @relation("MonitoredSourceUpdatedBy")
 
+  signalCategories SignalCategoryConfig[] @relation("CompanySignalCategories")
+
   @@unique([companyName])
   @@index([role])
   @@index([isActive])
@@ -1233,4 +1235,34 @@ model CrunchbaseSignal {
   @@unique([pipelineRunId, leadId, providerKey])
   @@index([leadId])
   @@index([pipelineRunId])
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Signal Category Configuration
+// ────────────────────────────────────────────────────────────────────
+
+enum SignalCategory {
+  HIRING
+  FUNDING
+  COMMUNITY
+}
+
+/// Company-level signal category configuration.
+/// Each category maps to one or more internal signal providers (hidden from the company).
+/// The company describes what it expects from each signal type so the AI can
+/// evaluate collected signals against those expectations during final scoring.
+model SignalCategoryConfig {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   User           @relation("CompanySignalCategories", fields: [companyId], references: [id])
+
+  category    SignalCategory
+  description String  @db.VarChar(500)
+  enabled     Boolean @default(true)
+
+  @@unique([companyId, category])
+  @@index([companyId])
 }

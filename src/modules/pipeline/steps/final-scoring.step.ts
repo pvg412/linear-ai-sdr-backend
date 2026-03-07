@@ -18,6 +18,7 @@ import type {
   ScoreLeadFinalResponse,
   ServiceCatalogProto,
   ServiceCatalogSubServiceProto,
+  SignalCategoryDescriptionProto,
 } from "@/generated/aisdr/v1/ai_sdr";
 
 import { mapCategoryToProto } from "@/modules/company-research/utils/category-mapping";
@@ -184,6 +185,14 @@ export class FinalScoringStep implements PipelineStepHandler {
       "Initial ICP scores loaded for final scoring",
     );
 
+    // ── Step 4b: Load signal category descriptions ─────────────────
+    const signalCategoryDescriptions = await this.loadSignalCategoryDescriptions(ctx.companyId);
+
+    tools.log.info(
+      { descriptionsCount: signalCategoryDescriptions.length },
+      "Signal category descriptions loaded for final scoring",
+    );
+
     // ── Step 5: Load hiring signals ─────────────────────────────────
     tools.emitProgress("Loading hiring signals...");
 
@@ -246,6 +255,7 @@ export class FinalScoringStep implements PipelineStepHandler {
             hiringSignalsByLead.get(rl.leadId),
             redditSignalsByLead.get(rl.leadId),
             crunchbaseSignalsByLead.get(rl.leadId),
+            signalCategoryDescriptions,
           );
         }),
       );
@@ -344,6 +354,7 @@ export class FinalScoringStep implements PipelineStepHandler {
     hiringSignals?: HiringSignalProto,
     redditSignals?: RedditSignalProto,
     crunchbaseSignals?: CrunchbaseSignalProto,
+    signalCategoryDescriptions: SignalCategoryDescriptionProto[] = [],
   ): Promise<FinalScoredLead> {
     const fullLead = leadMap.get(leadId);
     const profile = buildLeadProfile(leadId, fullLead);
@@ -357,6 +368,7 @@ export class FinalScoringStep implements PipelineStepHandler {
         hiringSignals,
         redditSignals,
         crunchbaseSignals,
+        signalCategoryDescriptions,
       });
 
       const signalStrength = clampScore(resp.signalStrength);
@@ -648,6 +660,31 @@ export class FinalScoringStep implements PipelineStepHandler {
     }
 
     return byLead;
+  }
+
+  /**
+   * Load company-defined signal category descriptions.
+   * These tell the AI what the company cares about for each signal type
+   * (e.g. "Job postings for Solidity developers..." for HIRING).
+   *
+   * Returns only categories that have a non-empty description.
+   */
+  private async loadSignalCategoryDescriptions(
+    companyId: string | null,
+  ): Promise<SignalCategoryDescriptionProto[]> {
+    if (!companyId) return [];
+
+    const configs = await this.prisma.signalCategoryConfig.findMany({
+      where: { companyId, enabled: true },
+      select: { category: true, description: true },
+    });
+
+    return configs
+      .filter((c) => c.description && c.description.trim().length > 0)
+      .map((c) => ({
+        category: c.category,
+        description: c.description,
+      }));
   }
 
   /**

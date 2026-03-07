@@ -22,6 +22,7 @@ import { registerProfileEnrichmentRoutes } from "./modules/profile-enrichment/pr
 import { registerLeadConversationsRoutes } from "./modules/lead-conversations/controller/lead-conversations.controller";
 import { registerDatasetImportRoutes } from "./modules/dataset-import/dataset-import.controller";
 import { registerServiceCatalogRoutes } from "./modules/service-catalog/service-catalog.controller";
+import { registerSignalCategoryRoutes } from "./modules/signal-category/signal-category.controller";
 import { registerPipelineRoutes } from "./modules/pipeline/pipeline.controller";
 import { registerAdminRoutes } from "./modules/admin/admin.controller";
 import { initAdminModule } from "./modules/admin/admin.module";
@@ -163,6 +164,7 @@ export async function buildServer() {
   registerLeadConversationsRoutes(app);
   registerDatasetImportRoutes(app);
   registerServiceCatalogRoutes(app);
+  registerSignalCategoryRoutes(app);
   registerPipelineRoutes(app);
   registerAdminRoutes(app);
 

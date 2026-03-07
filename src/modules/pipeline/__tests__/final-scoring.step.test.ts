@@ -261,6 +261,9 @@ function createMockPrisma(opts?: {
       findMany: vi.fn().mockResolvedValue(initialScores),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    signalCategoryConfig: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
   };
 }
 
