@@ -11,6 +11,7 @@ import type { ServiceCatalogRepository } from "@/modules/service-catalog/persist
 import { CompanySize as ProtoCompanySize } from "@/generated/aisdr/v1/ai_sdr";
 import type {
   CompanyResearchItemProto,
+  CrunchbaseSignalProto,
   HiringSignalProto,
   RedditSignalProto,
   LeadProfileProto,
@@ -203,6 +204,16 @@ export class FinalScoringStep implements PipelineStepHandler {
       "Reddit signals loaded for final scoring",
     );
 
+    // ── Step 5c: Load Crunchbase signals ─────────────────────────────
+    tools.emitProgress("Loading Crunchbase signals...");
+
+    const crunchbaseSignalsByLead = await this.loadCrunchbaseSignals(leadIds, ctx.pipelineRunId);
+
+    tools.log.info(
+      { leadsWithCrunchbaseSignals: crunchbaseSignalsByLead.size },
+      "Crunchbase signals loaded for final scoring",
+    );
+
     if (await tools.checkCancelled()) return cancelledResult();
 
     // ── Step 6: Batch-parallel signal strength scoring ───────────────
@@ -234,6 +245,7 @@ export class FinalScoringStep implements PipelineStepHandler {
             companyResearchByLead.get(rl.leadId) ?? [],
             hiringSignalsByLead.get(rl.leadId),
             redditSignalsByLead.get(rl.leadId),
+            crunchbaseSignalsByLead.get(rl.leadId),
           );
         }),
       );
@@ -331,6 +343,7 @@ export class FinalScoringStep implements PipelineStepHandler {
     companyResearchItems: CompanyResearchItemProto[],
     hiringSignals?: HiringSignalProto,
     redditSignals?: RedditSignalProto,
+    crunchbaseSignals?: CrunchbaseSignalProto,
   ): Promise<FinalScoredLead> {
     const fullLead = leadMap.get(leadId);
     const profile = buildLeadProfile(leadId, fullLead);
@@ -343,6 +356,7 @@ export class FinalScoringStep implements PipelineStepHandler {
         companyResearchItems,
         hiringSignals,
         redditSignals,
+        crunchbaseSignals,
       });
 
       const signalStrength = clampScore(resp.signalStrength);
@@ -573,6 +587,64 @@ export class FinalScoringStep implements PipelineStepHandler {
           posts: signalPosts,
         });
       }
+    }
+
+    return byLead;
+  }
+
+  /**
+   * Load Crunchbase signals from the DB and map to proto format.
+   * Returns a map of leadId → CrunchbaseSignalProto.
+   *
+   * Only one CrunchbaseSignal row per lead is expected (unique constraint
+   * on [pipelineRunId, leadId, providerKey]). Leads with `crunchbaseFound: false`
+   * are still included so the AI can see that Crunchbase was checked but no data was found.
+   */
+  private async loadCrunchbaseSignals(
+    leadIds: string[],
+    pipelineRunId: string,
+  ): Promise<Map<string, CrunchbaseSignalProto>> {
+    const rows = await this.prisma.crunchbaseSignal.findMany({
+      where: {
+        leadId: { in: leadIds },
+        pipelineRunId,
+      },
+    });
+
+    const byLead = new Map<string, CrunchbaseSignalProto>();
+
+    for (const row of rows) {
+      // First row per lead wins (normally just one per provider)
+      if (byLead.has(row.leadId)) continue;
+
+      byLead.set(row.leadId, {
+        companyName: row.companyName,
+        crunchbaseFound: row.crunchbaseFound,
+        crunchbasePermalink: row.crunchbasePermalink ?? "",
+        fundingTotalUsd: row.fundingTotalUsd ?? 0,
+        lastFundingAt: row.lastFundingAt ?? "",
+        lastFundingType: row.lastFundingType ?? "",
+        numFundingRounds: row.numFundingRounds ?? 0,
+        growthScore: row.growthScore ?? 0,
+        heatScore: row.heatScore ?? 0,
+        fundingPrediction: row.fundingPrediction ?? 0,
+        fundingPrediction0To5: row.fundingPrediction0to5 ?? 0,
+        fundingPrediction6To11: row.fundingPrediction6to11 ?? 0,
+        fundingPrediction12To24: row.fundingPrediction12to24 ?? 0,
+        fundingPrediction24Plus: row.fundingPrediction24plus ?? 0,
+        employeeCountEnum: row.employeeCountEnum ?? "",
+        semrushVisits: row.semrushVisits ?? 0,
+        shortDescription: row.shortDescription ?? "",
+        foundedOn: row.foundedOn ?? "",
+        operatingStatus: row.operatingStatus ?? "",
+        categories: row.categories ?? "",
+        numInvestors: row.numInvestors ?? 0,
+        topCompetitors: row.topCompetitors ?? "",
+        hadLayoffs: row.hadLayoffs,
+        techStack: row.techStack ?? "",
+        ipoPrediction: row.ipoPrediction ?? 0,
+        acquisitionPrediction: row.acquisitionPrediction ?? 0,
+      });
     }
 
     return byLead;

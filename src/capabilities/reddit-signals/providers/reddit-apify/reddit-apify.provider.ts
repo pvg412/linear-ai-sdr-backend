@@ -9,6 +9,7 @@ import type {
   RedditSignalSearchInput,
   RedditSignalResult,
   RedditSignalPostDto,
+  RedditSignalBatchInput,
 } from "@/capabilities/reddit-signals/reddit-signal-provider.dto";
 import { RedditApifyClient } from "./reddit-apify.client";
 import {
@@ -180,6 +181,121 @@ export class RedditApifyProvider implements RedditSignalProvider {
       });
     } catch {
       // Best-effort; a slightly off counter is acceptable.
+    }
+  }
+
+  /**
+   * Batch version: search for multiple companies in a single Apify actor run.
+   *
+   * Maps posts back to companies by checking case-insensitive keyword presence
+   * in title + body. Posts matching multiple companies are duplicated.
+   */
+  async detectRedditSignalsBatch(
+    input: RedditSignalBatchInput,
+  ): Promise<Map<string, RedditSignalResult>> {
+    const lg = ensureLogger();
+
+    if (input.subreddits.length === 0 || input.companies.length === 0) {
+      lg.info("[RedditApify] Batch: no subreddits or companies, skipping");
+      return new Map();
+    }
+
+    // ── Rate-limit check (1 increment for entire batch) ────────────
+    const limitReached = await this.checkAndIncrementDailyUsage();
+    if (limitReached) {
+      lg.info(
+        { date: utcDateString(), companyCount: input.companies.length },
+        "[RedditApify] Batch: daily request limit reached — stopping",
+      );
+      return new Map();
+    }
+
+    const companyNames = input.companies.map((c) => c.companyName);
+
+    try {
+      const rawPosts = await this.client.searchBatch(
+        input.subreddits,
+        companyNames,
+        MAX_ITEMS_PER_SUBREDDIT,
+      );
+
+      lg.info(
+        {
+          subredditCount: input.subreddits.length,
+          companyCount: companyNames.length,
+          postsRetrieved: rawPosts.length,
+        },
+        "[RedditApify] Batch: posts retrieved, mapping to companies",
+      );
+
+      // ── Map posts to companies ──────────────────────────────────
+      const resultsByCompany = new Map<string, RedditSignalResult>();
+
+      // Initialize empty results for all companies
+      for (const company of input.companies) {
+        const key = company.companyName.trim().toLowerCase();
+        resultsByCompany.set(key, {
+          providerKey: PROVIDER_KEY,
+          companyName: company.companyName,
+          totalMentions: 0,
+          totalActivities: 0,
+          subredditsFound: [],
+          posts: [],
+        });
+      }
+
+      // Map each post to matching companies
+      for (const rawPost of rawPosts) {
+        const postText = `${rawPost.title ?? ""} ${rawPost.body ?? ""}`.toLowerCase();
+        const matchingCompanies = input.companies.filter((company) =>
+          postText.includes(company.companyName.toLowerCase()),
+        );
+
+        for (const company of matchingCompanies) {
+          const key = company.companyName.trim().toLowerCase();
+          const result = resultsByCompany.get(key);
+          if (!result) continue;
+
+          const postDto = mapToDto(rawPost, rawPost.subreddit ?? "unknown");
+          result.posts.push(postDto);
+
+          // Track unique subreddits
+          if (postDto.subreddit && !result.subredditsFound.includes(postDto.subreddit)) {
+            result.subredditsFound.push(postDto.subreddit);
+          }
+        }
+      }
+
+      // ── Finalize results: cap posts, count mentions ─────────────
+      for (const result of resultsByCompany.values()) {
+        result.posts = result.posts.slice(0, MAX_POSTS_PER_COMPANY);
+        result.totalMentions = result.posts.filter((p) => p.signalType === "mention").length;
+        result.totalActivities = result.posts.filter((p) => p.signalType === "activity").length;
+
+        lg.info(
+          {
+            companyName: result.companyName,
+            mentions: result.totalMentions,
+            subreddits: result.subredditsFound.length,
+          },
+          "[RedditApify] Batch: company result",
+        );
+      }
+
+      return resultsByCompany;
+    } catch (e) {
+      if (e instanceof RedditApifyRateLimitError) {
+        await this.decrementDailyUsage();
+        lg.info(
+          { companyCount: companyNames.length },
+          "[RedditApify] Batch: provider returned 429 — stopping",
+        );
+        return new Map();
+      }
+
+      wrapRedditApifyError(e);
+      // Error swallowed — return empty results
+      return new Map();
     }
   }
 }

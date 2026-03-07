@@ -361,6 +361,7 @@ model Lead {
   pipelineRunLeads     PipelineRunLead[]
   hiringSignals        HiringSignal[]
   redditSignals        RedditSignal[]
+  crunchbaseSignals    CrunchbaseSignal[]
 
   @@unique([email])
   @@unique([linkedinUrl])
@@ -1118,4 +1119,118 @@ model RedditSignalPost {
   createdUtc   String?
 
   @@index([redditSignalId])
+}
+
+// ── Crunchbase Signals ────────────────────────────────────────────────
+
+/// Stores Crunchbase company data per lead per pipeline run.
+/// Multiple leads at the same company share identical signal data (deduped at write time).
+model CrunchbaseSignal {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  leadId        String
+  lead          Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  pipelineRunId String
+
+  /// Which signal provider produced this (e.g. "crunchbase-apify")
+  providerKey   String
+
+  /// Company name that was queried
+  companyName   String
+
+  /// Whether the company was found on Crunchbase
+  crunchbaseFound Boolean @default(false)
+
+  /// Crunchbase canonical slug (e.g. "gigradar-io")
+  crunchbasePermalink String?
+
+  // ── Funding ─────────────────────────────────────────────────────
+
+  /// Total funding raised in USD
+  fundingTotalUsd Float?
+
+  /// Date of the most recent funding round (ISO date string)
+  lastFundingAt   String?
+
+  /// Type of the most recent funding round (e.g. "seed", "series_a")
+  lastFundingType String?
+
+  /// Total number of funding rounds
+  numFundingRounds Int?
+
+  // ── Growth & Heat ───────────────────────────────────────────────
+
+  /// Crunchbase growth score (0-100)
+  growthScore Int?
+
+  /// Crunchbase heat score (0-100)
+  heatScore   Int?
+
+  /// Funding prediction probability (0-1). Real API field: funding_prediction.
+  fundingPrediction Float?
+
+  /// Funding prediction: probability for 0-5 months window
+  fundingPrediction0to5  Float?
+  /// Funding prediction: probability for 6-11 months window
+  fundingPrediction6to11 Float?
+  /// Funding prediction: probability for 12-24 months window
+  fundingPrediction12to24 Float?
+  /// Funding prediction: probability for 24+ months window
+  fundingPrediction24plus Float?
+
+  // ── Company Info ────────────────────────────────────────────────
+
+  /// Crunchbase employee count enum (e.g. "c_00001_00010", "c_00051_00100")
+  employeeCountEnum String?
+
+  /// Latest monthly website visits from Semrush via Crunchbase
+  semrushVisits     Int?
+
+  /// Short company description from Crunchbase
+  shortDescription  String? @db.Text
+
+  /// Company founding date (ISO date string)
+  foundedOn         String?
+
+  /// Operating status (e.g. "active", "closed")
+  operatingStatus   String?
+
+  // ── Categories & Industry ──────────────────────────────────────
+
+  /// Crunchbase industry categories (e.g. "Blockchain,Software,Mobile Apps")
+  categories        String? @db.Text
+
+  // ── Investors ──────────────────────────────────────────────────
+
+  /// Number of investors
+  numInvestors      Int?
+
+  // ── Competitors ────────────────────────────────────────────────
+
+  /// Top competitor names, comma-separated (up to 5)
+  topCompetitors    String? @db.Text
+
+  // ── Layoffs ────────────────────────────────────────────────────
+
+  /// Whether the company has had layoffs according to Crunchbase
+  hadLayoffs        Boolean @default(false)
+
+  // ── Tech Stack ─────────────────────────────────────────────────
+
+  /// Technologies used, comma-separated (from BuiltWith via Crunchbase)
+  techStack         String? @db.Text
+
+  // ── Predictions ────────────────────────────────────────────────
+
+  /// IPO prediction probability (0-1)
+  ipoPrediction        Float?
+
+  /// Acquisition prediction probability (0-1)
+  acquisitionPrediction Float?
+
+  @@unique([pipelineRunId, leadId, providerKey])
+  @@index([leadId])
+  @@index([pipelineRunId])
 }

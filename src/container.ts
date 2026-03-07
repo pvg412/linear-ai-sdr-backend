@@ -20,6 +20,7 @@ import { registerServiceCatalogModule } from "./modules/service-catalog/service-
 import { registerAdminModule } from "./modules/admin/admin.module";
 import { registerHiringSignalsModule } from "./capabilities/hiring-signals/hiring-signals.module";
 import { registerRedditSignalsModule } from "./capabilities/reddit-signals/reddit-signals.module";
+import { registerCrunchbaseSignalsModule } from "./capabilities/crunchbase-signals/crunchbase-signals.module";
 import { registerPipelineModule } from "./modules/pipeline/pipeline.module";
 
 const container = new Container();
@@ -43,6 +44,7 @@ registerServiceCatalogModule(container);
 registerAdminModule(container); // before hiring-signals — providers depend on ServiceToggleService
 registerHiringSignalsModule(container);
 registerRedditSignalsModule(container);
+registerCrunchbaseSignalsModule(container);
 registerPipelineModule(container);
 
 export { container };

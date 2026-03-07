@@ -14,6 +14,10 @@ const MAX_RETRIES = 2;
 const RETRY_BACKOFF_MS = 2_000;
 const WAIT_SECS = 120;
 const MAX_ITEMS_PER_SUBREDDIT = 25;
+const MAX_ITEMS_PER_BATCH = 500; // Cap for batch requests
+const BASE_WAIT_SECS_BATCH = 120;
+const WAIT_SECS_PER_KEYWORD = 5; // Additional wait per keyword
+const MAX_WAIT_SECS = 300; // 5 minutes max
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -124,6 +128,108 @@ export class RedditApifyClient {
         lg.warn({ err, subreddit, keyword }, "Failed to parse Reddit post");
       }
     }
+
+    return posts;
+  }
+
+  /**
+   * Search multiple subreddits for multiple keywords (companies) in a single batch.
+   *
+   * Returns an array of parsed Reddit posts with all matching content.
+   * Throws the raw Apify error on failures — callers must wrap.
+   *
+   * @param subreddits - Array of subreddit names (without "r/" prefix)
+   * @param keywords - Array of company names to search for
+   * @param maxItemsPerKeyword - Maximum items per keyword (default: 25)
+   */
+  async searchBatch(
+    subreddits: string[],
+    keywords: string[],
+    maxItemsPerKeyword: number = MAX_ITEMS_PER_SUBREDDIT,
+  ): Promise<RedditScrapedPost[]> {
+    if (subreddits.length === 0 || keywords.length === 0) {
+      return [];
+    }
+
+    const client = this.getClient();
+    const lg = ensureLogger();
+
+    // Build startUrls for all subreddits
+    const startUrls = subreddits.map((subreddit) => ({
+      url: `https://www.reddit.com/r/${subreddit}/`,
+    }));
+
+    // Calculate scaled maxItems with cap
+    const totalMaxItems = Math.min(
+      maxItemsPerKeyword * subreddits.length * keywords.length,
+      MAX_ITEMS_PER_BATCH,
+    );
+
+    // Calculate scaled wait time based on workload
+    const scaledWaitSecs = Math.min(
+      BASE_WAIT_SECS_BATCH + keywords.length * subreddits.length * WAIT_SECS_PER_KEYWORD,
+      MAX_WAIT_SECS,
+    );
+
+    const input = {
+      startUrls,
+      searchMode: true,
+      searches: keywords,
+      sort: "relevance",
+      time: "month",
+      maxItems: totalMaxItems,
+      skipComments: false,
+    };
+
+    lg.info(
+      {
+        subredditCount: subreddits.length,
+        keywordCount: keywords.length,
+        maxItems: totalMaxItems,
+        waitSecs: scaledWaitSecs,
+      },
+      "Reddit batch scrape starting",
+    );
+
+    const run = await withRetry(
+      () => client.actor(this.actorId).call(input, { waitSecs: scaledWaitSecs }),
+      {
+        maxAttempts: MAX_RETRIES,
+        backoffMs: RETRY_BACKOFF_MS,
+        label: `batch:${subreddits.length}sr×${keywords.length}kw`,
+      },
+    );
+
+    if (!run.defaultDatasetId) {
+      lg.warn({ subreddits, keywords }, "Reddit batch scraper returned no dataset");
+      return [];
+    }
+
+    const { items } = await client.dataset(run.defaultDatasetId).listItems({
+      limit: totalMaxItems,
+    });
+
+    if (!items || items.length === 0) {
+      return [];
+    }
+
+    const posts: RedditScrapedPost[] = [];
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      // Skip info/error messages from the actor
+      if ("message" in item && !("id" in item)) continue;
+
+      try {
+        posts.push(RedditScrapedPostSchema.parse(item));
+      } catch (err) {
+        lg.warn({ err }, "Failed to parse Reddit post in batch");
+      }
+    }
+
+    lg.info(
+      { subreddits, keywords, postsFound: posts.length },
+      "Reddit batch scrape completed",
+    );
 
     return posts;
   }

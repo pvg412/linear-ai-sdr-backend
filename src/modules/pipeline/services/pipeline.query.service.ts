@@ -280,6 +280,135 @@ export class PipelineQueryService {
       details: signalDetails,
     };
 
+    /* ── Reddit signals ─────────────────────────────────────────────── */
+    const redditSignalRows = leadIds.length > 0
+      ? await this.prisma.redditSignal.findMany({
+          where: { pipelineRunId, leadId: { in: leadIds } },
+          include: { posts: true },
+          orderBy: { createdAt: "asc" },
+        })
+      : [];
+
+    const redditByLead = new Map<string, typeof redditSignalRows>();
+    for (const row of redditSignalRows) {
+      const existing = redditByLead.get(row.leadId);
+      if (existing) {
+        existing.push(row);
+      } else {
+        redditByLead.set(row.leadId, [row]);
+      }
+    }
+
+    const redditDetails = Array.from(redditByLead.entries()).map(
+      ([leadId, rows]) => {
+        const rl = runLeadMap.get(leadId);
+        const totalMentions = rows.reduce(
+          (sum: number, r) => sum + r.totalMentions,
+          0,
+        );
+        const subredditsFound = Array.from(
+          new Set(rows.flatMap((r) => r.subredditsFound)),
+        );
+        const posts = rows.flatMap((r) =>
+          r.posts.map((p) => ({
+            subreddit: p.subreddit,
+            postType: p.postType,
+            signalType: p.signalType,
+            title: p.title,
+            content: p.content,
+            author: p.author,
+            url: p.url,
+            score: p.score,
+            numComments: p.numComments,
+            createdUtc: p.createdUtc,
+          })),
+        );
+        return {
+          leadId,
+          fullName: rl?.lead.fullName ?? null,
+          company: rows[0]?.companyName ?? rl?.lead.company ?? null,
+          totalMentions,
+          subredditsFound,
+          posts,
+        };
+      },
+    );
+
+    redditDetails.sort((a, b) => b.totalMentions - a.totalMentions);
+
+    const redditSignals = {
+      leadsWithSignals: redditByLead.size,
+      totalMentions: redditDetails.reduce((sum, s) => sum + s.totalMentions, 0),
+      details: redditDetails,
+    };
+
+    /* ── Crunchbase signals ──────────────────────────────────────────── */
+    const crunchbaseRows = leadIds.length > 0
+      ? await this.prisma.crunchbaseSignal.findMany({
+          where: { pipelineRunId, leadId: { in: leadIds } },
+          orderBy: { createdAt: "asc" },
+        })
+      : [];
+
+    const crunchbaseByLead = new Map<string, (typeof crunchbaseRows)[number]>();
+    for (const row of crunchbaseRows) {
+      // One row per lead (first wins if somehow duplicated)
+      if (!crunchbaseByLead.has(row.leadId)) {
+        crunchbaseByLead.set(row.leadId, row);
+      }
+    }
+
+    const crunchbaseDetails = Array.from(crunchbaseByLead.entries()).map(
+      ([leadId, row]) => {
+        const rl = runLeadMap.get(leadId);
+        return {
+          leadId,
+          fullName: rl?.lead.fullName ?? null,
+          company: rl?.lead.company ?? null,
+          crunchbaseFound: row.crunchbaseFound,
+          crunchbasePermalink: row.crunchbasePermalink,
+          fundingTotalUsd: row.fundingTotalUsd,
+          lastFundingAt: row.lastFundingAt,
+          lastFundingType: row.lastFundingType,
+          numFundingRounds: row.numFundingRounds,
+          growthScore: row.growthScore,
+          heatScore: row.heatScore,
+          fundingPrediction: row.fundingPrediction,
+          fundingPrediction0to5: row.fundingPrediction0to5,
+          fundingPrediction6to11: row.fundingPrediction6to11,
+          fundingPrediction12to24: row.fundingPrediction12to24,
+          fundingPrediction24plus: row.fundingPrediction24plus,
+          employeeCountEnum: row.employeeCountEnum,
+          semrushVisits: row.semrushVisits,
+          shortDescription: row.shortDescription,
+          foundedOn: row.foundedOn,
+          operatingStatus: row.operatingStatus,
+          categories: row.categories,
+          numInvestors: row.numInvestors,
+          topCompetitors: row.topCompetitors,
+          hadLayoffs: row.hadLayoffs,
+          techStack: row.techStack,
+          ipoPrediction: row.ipoPrediction,
+          acquisitionPrediction: row.acquisitionPrediction,
+        };
+      },
+    );
+
+    // Sort: found companies first, then by funding desc
+    crunchbaseDetails.sort((a, b) => {
+      if (a.crunchbaseFound !== b.crunchbaseFound) return a.crunchbaseFound ? -1 : 1;
+      return (b.fundingTotalUsd ?? 0) - (a.fundingTotalUsd ?? 0);
+    });
+
+    const foundCount = crunchbaseDetails.filter((d) => d.crunchbaseFound).length;
+
+    const crunchbaseSignals = {
+      leadsWithData: foundCount,
+      companiesFound: foundCount,
+      companiesNotFound: crunchbaseDetails.length - foundCount,
+      details: crunchbaseDetails,
+    };
+
     /* Fetch live outreach state from junction table */
     const links = await this.repo.findOutreachDrafts(pipelineRunId);
 
@@ -332,6 +461,8 @@ export class PipelineQueryService {
       scoringFinal,
       enrichment,
       signals,
+      redditSignals,
+      crunchbaseSignals,
       outreach,
       stepRuns: run.stepRuns,
       startedAt: run.startedAt,

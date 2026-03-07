@@ -51,6 +51,23 @@ export interface RedditSignalResult {
   posts: RedditSignalPostDto[];
 }
 
+/** Company information for batch processing. */
+export interface RedditSignalCompanyInfo {
+  /** Company name (from lead.company). */
+  companyName: string;
+  /** Optional company domain (from lead.companyDomain). */
+  companyDomain?: string | null;
+  /** Lead IDs associated with this company. */
+  leadIds: string[];
+}
+
+export interface RedditSignalBatchInput {
+  /** Companies to search for in a single batch. */
+  companies: RedditSignalCompanyInfo[];
+  /** Active subreddit names to search within (without "r/" prefix). */
+  subreddits: string[];
+}
+
 export interface RedditSignalProvider {
   /** Short opaque key that uniquely identifies this provider. */
   readonly key: string;
@@ -70,4 +87,16 @@ export interface RedditSignalProvider {
   detectRedditSignals(
     input: RedditSignalSearchInput,
   ): Promise<RedditSignalResult | null>;
+
+  /**
+   * Batch version: queries the provider for Reddit signals for multiple companies at once.
+   *
+   * Returns a Map keyed by normalized company name (lowercased trim).
+   * Missing companies in the result indicate rate limit reached or no matches found.
+   *
+   * Optional method — if not implemented, caller falls back to per-company calls.
+   */
+  detectRedditSignalsBatch?(
+    input: RedditSignalBatchInput,
+  ): Promise<Map<string, RedditSignalResult>>;
 }

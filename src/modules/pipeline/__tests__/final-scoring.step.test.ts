@@ -254,6 +254,9 @@ function createMockPrisma(opts?: {
     redditSignal: {
       findMany: vi.fn().mockResolvedValue([]),
     },
+    crunchbaseSignal: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     leadScore: {
       findMany: vi.fn().mockResolvedValue(initialScores),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
