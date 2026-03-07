@@ -49,12 +49,18 @@ const ROLES = [
   "Co-Founder",
   "CEO",
   "CTO",
+  "Chief Technology Officer",
   "VP Engineering",
+  "Head of Engineering",
   "Director of Engineering",
+  "VP Product",
   "Head of Product",
   "CPO",
-  "VP Product",
+  "Chief Product Officer",
   "Head of Innovation",
+  "Innovation Director",
+  "Head of Blockchain",
+  "Head of Digital Assets",
 ];
 const HARDCODED_USER_TEXT = `Can you find 10 people with the following roles: ${ROLES.join(", ")}?`;
 const LEAD_LIMIT = 10;
