@@ -98,19 +98,17 @@ export class PerplexityClient {
     const client = this.getClient();
 
     // Build domain filter - prioritize company domains
+    // Perplexity expects bare domain names (e.g. "oumla.com"), not full URLs.
     const domainFilter: string[] = [];
     if (options.companyDomain) {
-      domainFilter.push(options.companyDomain);
+      const cleaned = extractDomain(options.companyDomain);
+      if (cleaned) domainFilter.push(cleaned);
     }
     if (options.companyWebsites?.length) {
       for (const url of options.companyWebsites) {
-        try {
-          const domain = new URL(url).hostname;
-          if (!domainFilter.includes(domain)) {
-            domainFilter.push(domain);
-          }
-        } catch {
-          /* ignore invalid URLs */
+        const domain = extractDomain(url);
+        if (domain && !domainFilter.includes(domain)) {
+          domainFilter.push(domain);
         }
       }
     }
@@ -310,4 +308,39 @@ IMPORTANT: For each item, extract the ACTUAL PUBLICATION DATE from the article (
       });
     }
   }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Extracts a bare, lowercased domain from a value that may be a full URL
+ * (e.g. "https://Oumla.com/about") or already a plain domain ("oumla.com").
+ *
+ * Returns null if the input cannot be parsed into a valid domain.
+ */
+function extractDomain(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  // If it looks like a URL (has protocol or starts with //), parse with URL
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith("//")) {
+    try {
+      return new URL(trimmed).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  }
+
+  // Otherwise treat as a bare domain — strip any path/query/port
+  const bare = trimmed
+    .replace(/[/?#].*$/, "")
+    .replace(/:\d+$/, "")
+    .toLowerCase();
+
+  // Basic validation: must have at least one dot and no spaces
+  if (!bare.includes(".") || /\s/.test(bare)) return null;
+
+  return bare;
 }

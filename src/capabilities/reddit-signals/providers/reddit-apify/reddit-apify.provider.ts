@@ -17,6 +17,12 @@ import {
   wrapRedditApifyError,
 } from "./reddit-apify.errors";
 import type { RedditScrapedPost } from "./reddit-apify.schemas";
+import {
+  normalizeCompanyName,
+  matchesCompanyName,
+  matchesDomain,
+  MIN_MATCHABLE_NAME_LENGTH,
+} from "./company-match.utils";
 
 /** Opaque key used in DB records. Never shown to the frontend. */
 const PROVIDER_KEY = "reddit-apify";
@@ -89,6 +95,23 @@ export class RedditApifyProvider implements RedditSignalProvider {
       };
     }
 
+    const searchKeyword = normalizeCompanyName(input.companyName);
+
+    if (searchKeyword.length < MIN_MATCHABLE_NAME_LENGTH) {
+      lg.info(
+        { companyName: input.companyName, normalized: searchKeyword },
+        "[RedditApify] Company name too short after normalisation, skipping",
+      );
+      return {
+        providerKey: PROVIDER_KEY,
+        companyName: input.companyName,
+        totalMentions: 0,
+        totalActivities: 0,
+        subredditsFound: [],
+        posts: [],
+      };
+    }
+
     const allPosts: RedditSignalPostDto[] = [];
     const subredditsWithMatches = new Set<string>();
     let stopped = false;
@@ -110,7 +133,7 @@ export class RedditApifyProvider implements RedditSignalProvider {
       try {
         const rawPosts = await this.client.searchSubreddit(
           subreddit,
-          input.companyName,
+          searchKeyword,
           MAX_ITEMS_PER_SUBREDDIT,
         );
 
@@ -187,8 +210,9 @@ export class RedditApifyProvider implements RedditSignalProvider {
   /**
    * Batch version: search for multiple companies in a single Apify actor run.
    *
-   * Maps posts back to companies by checking case-insensitive keyword presence
-   * in title + body. Posts matching multiple companies are duplicated.
+   * Uses normalised company names as Apify keywords and re-attributes
+   * returned posts via word-boundary matching (+ optional domain matching)
+   * to avoid false-positive substring hits.
    */
   async detectRedditSignalsBatch(
     input: RedditSignalBatchInput,
@@ -210,28 +234,62 @@ export class RedditApifyProvider implements RedditSignalProvider {
       return new Map();
     }
 
-    const companyNames = input.companies.map((c) => c.companyName);
+    // ── Normalise & deduplicate keywords ───────────────────────────
+    const companyMeta = input.companies.map((c) => ({
+      original: c,
+      normalized: normalizeCompanyName(c.companyName),
+      key: c.companyName.trim().toLowerCase(),
+    }));
+
+    // Filter out companies whose name is too short after normalisation
+    const matchable = companyMeta.filter((c) => {
+      if (c.normalized.length < MIN_MATCHABLE_NAME_LENGTH) {
+        lg.info(
+          { companyName: c.original.companyName, normalized: c.normalized },
+          "[RedditApify] Batch: company name too short after normalisation, skipping",
+        );
+        return false;
+      }
+      return true;
+    });
+
+    // Unique keywords for the Apify actor (deduplicated by lowercased form)
+    const seenKeywords = new Set<string>();
+    const keywords: string[] = [];
+    for (const c of matchable) {
+      const lc = c.normalized.toLowerCase();
+      if (!seenKeywords.has(lc)) {
+        seenKeywords.add(lc);
+        keywords.push(c.normalized);
+      }
+    }
+
+    if (keywords.length === 0) {
+      lg.info("[RedditApify] Batch: no matchable company names, skipping");
+      return new Map();
+    }
 
     try {
       const rawPosts = await this.client.searchBatch(
         input.subreddits,
-        companyNames,
+        keywords,
         MAX_ITEMS_PER_SUBREDDIT,
       );
 
       lg.info(
         {
           subredditCount: input.subreddits.length,
-          companyCount: companyNames.length,
+          keywordCount: keywords.length,
+          companiesTotal: input.companies.length,
+          companiesMatchable: matchable.length,
           postsRetrieved: rawPosts.length,
         },
         "[RedditApify] Batch: posts retrieved, mapping to companies",
       );
 
-      // ── Map posts to companies ──────────────────────────────────
+      // ── Initialise empty results for ALL companies ──────────────
       const resultsByCompany = new Map<string, RedditSignalResult>();
 
-      // Initialize empty results for all companies
       for (const company of input.companies) {
         const key = company.companyName.trim().toLowerCase();
         resultsByCompany.set(key, {
@@ -244,16 +302,17 @@ export class RedditApifyProvider implements RedditSignalProvider {
         });
       }
 
-      // Map each post to matching companies
+      // ── Attribute posts via word-boundary + domain matching ─────
       for (const rawPost of rawPosts) {
-        const postText = `${rawPost.title ?? ""} ${rawPost.body ?? ""}`.toLowerCase();
-        const matchingCompanies = input.companies.filter((company) =>
-          postText.includes(company.companyName.toLowerCase()),
-        );
+        const postText = `${rawPost.title ?? ""} ${rawPost.body ?? ""} ${rawPost.url ?? ""}`.toLowerCase();
 
-        for (const company of matchingCompanies) {
-          const key = company.companyName.trim().toLowerCase();
-          const result = resultsByCompany.get(key);
+        for (const cm of matchable) {
+          const nameMatch = matchesCompanyName(postText, cm.normalized.toLowerCase());
+          const domainMatch = matchesDomain(postText, cm.original.companyDomain);
+
+          if (!nameMatch && !domainMatch) continue;
+
+          const result = resultsByCompany.get(cm.key);
           if (!result) continue;
 
           const postDto = mapToDto(rawPost, rawPost.subreddit ?? "unknown");
@@ -287,7 +346,7 @@ export class RedditApifyProvider implements RedditSignalProvider {
       if (e instanceof RedditApifyRateLimitError) {
         await this.decrementDailyUsage();
         lg.info(
-          { companyCount: companyNames.length },
+          { companyCount: input.companies.length },
           "[RedditApify] Batch: provider returned 429 — stopping",
         );
         return new Map();

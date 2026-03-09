@@ -60,9 +60,27 @@ const AboutShortDescriptionSchema = z.object({
   short_description: z.string().nullable().optional(),
 }).nullable().optional();
 
+/**
+ * Some Crunchbase fields come back as either a plain string
+ * or a `{ value: string, precision: string }` object depending on
+ * the API version / actor. This helper normalises both to a string.
+ */
+const cbStringOrValueObject = z
+  .union([
+    z.string(),
+    z.looseObject({ value: z.string().nullable().optional() })
+  ])
+  .nullable()
+  .optional()
+  .transform((v) => {
+    if (v == null) return null;
+    if (typeof v === "string") return v;
+    return v.value ?? null;
+  });
+
 const OverviewFieldsExtendedSchema = z.object({
-  founded_on: z.string().nullable().optional(),
-  operating_status: z.string().nullable().optional(),
+  founded_on: cbStringOrValueObject,
+  operating_status: cbStringOrValueObject,
 }).nullable().optional();
 
 // ── Investors ───────────────────────────────────────────────────────
@@ -104,7 +122,7 @@ const AcquisitionPredictionItemSchema = z.object({
 // ── Layoffs ─────────────────────────────────────────────────────────
 // layoff_list is simply an array of objects — we only need to know if non-empty
 
-const LayoffItemSchema = z.object({}).passthrough().nullable().optional();
+const LayoffItemSchema = z.looseObject({}).nullable().optional();
 
 /* ------------------------------------------------------------------ */
 /*  Full company result schema                                         */
@@ -114,9 +132,9 @@ const LayoffItemSchema = z.object({}).passthrough().nullable().optional();
  * Full schema for a single Crunchbase company result item.
  *
  * The actor returns an array of these objects in its dataset.
- * We use `.passthrough()` so unknown extra fields don't cause validation errors.
+ * We use `.looseObject()` so unknown extra fields don't cause validation errors.
  */
-export const CrunchbaseCompanyResultSchema = z.object({
+export const CrunchbaseCompanyResultSchema = z.looseObject({
   /** The input URL that was scraped — used to match results back to companies. */
   url: z.string().optional(),
 
@@ -155,6 +173,6 @@ export const CrunchbaseCompanyResultSchema = z.object({
 
   // ── Layoffs ─────────────────────────────────────────────────────
   layoff_list: z.array(LayoffItemSchema).nullable().optional(),
-}).passthrough();
+})
 
 export type CrunchbaseCompanyResult = z.infer<typeof CrunchbaseCompanyResultSchema>;

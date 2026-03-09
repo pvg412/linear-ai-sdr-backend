@@ -61,6 +61,7 @@ export const DEFAULT_COMPANY_PIPELINE: PipelineDefinition = {
       id: "outreach",
       displayName: "Outreach",
       config: { channel: "linkedin" },
+      timeoutMs: 15 * 60 * 1000, // 15 min (two sequential gRPC calls per lead: parse + stream)
     },
   ],
   defaults: {

@@ -72,8 +72,83 @@ export class CrunchbaseApifyClient {
   }
 
   /**
+   * Scrape Crunchbase data for a SINGLE company's candidate slugs.
+   * 
+   * This method is more resilient than batching all companies together — if one
+   * company's slugs are invalid (causing the actor to crash), it doesn't affect
+   * other companies.
+   * 
+   * @param slugs - Array of candidate slugs for ONE company (e.g. ["gigradar", "gigradar-io", "gig-radar"])
+   * @returns The first matching result, or null if no slug resolved successfully
+   */
+  async scrapeCompany(slugs: string[]): Promise<CrunchbaseCompanyResult | null> {
+    if (slugs.length === 0) return null;
+
+    const client = this.getClient();
+    const lg = ensureLogger();
+
+    // Build the URL list from candidate slugs
+    const urls = slugs.map((slug) => `${CRUNCHBASE_ORG_BASE}${slug}`);
+
+    const input = {
+      urls,
+    };
+
+    const waitSecs = 30; // Shorter timeout for single-company runs
+
+    lg.info(
+      { slugCount: slugs.length, waitSecs },
+      "Crunchbase single-company scrape starting",
+    );
+
+    try {
+      const run = await withRetry(
+        () => client.actor(this.actorId).call(input, { waitSecs }),
+        {
+          maxAttempts: MAX_RETRIES,
+          backoffMs: RETRY_BACKOFF_MS,
+          label: `crunchbase-single:${slugs[0]}`,
+        },
+      );
+
+      if (!run.defaultDatasetId) {
+        lg.warn({ slugs }, "Crunchbase scraper returned no dataset");
+        return null;
+      }
+
+      const { items } = await client.dataset(run.defaultDatasetId).listItems({
+        limit: slugs.length * 2,
+      });
+
+      if (!items || items.length === 0) {
+        return null;
+      }
+
+      // Parse and return the FIRST valid result (candidate slugs are ordered by confidence)
+      for (const item of items) {
+        if (!item || typeof item !== "object") continue;
+        if ("message" in item && !("identifier" in item) && !("url" in item)) continue;
+
+        try {
+          const parsed = CrunchbaseCompanyResultSchema.parse(item);
+          lg.info({ permalink: parsed.identifier?.permalink }, "Crunchbase single-company scrape found match");
+          return parsed;
+        } catch (err) {
+          lg.warn({ err }, "Failed to parse Crunchbase company result");
+        }
+      }
+
+      return null;
+    } catch (err) {
+      lg.warn({ err, slugs }, "Crunchbase single-company scrape failed");
+      throw err; // Let caller handle error wrapping
+    }
+  }
+
+  /**
    * Scrape Crunchbase data for multiple company slugs in a single actor run.
    *
+   * @deprecated Use scrapeCompany() for per-company resilience instead of batching all companies
    * @param slugs - Array of Crunchbase organisation slugs (e.g. "gigradar-io")
    * @returns Map of slug -> parsed company result. Slugs not found are absent from the map.
    */
@@ -147,19 +222,25 @@ export class CrunchbaseApifyClient {
 }
 
 /**
- * Extract the slug from a Crunchbase result, trying permalink first,
- * then falling back to parsing the URL.
+ * Extract the slug from a Crunchbase result.
+ * 
+ * CRITICAL: Prioritize the INPUT URL (the slug WE sent) over the permalink
+ * (Crunchbase's canonical slug). This ensures we can match results back to
+ * companies via the slugToCompanyKey map which is keyed by our input slugs.
+ * 
+ * If we sent "gigradar" but Crunchbase returned permalink "gigradar-io",
+ * we MUST return "gigradar" here so the provider can find it in slugToCompanyKey.
  */
 function extractSlugFromResult(result: CrunchbaseCompanyResult): string | null {
-  // Try permalink from identifier
-  const permalink = result.identifier?.permalink;
-  if (permalink) return permalink.toLowerCase();
-
-  // Fallback: extract slug from the input URL
+  // Primary: extract the slug from the input URL (this is OUR slug)
   if (result.url) {
     const match = result.url.match(/\/organization\/([^/?#]+)/);
     if (match?.[1]) return match[1].toLowerCase();
   }
+
+  // Fallback: use permalink if URL is missing (shouldn't happen)
+  const permalink = result.identifier?.permalink;
+  if (permalink) return permalink.toLowerCase();
 
   return null;
 }

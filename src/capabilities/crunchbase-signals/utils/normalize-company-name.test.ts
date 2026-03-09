@@ -49,6 +49,26 @@ describe("extractSlugFromDomain", () => {
   it("returns null for single-char slug", () => {
     expect(extractSlugFromDomain("x.com")).toBeNull();
   });
+
+  it("handles app subdomain", () => {
+    expect(extractSlugFromDomain("app.notion.so")).toBe("notion");
+  });
+
+  it("handles api subdomain", () => {
+    expect(extractSlugFromDomain("api.stripe.com")).toBe("stripe");
+  });
+
+  it("handles docs subdomain", () => {
+    expect(extractSlugFromDomain("docs.company.io")).toBe("company");
+  });
+
+  it("keeps non-common subdomain", () => {
+    expect(extractSlugFromDomain("custom.example.com")).toBe("custom");
+  });
+
+  it("handles dashboard subdomain", () => {
+    expect(extractSlugFromDomain("dashboard.acme.co")).toBe("acme");
+  });
 });
 
 /* ------------------------------------------------------------------ */

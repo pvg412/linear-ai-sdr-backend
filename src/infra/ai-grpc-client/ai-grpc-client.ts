@@ -129,12 +129,17 @@ export class AiGrpcClient {
       ? grpc.credentials.createInsecure()
       : grpc.credentials.createSsl();
 
-    // Match Python server defaults (50MB)
+    // Channel-level settings.
+    // keepalive_time_ms must stay ABOVE the server's
+    // GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS (typically 2 min).
+    // Previous value of 30 s triggered "excess pings" rejection + RESOURCE_EXHAUSTED.
     const defaultChannelOptions: grpc.ChannelOptions = {
-      "grpc.keepalive_time_ms": 30_000,
-      "grpc.keepalive_timeout_ms": 10_000,
-      "grpc.max_receive_message_length": 50 * 1024 * 1024,
-      "grpc.max_send_message_length": 50 * 1024 * 1024,
+      "grpc.keepalive_time_ms": 120_000,                  // 2 min (was 30 s)
+      "grpc.keepalive_timeout_ms": 20_000,                // 20 s  (was 10 s)
+      "grpc.keepalive_permit_without_calls": 0,            // don't ping when idle
+      "grpc.http2.min_time_between_pings_ms": 120_000,     // hard floor for ping interval
+      "grpc.max_receive_message_length": 50 * 1024 * 1024, // 50 MB
+      "grpc.max_send_message_length": 50 * 1024 * 1024,    // 50 MB
     };
 
     // gRPC client "options" are effectively channel options + a few client-only fields

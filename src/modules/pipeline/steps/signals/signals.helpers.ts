@@ -46,6 +46,10 @@ export function buildCompanyGroups(runLeads: RunLead[]): Map<string, CompanyGrou
     const existing = groups.get(key);
     if (existing) {
       existing.leadIds.push(rl.lead.id);
+      // If the existing group has no domain but this lead does, use this lead's domain
+      if (!existing.companyDomain && rl.lead.companyDomain) {
+        existing.companyDomain = rl.lead.companyDomain;
+      }
     } else {
       groups.set(key, {
         companyName: rawName.trim(),

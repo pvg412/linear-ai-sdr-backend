@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 const HirebaseJobLocationSchema = z.object({
-  city: z.string().optional(),
-  region: z.string().optional(),
-  country: z.string().optional(),
+  city: z.string().nullish(),
+  region: z.string().nullish(),
+  country: z.string().nullish(),
 });
 
 const HirebaseSalaryRangeSchema = z

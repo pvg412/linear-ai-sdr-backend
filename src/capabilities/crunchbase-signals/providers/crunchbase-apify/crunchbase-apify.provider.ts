@@ -40,8 +40,36 @@ const MAX_COMPETITORS = 5;
 /** Maximum number of technologies to extract from builtwith_tech_used_list. */
 const MAX_TECH_ITEMS = 15;
 
+/** Number of companies to process in parallel (Apify actor calls). */
+const COMPANY_CONCURRENCY = 3;
+
 function utcDateString(): string {
   return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
+/**
+ * Runs async tasks with a concurrency limit (worker pool pattern).
+ */
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  const queue = [...items];
+  
+  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (item !== undefined) {
+        const result = await fn(item);
+        results.push(result);
+      }
+    }
+  });
+  
+  await Promise.all(workers);
+  return results;
 }
 
 /* ------------------------------------------------------------------ */
@@ -88,98 +116,101 @@ export class CrunchbaseApifyProvider implements CrunchbaseSignalProvider {
       return new Map();
     }
 
-    // ── Check daily rate limit ───────────────────────────────────────
-    const canProceed = await this.tryIncrementDailyUsage();
-    if (!canProceed) {
-      lg.info(
-        { providerKey: PROVIDER_KEY },
-        "[CrunchbaseApify] Daily request limit reached, skipping",
-      );
-      return null;
-    }
+    lg.info(
+      { companies: input.companies.length },
+      "[CrunchbaseApify] Starting per-company lookup",
+    );
 
-    // ── Generate candidate slugs for all companies ──────────────────
-    const slugToCompanyKey = new Map<string, string>(); // slug → normalised company key
-    const companyKeyToInfo = new Map<string, CrunchbaseSignalCompanyInfo>();
-    const allSlugs: string[] = [];
-
-    for (const company of input.companies) {
+    // ── Process each company individually with concurrency ──────────
+    const processCompany = async (
+      company: CrunchbaseSignalCompanyInfo,
+    ): Promise<{ key: string; result: CrunchbaseSignalResult }> => {
       const key = company.companyName.trim().toLowerCase();
-      companyKeyToInfo.set(key, company);
 
-      const candidates = generateCandidateSlugs({
+      // Check rate limit PER company (each company = 1 actor call)
+      const canProceed = await this.tryIncrementDailyUsage();
+      if (!canProceed) {
+        lg.info(
+          { companyName: company.companyName },
+          "[CrunchbaseApify] Daily request limit reached, skipping this company",
+        );
+        return { key, result: buildNotFoundResult(company.companyName) };
+      }
+
+      // Generate candidate slugs for this company
+      const candidateSlugs = generateCandidateSlugs({
         companyName: company.companyName,
         companyDomain: company.companyDomain,
       });
 
-      for (const slug of candidates) {
-        if (!slugToCompanyKey.has(slug)) {
-          slugToCompanyKey.set(slug, key);
-          allSlugs.push(slug);
-        }
+      if (candidateSlugs.length === 0) {
+        lg.warn(
+          { companyName: company.companyName },
+          "[CrunchbaseApify] No candidate slugs generated",
+        );
+        return { key, result: buildNotFoundResult(company.companyName) };
       }
-    }
 
-    lg.info(
-      {
-        companies: input.companies.length,
-        totalSlugs: allSlugs.length,
-      },
-      "[CrunchbaseApify] Starting batch lookup",
+      // Call Apify actor for this company's slugs only
+      try {
+        const rawResult = await this.client.scrapeCompany(candidateSlugs);
+        
+        if (rawResult) {
+          lg.info(
+            { companyName: company.companyName, permalink: rawResult.identifier?.permalink },
+            "[CrunchbaseApify] Company found",
+          );
+          return { key, result: mapToResult(company.companyName, rawResult) };
+        } else {
+          lg.info(
+            { companyName: company.companyName, slugsTried: candidateSlugs.length },
+            "[CrunchbaseApify] Company not found",
+          );
+          return { key, result: buildNotFoundResult(company.companyName) };
+        }
+      } catch (err) {
+        try {
+          wrapCrunchbaseApifyError(err);
+        } catch (wrapped) {
+          if (wrapped instanceof CrunchbaseApifyRateLimitError) {
+            lg.info(
+              { companyName: company.companyName },
+              "[CrunchbaseApify] Rate limited by Apify, marking as not found",
+            );
+            return { key, result: buildNotFoundResult(company.companyName) };
+          }
+          throw wrapped;
+        }
+        // Error was swallowed by wrapCrunchbaseApifyError
+        lg.warn(
+          { companyName: company.companyName, err },
+          "[CrunchbaseApify] Scrape failed, marking as not found",
+        );
+        return { key, result: buildNotFoundResult(company.companyName) };
+      }
+    };
+
+    // Run with concurrency limit to avoid overwhelming Apify
+    const results = await runWithConcurrency(
+      input.companies,
+      COMPANY_CONCURRENCY,
+      processCompany,
     );
 
-    // ── Call Apify actor ─────────────────────────────────────────────
-    let rawResults: Map<string, CrunchbaseCompanyResult>;
-    try {
-      rawResults = await this.client.scrapeCompanies(allSlugs);
-    } catch (err) {
-      try {
-        wrapCrunchbaseApifyError(err);
-      } catch (wrapped) {
-        if (wrapped instanceof CrunchbaseApifyRateLimitError) {
-          lg.info(
-            { providerKey: PROVIDER_KEY },
-            "[CrunchbaseApify] Rate limited by Apify, skipping",
-          );
-          return null;
-        }
-        throw wrapped;
-      }
-      // If wrapCrunchbaseApifyError didn't throw, it was swallowed
-      return new Map();
-    }
-
-    // ── Match results back to companies ──────────────────────────────
+    // ── Build results map ────────────────────────────────────────────
     const resultsMap = new Map<string, CrunchbaseSignalResult>();
-    const matchedCompanyKeys = new Set<string>();
-
-    for (const [slug, raw] of rawResults) {
-      const companyKey = slugToCompanyKey.get(slug);
-      if (!companyKey || matchedCompanyKeys.has(companyKey)) continue;
-
-      // First match wins (slugs are ordered by confidence)
-      matchedCompanyKeys.add(companyKey);
-      const info = companyKeyToInfo.get(companyKey)!;
-
-      resultsMap.set(companyKey, mapToResult(info.companyName, raw));
-    }
-
-    // ── Fill in "not found" results for unmatched companies ──────────
-    for (const company of input.companies) {
-      const key = company.companyName.trim().toLowerCase();
-      if (!resultsMap.has(key)) {
-        resultsMap.set(key, buildNotFoundResult(company.companyName));
-      }
+    for (const { key, result } of results) {
+      resultsMap.set(key, result);
     }
 
     // ── Log matching quality ─────────────────────────────────────────
-    const found = matchedCompanyKeys.size;
+    const found = results.filter((r) => r.result.crunchbaseFound).length;
     const total = input.companies.length;
     const matchRate = total > 0 ? Math.round((found / total) * 100) : 0;
 
     lg.info(
       { found, total, matchRate: `${matchRate}%`, providerKey: PROVIDER_KEY },
-      `[CrunchbaseApify] Batch lookup complete: found ${found}/${total} companies (${matchRate}% match rate)`,
+      `[CrunchbaseApify] Per-company lookup complete: found ${found}/${total} companies (${matchRate}% match rate)`,
     );
 
     return resultsMap;

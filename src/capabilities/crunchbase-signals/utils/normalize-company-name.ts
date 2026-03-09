@@ -48,12 +48,25 @@ const TECH_SLUG_SUFFIXES = ["-io", "-ai"];
 /* ------------------------------------------------------------------ */
 
 /**
+ * Common subdomains that should be stripped when extracting company slugs.
+ */
+const COMMON_SUBDOMAINS = [
+  "www", "app", "api", "docs", "blog", "dashboard", "portal",
+  "admin", "staging", "dev", "test", "demo", "cdn", "static",
+  "mail", "email", "support", "help", "status", "console",
+];
+
+/**
  * Extracts a Crunchbase slug candidate from a website domain.
  *
+ * Handles subdomains intelligently: "app.company.com" → "company", not "app".
+ *
  * @example
- *   extractSlugFromDomain("evacodes.com")     → "evacodes"
+ *   extractSlugFromDomain("evacodes.com")         → "evacodes"
  *   extractSlugFromDomain("https://gig-radar.io") → "gig-radar"
- *   extractSlugFromDomain(null)               → null
+ *   extractSlugFromDomain("app.notion.so")        → "notion"
+ *   extractSlugFromDomain("www.stripe.com")       → "stripe"
+ *   extractSlugFromDomain(null)                   → null
  */
 export function extractSlugFromDomain(
   domainOrUrl: string | null | undefined,
@@ -71,11 +84,24 @@ export function extractSlugFromDomain(
   // Strip port
   domain = domain.replace(/:\d+$/, "");
 
-  // Extract the part before the TLD
-  const dotIdx = domain.indexOf(".");
-  if (dotIdx <= 0) return null;
+  // Split into parts (e.g., "app.company.com" → ["app", "company", "com"])
+  const parts = domain.split(".");
+  
+  // Need at least "name.tld" (2 parts)
+  if (parts.length < 2) return null;
 
-  const slug = domain.slice(0, dotIdx);
+  // If there are 3+ parts (subdomain.company.tld), check if first part is a common subdomain
+  if (parts.length >= 3) {
+    const firstPart = parts[0];
+    if (COMMON_SUBDOMAINS.includes(firstPart)) {
+      // Use the second part (company name)
+      const slug = parts[1];
+      if (slug && slug.length >= 2) return slug;
+    }
+  }
+
+  // Default: use the first part (before the first dot)
+  const slug = parts[0];
   if (!slug || slug.length < 2) return null;
 
   return slug;

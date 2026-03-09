@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { QUEUE_TYPES } from "@/infra/queue/queue.types";
 import { ensureLogger, type LoggerLike } from "@/infra/observability";
+import { UserFacingError } from "@/infra/userFacingError";
 import { PIPELINE_TYPES } from "@/modules/pipeline/pipeline.types";
 import type { PipelineRepository } from "@/modules/pipeline/persistence/pipeline.repository";
 import type { PipelineStepRegistry } from "@/modules/pipeline/engine/pipeline.registry";
@@ -386,7 +387,11 @@ export class PipelineExecutor {
     }
 
     /* All attempts exhausted — mark step as failed */
-    const errorMessage = lastError?.message ?? "Unknown error";
+    const rawError = lastError?.message ?? "Unknown error";
+    const errorMessage =
+      lastError instanceof UserFacingError
+        ? lastError.userMessage
+        : "An unexpected error occurred. Please try again.";
 
     await this.repo.updateStepStatus(pipelineRunId, stepId, "FAILED", {
       finishedAt: new Date(),
@@ -401,7 +406,7 @@ export class PipelineExecutor {
     );
 
     lg.error(
-      { pipelineRunId, stepId, error: errorMessage },
+      { pipelineRunId, stepId, error: rawError },
       "Step failed after all attempts",
     );
 

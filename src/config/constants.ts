@@ -55,18 +55,6 @@ export const CHAT_CONSTANTS = {
 } as const;
 
 /**
- * gRPC client timeouts
- */
-export const GRPC_TIMEOUTS = {
-  PARSE_MS: 40_000,
-  UPSERT_MS: 60_000,
-  DELETE_MS: 60_000,
-  COMPANY_RESEARCH_MS: 60_000,
-  KEEPALIVE_TIME_MS: 30_000,
-  KEEPALIVE_TIMEOUT_MS: 10_000,
-} as const;
-
-/**
  * HTTP client timeouts
  */
 export const HTTP_TIMEOUTS = {
@@ -155,5 +143,5 @@ export const OUTREACH_CONSTANTS = {
   /** Number of leads processed in parallel per batch */
   BATCH_SIZE: 5,
   /** Per-call timeout for the gRPC chatStream (ms) */
-  STREAM_TIMEOUT_MS: 60_000,
+  STREAM_TIMEOUT_MS: 360_000,
 } as const;
