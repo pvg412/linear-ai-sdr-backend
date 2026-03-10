@@ -294,9 +294,14 @@ export class SignalsStep implements PipelineStepHandler {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Load the company's signal category configuration.
-   * Returns a ResolvedCategoryConfig for every category. Categories
-   * without a saved config get defaults (enabled: true, description: null).
+   * Load the company's signal category configuration across all service catalogs.
+   *
+   * A category is considered enabled if ANY service catalog has it enabled.
+   * This ensures signals are collected whenever at least one catalog cares
+   * about a given signal type.
+   *
+   * Categories without any saved config across any catalog default to
+   * enabled: true (backward-compatible behaviour).
    */
   private async loadCategoryConfigs(
     companyId: string | null,
@@ -310,18 +315,23 @@ export class SignalsStep implements PipelineStepHandler {
     }
 
     const saved = await this.prisma.signalCategoryConfig.findMany({
-      where: { companyId },
+      where: { serviceCatalog: { companyId } },
     });
 
-    const savedMap = new Map(saved.map((s) => [s.category, s]));
+    // A category is enabled if ANY catalog has it enabled
+    const enabledCategories = new Set(
+      saved.filter((s) => s.enabled).map((s) => s.category),
+    );
 
-    return ALL_SIGNAL_CATEGORIES.map((cat) => {
-      const config = savedMap.get(cat);
-      return {
-        category: cat,
-        enabled: config?.enabled ?? true,
-        description: config?.description ?? null,
-      };
-    });
+    // Categories that have at least one saved config row
+    const configuredCategories = new Set(saved.map((s) => s.category));
+
+    return ALL_SIGNAL_CATEGORIES.map((cat) => ({
+      category: cat,
+      // If no catalog has configured this category at all, default to enabled
+      enabled: configuredCategories.has(cat) ? enabledCategories.has(cat) : true,
+      // description is not used in the signals step (only for final scoring)
+      description: null,
+    }));
   }
 }

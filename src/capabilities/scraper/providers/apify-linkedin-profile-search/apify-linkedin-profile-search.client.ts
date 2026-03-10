@@ -26,6 +26,7 @@ export type ApifyLinkedinProfileSearchInput = {
   seniorityLevelIds?: string[];
   functionIds?: string[];
   industryIds?: string[];
+  companyHeadcount?: string[];
   firstNames?: string[];
   lastNames?: string[];
   profileLanguages?: string[];

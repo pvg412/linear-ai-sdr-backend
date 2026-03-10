@@ -45,6 +45,7 @@ function createMockServiceCatalogRepo(catalogs?: unknown[]) {
               budgetMax: 50000,
             },
           ],
+          signalCategories: [],
         },
       ],
     ),
@@ -307,6 +308,10 @@ describe("ScoringStep", () => {
             budgetMax: 50000,
           },
         ],
+        signalCategories: [
+          { category: "HIRING", description: "AI engineers", enabled: true },
+          { category: "FUNDING", description: "Series A+", enabled: false },
+        ],
       },
     ];
 
@@ -329,6 +334,9 @@ describe("ScoringStep", () => {
             subServices: [
               { id: "ss-1", name: "NLP", priority: 9, budgetMin: 10000, budgetMax: 100000 },
               { id: "ss-2", name: "Vision", priority: 5, budgetMin: 5000, budgetMax: 50000 },
+            ],
+            signalCategoryDescriptions: [
+              { category: "HIRING", description: "AI engineers" },
             ],
           },
         ],

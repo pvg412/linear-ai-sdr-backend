@@ -1,9 +1,15 @@
 import { z } from "zod";
 import { SignalCategory } from "@prisma/client";
 
+// ── Param schemas ─────────────────────────────────────────────────────
+
+export const serviceCatalogIdParamSchema = z.object({
+  serviceCatalogId: z.string().min(1, "serviceCatalogId is required"),
+});
+
 // ── Field schemas ─────────────────────────────────────────────────────
 
-const SignalCategoryEnumSchema = z.nativeEnum(SignalCategory);
+const SignalCategoryEnumSchema = z.enum(SignalCategory);
 
 const SignalDescriptionSchema = z
   .string()
@@ -11,7 +17,7 @@ const SignalDescriptionSchema = z
   .min(10, "Description must be at least 10 characters")
   .max(500, "Description must be at most 500 characters");
 
-// ── Upsert body (PUT /company/signal-categories) ──────────────────────
+// ── Upsert body (PUT /company/service-catalog/:id/signal-categories) ──
 
 const SignalCategoryItemSchema = z.object({
   category: SignalCategoryEnumSchema,

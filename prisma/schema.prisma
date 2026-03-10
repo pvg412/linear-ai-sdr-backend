@@ -229,7 +229,7 @@ model User {
   serviceTogglesUpdated  ServiceToggle[]  @relation("ServiceToggleUpdatedBy")
   monitoredSourcesUpdated MonitoredSource[] @relation("MonitoredSourceUpdatedBy")
 
-  signalCategories SignalCategoryConfig[] @relation("CompanySignalCategories")
+  icpConfig CompanyIcpConfig? @relation("CompanyIcpConfig")
 
   @@unique([companyName])
   @@index([role])
@@ -739,7 +739,8 @@ model CompanyServiceCatalog {
 
   name String @db.Citext
 
-  subServices CompanyServiceCatalogSubService[]
+  subServices      CompanyServiceCatalogSubService[]
+  signalCategories SignalCategoryConfig[]
 
   @@unique([companyId, name])
   @@index([companyId])
@@ -1238,6 +1239,51 @@ model CrunchbaseSignal {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// ICP (Ideal Customer Profile) Configuration
+// ────────────────────────────────────────────────────────────────────
+
+/// Company-level Ideal Customer Profile settings.
+/// Stores location targets, company size filters, and links to industry selections.
+/// One-to-one with the company User (companyId is unique).
+model CompanyIcpConfig {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String @unique
+  company   User   @relation("CompanyIcpConfig", fields: [companyId], references: [id], onDelete: Cascade)
+
+  /// LinkedIn-compatible location strings (e.g. "San Francisco, CA", "United Kingdom")
+  locations    String[]
+
+  /// LinkedIn company size codes: A-I (multi-select)
+  companySizes String[]
+
+  industries CompanyIcpIndustry[]
+
+  @@index([companyId])
+}
+
+/// Individual industry selection within an ICP config.
+/// Uses LinkedIn industry IDs (numeric strings) with human-readable labels.
+model CompanyIcpIndustry {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  configId String
+  config   CompanyIcpConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  /// LinkedIn industry ID (numeric string, e.g. "96" for IT Services)
+  industryId String
+
+  /// Human-readable industry label (e.g. "IT Services and IT Consulting")
+  label String
+
+  @@unique([configId, industryId])
+  @@index([configId])
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Signal Category Configuration
 // ────────────────────────────────────────────────────────────────────
 
@@ -1247,22 +1293,22 @@ enum SignalCategory {
   COMMUNITY
 }
 
-/// Company-level signal category configuration.
+/// Per-service-catalog signal category configuration.
 /// Each category maps to one or more internal signal providers (hidden from the company).
-/// The company describes what it expects from each signal type so the AI can
-/// evaluate collected signals against those expectations during final scoring.
+/// The company describes what it expects from each signal type **per service catalog**
+/// so the AI can evaluate collected signals against those expectations during final scoring.
 model SignalCategoryConfig {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  companyId String
-  company   User           @relation("CompanySignalCategories", fields: [companyId], references: [id])
+  serviceCatalogId String
+  serviceCatalog   CompanyServiceCatalog @relation(fields: [serviceCatalogId], references: [id], onDelete: Cascade)
 
   category    SignalCategory
   description String  @db.VarChar(500)
   enabled     Boolean @default(true)
 
-  @@unique([companyId, category])
-  @@index([companyId])
+  @@unique([serviceCatalogId, category])
+  @@index([serviceCatalogId])
 }

@@ -9,6 +9,7 @@ import type {
 } from "@/modules/pipeline/schemas/pipeline.dto";
 import type { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 import type { ServiceCatalogRepository } from "@/modules/service-catalog/persistence/service-catalog.repository";
+import type { IcpRepository } from "@/modules/icp/persistence/icp.repository";
 import type { ScraperOrchestrator } from "@/capabilities/scraper/scraper.orchestrator";
 import type { ScraperAdapter } from "@/capabilities/scraper/scraper.dto";
 import type { LeadSearchRepository } from "@/modules/lead-search/persistence/lead-search.repository";
@@ -123,9 +124,38 @@ function createMockServiceCatalogRepo() {
             companyServiceCatalogId: "sc-1",
           },
         ],
+        signalCategories: [],
       },
     ]),
   } as unknown as ServiceCatalogRepository;
+}
+
+function createMockIcpRepo(config?: {
+  locations?: string[];
+  companySizes?: string[];
+  industries?: { industryId: string; label: string }[];
+}) {
+  return {
+    getByCompanyId: vi.fn().mockResolvedValue(
+      config
+        ? {
+            id: "icp-1",
+            companyId: "company-1",
+            locations: config.locations ?? [],
+            companySizes: config.companySizes ?? [],
+            industries: (config.industries ?? []).map((ind) => ({
+              id: `ind-${ind.industryId}`,
+              configId: "icp-1",
+              industryId: ind.industryId,
+              label: ind.label,
+              createdAt: new Date(),
+            })),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }
+        : null,
+    ),
+  } as unknown as IcpRepository;
 }
 
 function createMockLeadSearchRepo() {
@@ -171,6 +201,7 @@ function createMockPersister() {
 function buildStep(overrides?: {
   aiGrpcClient?: AiGrpcClient;
   serviceCatalogRepo?: ServiceCatalogRepository;
+  icpRepo?: IcpRepository;
   scraperOrchestrator?: ScraperOrchestrator;
   leadSearchRepo?: LeadSearchRepository;
   leadSearchRunRepo?: LeadSearchRunRepository;
@@ -180,6 +211,7 @@ function buildStep(overrides?: {
   const step = new LeadGenerationStep(
     overrides?.aiGrpcClient ?? createMockAiGrpcClient(),
     overrides?.serviceCatalogRepo ?? createMockServiceCatalogRepo(),
+    overrides?.icpRepo ?? createMockIcpRepo(),
     overrides?.scraperOrchestrator ?? createMockOrchestrator(adapter),
     overrides?.leadSearchRepo ?? createMockLeadSearchRepo(),
     overrides?.leadSearchRunRepo ?? createMockLeadSearchRunRepo(),
@@ -295,7 +327,7 @@ describe("LeadGenerationStep", () => {
 
     await step.run(makeCtx(), {}, tools);
 
-    // Verify service catalogs are mapped correctly
+    // Verify service catalogs are mapped correctly (including empty signalCategoryDescriptions)
     expect(aiGrpcClient.parseLeadSearchPromptWithServiceCatalogs).toHaveBeenCalledWith(
       expect.objectContaining({
         serviceCatalogs: [
@@ -311,10 +343,76 @@ describe("LeadGenerationStep", () => {
                 budgetMax: 50000,
               },
             ],
+            signalCategoryDescriptions: [],
           },
         ],
       }),
     );
+  });
+
+  it("overlays ICP locations and industryIds onto APIFY query", async () => {
+    const icpRepo = createMockIcpRepo({
+      locations: ["Berlin, Germany", "London, UK"],
+      industries: [
+        { industryId: "96", label: "IT Services" },
+        { industryId: "4", label: "Computer Software" },
+      ],
+      companySizes: ["C", "D"],
+    });
+    const { step } = buildStep({ icpRepo });
+    const tools = makeTools();
+
+    await step.run(makeCtx(), {}, tools);
+
+    // ICP config should be logged
+    expect(tools.log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icpLocations: 2,
+        icpIndustries: 2,
+        icpCompanySizes: 2,
+      }),
+      "ICP config loaded and applied to search query",
+    );
+
+    // Final merged query should contain all ICP values
+    expect(tools.log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locations: ["Berlin, Germany", "London, UK"],
+        industryIds: ["96", "4"],
+        companyHeadcount: ["C", "D"],
+      }),
+      expect.stringContaining("Final APIFY search criteria"),
+    );
+  });
+
+  it("skips ICP overlay when no ICP config exists", async () => {
+    const icpRepo = createMockIcpRepo(); // returns null
+    const { step } = buildStep({ icpRepo });
+    const tools = makeTools();
+
+    await step.run(makeCtx(), {}, tools);
+
+    // Should still use AI-parsed locations
+    expect(tools.log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locations: ["United States"], // from FAKE_GRPC_RESPONSE
+      }),
+      expect.stringContaining("Final APIFY search criteria"),
+    );
+  });
+
+  it("skips ICP when companyId is null", async () => {
+    const icpRepo = createMockIcpRepo({
+      locations: ["Berlin"],
+      industries: [{ industryId: "96", label: "IT" }],
+    });
+    const { step } = buildStep({ icpRepo });
+    const tools = makeTools();
+
+    await step.run(makeCtx({ companyId: null }), {}, tools);
+
+    // IcpRepo should not be called when there is no company
+    expect(icpRepo.getByCompanyId).not.toHaveBeenCalled();
   });
 
   it("throws when lead search adapter is not available", async () => {

@@ -62,6 +62,7 @@ function createMockServiceCatalogRepo(catalogs?: unknown[]) {
               budgetMax: 50000,
             },
           ],
+          signalCategories: [],
         },
       ],
     ),
@@ -260,9 +261,6 @@ function createMockPrisma(opts?: {
     leadScore: {
       findMany: vi.fn().mockResolvedValue(initialScores),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
-    },
-    signalCategoryConfig: {
-      findMany: vi.fn().mockResolvedValue([]),
     },
   };
 }

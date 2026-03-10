@@ -18,6 +18,7 @@ import { registerLeadConversationsModule } from "./modules/lead-conversations/le
 import { registerDatasetImportModule } from "./modules/dataset-import/dataset-import.module";
 import { registerServiceCatalogModule } from "./modules/service-catalog/service-catalog.module";
 import { registerSignalCategoryModule } from "./modules/signal-category/signal-category.module";
+import { registerIcpModule } from "./modules/icp/icp.module";
 import { registerAdminModule } from "./modules/admin/admin.module";
 import { registerHiringSignalsModule } from "./capabilities/hiring-signals/hiring-signals.module";
 import { registerRedditSignalsModule } from "./capabilities/reddit-signals/reddit-signals.module";
@@ -43,6 +44,7 @@ registerLeadConversationsModule(container);
 registerDatasetImportModule(container);
 registerServiceCatalogModule(container);
 registerSignalCategoryModule(container);
+registerIcpModule(container);
 registerAdminModule(container); // before hiring-signals — providers depend on ServiceToggleService
 registerHiringSignalsModule(container);
 registerRedditSignalsModule(container);

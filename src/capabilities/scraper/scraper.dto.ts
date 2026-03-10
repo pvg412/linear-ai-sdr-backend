@@ -58,6 +58,8 @@ export const ApifyScraperQuerySchema = z.looseObject({
   industryIds: z.array(S).optional(),
   excludeIndustryIds: z.array(S).optional(),
 
+  companyHeadcount: z.array(z.enum(["A", "B", "C", "D", "E", "F", "G", "H", "I"])).optional(),
+
   seniorityLevelIds: z.array(S).optional(),
   excludeSeniorityLevelIds: z.array(S).optional(),
 

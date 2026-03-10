@@ -7,7 +7,12 @@ import { container } from "@/container";
 
 import { SIGNAL_CATEGORY_TYPES } from "./signal-category.types";
 import type { SignalCategoryRepository } from "./persistence/signal-category.repository";
-import { upsertSignalCategoriesBodySchema } from "./schemas/signal-category.schemas";
+import {
+  serviceCatalogIdParamSchema,
+  upsertSignalCategoriesBodySchema,
+} from "./schemas/signal-category.schemas";
+import { SERVICE_CATALOG_TYPES } from "../service-catalog/service-catalog.types";
+import type { ServiceCatalogRepository } from "../service-catalog/persistence/service-catalog.repository";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
@@ -51,71 +56,104 @@ export function registerSignalCategoryRoutes(app: FastifyInstance): void {
   const repo = container.get<SignalCategoryRepository>(
     SIGNAL_CATEGORY_TYPES.SignalCategoryRepository,
   );
+  const serviceCatalogRepo = container.get<ServiceCatalogRepository>(
+    SERVICE_CATALOG_TYPES.ServiceCatalogRepository,
+  );
 
   /**
-   * GET /company/signal-categories
+   * Assert that the service catalog exists and belongs to the company.
+   * Returns the catalog id for convenience.
+   */
+  async function assertCatalogOwnership(
+    companyId: string,
+    serviceCatalogId: string,
+  ): Promise<void> {
+    const catalog = await serviceCatalogRepo.findServiceById(serviceCatalogId);
+    if (!catalog || catalog.companyId !== companyId) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "Service catalog not found",
+      });
+    }
+  }
+
+  /**
+   * GET /company/service-catalog/:serviceCatalogId/signal-categories
    *
-   * Returns all available signal categories with the company's current
+   * Returns all available signal categories with the catalog's current
    * configuration. Categories without a saved config appear with defaults
    * (enabled: true, description: null).
    */
-  app.get("/company/signal-categories", async (req) => {
-    const { companyId } = requireCompanyUser(req);
+  app.get(
+    "/company/service-catalog/:serviceCatalogId/signal-categories",
+    async (req) => {
+      const { companyId } = requireCompanyUser(req);
+      const { serviceCatalogId } = serviceCatalogIdParamSchema.parse(req.params);
 
-    const saved = await repo.listByCompany(companyId);
-    const savedMap = new Map(saved.map((s) => [s.category, s]));
+      await assertCatalogOwnership(companyId, serviceCatalogId);
 
-    return ALL_CATEGORIES.map((cat) => {
-      const config = savedMap.get(cat);
-      const meta = CATEGORY_LABELS[cat];
+      const saved = await repo.listByServiceCatalog(serviceCatalogId);
+      const savedMap = new Map(saved.map((s) => [s.category, s]));
 
-      return {
-        category: cat,
-        label: meta.label,
-        hint: meta.hint,
-        enabled: config?.enabled ?? true,
-        description: config?.description ?? null,
-        updatedAt: config?.updatedAt ?? null,
-      };
-    });
-  });
+      return ALL_CATEGORIES.map((cat) => {
+        const config = savedMap.get(cat);
+        const meta = CATEGORY_LABELS[cat];
+
+        return {
+          category: cat,
+          label: meta.label,
+          hint: meta.hint,
+          enabled: config?.enabled ?? true,
+          description: config?.description ?? null,
+          updatedAt: config?.updatedAt ?? null,
+        };
+      });
+    },
+  );
 
   /**
-   * PUT /company/signal-categories
+   * PUT /company/service-catalog/:serviceCatalogId/signal-categories
    *
-   * Upsert signal category configurations. Accepts an array of categories
-   * with their descriptions and enabled flags. Only provided categories
-   * are updated — omitted ones keep their current state (or default).
+   * Upsert signal category configurations for a specific service catalog.
+   * Accepts an array of categories with their descriptions and enabled flags.
+   * Only provided categories are updated — omitted ones keep their current
+   * state (or default).
    */
-  app.put("/company/signal-categories", async (req) => {
-    const { companyId } = requireCompanyUser(req);
-    const { categories } = upsertSignalCategoriesBodySchema.parse(req.body);
+  app.put(
+    "/company/service-catalog/:serviceCatalogId/signal-categories",
+    async (req) => {
+      const { companyId } = requireCompanyUser(req);
+      const { serviceCatalogId } = serviceCatalogIdParamSchema.parse(req.params);
+      const { categories } = upsertSignalCategoriesBodySchema.parse(req.body);
 
-    await repo.upsertMany(
-      companyId,
-      categories.map((c) => ({
-        category: c.category,
-        description: c.description,
-        enabled: c.enabled,
-      })),
-    );
+      await assertCatalogOwnership(companyId, serviceCatalogId);
 
-    // Return full state after update
-    const saved = await repo.listByCompany(companyId);
-    const savedMap = new Map(saved.map((s) => [s.category, s]));
+      await repo.upsertMany(
+        serviceCatalogId,
+        categories.map((c) => ({
+          category: c.category,
+          description: c.description,
+          enabled: c.enabled,
+        })),
+      );
 
-    return ALL_CATEGORIES.map((cat) => {
-      const config = savedMap.get(cat);
-      const meta = CATEGORY_LABELS[cat];
+      // Return full state after update
+      const saved = await repo.listByServiceCatalog(serviceCatalogId);
+      const savedMap = new Map(saved.map((s) => [s.category, s]));
 
-      return {
-        category: cat,
-        label: meta.label,
-        hint: meta.hint,
-        enabled: config?.enabled ?? true,
-        description: config?.description ?? null,
-        updatedAt: config?.updatedAt ?? null,
-      };
-    });
-  });
+      return ALL_CATEGORIES.map((cat) => {
+        const config = savedMap.get(cat);
+        const meta = CATEGORY_LABELS[cat];
+
+        return {
+          category: cat,
+          label: meta.label,
+          hint: meta.hint,
+          enabled: config?.enabled ?? true,
+          description: config?.description ?? null,
+          updatedAt: config?.updatedAt ?? null,
+        };
+      });
+    },
+  );
 }

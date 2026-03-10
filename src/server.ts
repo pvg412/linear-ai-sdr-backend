@@ -23,6 +23,7 @@ import { registerLeadConversationsRoutes } from "./modules/lead-conversations/co
 import { registerDatasetImportRoutes } from "./modules/dataset-import/dataset-import.controller";
 import { registerServiceCatalogRoutes } from "./modules/service-catalog/service-catalog.controller";
 import { registerSignalCategoryRoutes } from "./modules/signal-category/signal-category.controller";
+import { registerIcpRoutes } from "./modules/icp/icp.controller";
 import { registerPipelineRoutes } from "./modules/pipeline/pipeline.controller";
 import { registerAdminRoutes } from "./modules/admin/admin.controller";
 import { initAdminModule } from "./modules/admin/admin.module";
@@ -165,6 +166,7 @@ export async function buildServer() {
   registerDatasetImportRoutes(app);
   registerServiceCatalogRoutes(app);
   registerSignalCategoryRoutes(app);
+  registerIcpRoutes(app);
   registerPipelineRoutes(app);
   registerAdminRoutes(app);
 

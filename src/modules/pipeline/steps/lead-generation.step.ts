@@ -10,6 +10,9 @@ import { UserFacingError } from "@/infra/userFacingError";
 import { SERVICE_CATALOG_TYPES } from "@/modules/service-catalog/service-catalog.types";
 import type { ServiceCatalogRepository } from "@/modules/service-catalog/persistence/service-catalog.repository";
 
+import { ICP_TYPES } from "@/modules/icp/icp.types";
+import type { IcpRepository } from "@/modules/icp/persistence/icp.repository";
+
 import { SCRAPER_TYPES } from "@/capabilities/scraper/scraper.types";
 import type { ScraperOrchestrator } from "@/capabilities/scraper/scraper.orchestrator";
 import type { ScraperAdapter } from "@/capabilities/scraper/scraper.dto";
@@ -90,6 +93,8 @@ export class LeadGenerationStep implements PipelineStepHandler {
     private readonly aiGrpcClient: AiGrpcClient,
     @inject(SERVICE_CATALOG_TYPES.ServiceCatalogRepository)
     private readonly serviceCatalogRepo: ServiceCatalogRepository,
+    @inject(ICP_TYPES.IcpRepository)
+    private readonly icpRepo: IcpRepository,
     @inject(SCRAPER_TYPES.ScraperOrchestrator)
     private readonly scraperOrchestrator: ScraperOrchestrator,
     @inject(LEAD_SEARCH_TYPES.LeadSearchRepository)
@@ -133,6 +138,12 @@ export class LeadGenerationStep implements PipelineStepHandler {
             budgetMax: sub.budgetMax,
           }),
         ),
+        signalCategoryDescriptions: (cat.signalCategories ?? [])
+          .filter((sc) => sc.enabled && sc.description?.trim())
+          .map((sc) => ({
+            category: sc.category,
+            description: sc.description,
+          })),
       }));
     }
 
@@ -168,9 +179,39 @@ export class LeadGenerationStep implements PipelineStepHandler {
     }
 
     const rawQuery = toApifyScraperQuery(extracted.value);
+
+    // ── Step 3b: Load ICP config and overlay onto query ──────────────
+    const icpOverrides: Record<string, unknown> = {};
+
+    if (ctx.companyId) {
+      const icpConfig = await this.icpRepo.getByCompanyId(ctx.companyId);
+      if (icpConfig) {
+        if (icpConfig.locations.length > 0) {
+          icpOverrides.locations = icpConfig.locations;
+        }
+        if (icpConfig.industries.length > 0) {
+          icpOverrides.industryIds = icpConfig.industries.map(
+            (i: { industryId: string }) => i.industryId,
+          );
+        }
+        if (icpConfig.companySizes.length > 0) {
+          icpOverrides.companyHeadcount = icpConfig.companySizes;
+        }
+        tools.log.info(
+          {
+            icpLocations: icpConfig.locations.length,
+            icpIndustries: icpConfig.industries.length,
+            icpCompanySizes: icpConfig.companySizes.length,
+          },
+          "ICP config loaded and applied to search query",
+        );
+      }
+    }
+
     const parsed = ApifyScraperQuerySchema.safeParse({
       ...rawQuery,
-      limit: LEAD_LIMIT, // force 100
+      ...icpOverrides,
+      limit: LEAD_LIMIT, // force limit
     });
 
     if (!parsed.success) {
@@ -181,8 +222,14 @@ export class LeadGenerationStep implements PipelineStepHandler {
 
     const apifyQuery = parsed.data;
     tools.log.info(
-      { titles: apifyQuery.titles, industry: apifyQuery.industry },
-      "AI parsed APIFY search criteria",
+      {
+        titles: apifyQuery.titles,
+        industry: apifyQuery.industry,
+        locations: apifyQuery.locations,
+        industryIds: apifyQuery.industryIds,
+        companyHeadcount: apifyQuery.companyHeadcount,
+      },
+      "Final APIFY search criteria (AI + ICP merged)",
     );
     tools.emitProgress("AI parsed search criteria");
 

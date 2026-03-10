@@ -17,6 +17,7 @@ import type {
   ScoreLeadResponse,
   ServiceCatalogProto,
   ServiceCatalogSubServiceProto,
+  SignalCategoryDescriptionProto,
 } from "@/generated/aisdr/v1/ai_sdr";
 
 import { SCORING_CONSTANTS } from "@/config/constants";
@@ -129,6 +130,12 @@ export class ScoringStep implements PipelineStepHandler {
             budgetMax: sub.budgetMax,
           }),
         ),
+        signalCategoryDescriptions: (cat.signalCategories ?? [])
+          .filter((sc) => sc.enabled && sc.description?.trim())
+          .map((sc): SignalCategoryDescriptionProto => ({
+            category: sc.category,
+            description: sc.description,
+          })),
       }));
     }
 

@@ -21,6 +21,7 @@ import type {
   SignalCategoryDescriptionProto,
 } from "@/generated/aisdr/v1/ai_sdr";
 
+
 import { mapCategoryToProto } from "@/modules/company-research/utils/category-mapping";
 import { FINAL_SCORING_CONSTANTS } from "@/config/constants";
 
@@ -137,7 +138,7 @@ export class FinalScoringStep implements PipelineStepHandler {
       "Active leads loaded for final scoring",
     );
 
-    // ── Step 2: Fetch service catalogs ───────────────────────────────
+    // ── Step 2: Fetch service catalogs (with signal category descriptions) ─
     tools.emitProgress("Loading service catalogs...");
 
     let serviceCatalogsProto: ServiceCatalogProto[] = [];
@@ -155,6 +156,12 @@ export class FinalScoringStep implements PipelineStepHandler {
             budgetMax: sub.budgetMax,
           }),
         ),
+        signalCategoryDescriptions: (cat.signalCategories ?? [])
+          .filter((sc) => sc.enabled && sc.description?.trim())
+          .map((sc): SignalCategoryDescriptionProto => ({
+            category: sc.category,
+            description: sc.description,
+          })),
       }));
     }
 
@@ -183,14 +190,6 @@ export class FinalScoringStep implements PipelineStepHandler {
     tools.log.info(
       { leadsWithInitialScore: initialScoresByLead.size },
       "Initial ICP scores loaded for final scoring",
-    );
-
-    // ── Step 4b: Load signal category descriptions ─────────────────
-    const signalCategoryDescriptions = await this.loadSignalCategoryDescriptions(ctx.companyId);
-
-    tools.log.info(
-      { descriptionsCount: signalCategoryDescriptions.length },
-      "Signal category descriptions loaded for final scoring",
     );
 
     // ── Step 5: Load hiring signals ─────────────────────────────────
@@ -255,7 +254,6 @@ export class FinalScoringStep implements PipelineStepHandler {
             hiringSignalsByLead.get(rl.leadId),
             redditSignalsByLead.get(rl.leadId),
             crunchbaseSignalsByLead.get(rl.leadId),
-            signalCategoryDescriptions,
           );
         }),
       );
@@ -354,7 +352,6 @@ export class FinalScoringStep implements PipelineStepHandler {
     hiringSignals?: HiringSignalProto,
     redditSignals?: RedditSignalProto,
     crunchbaseSignals?: CrunchbaseSignalProto,
-    signalCategoryDescriptions: SignalCategoryDescriptionProto[] = [],
   ): Promise<FinalScoredLead> {
     const fullLead = leadMap.get(leadId);
     const profile = buildLeadProfile(leadId, fullLead);
@@ -368,7 +365,6 @@ export class FinalScoringStep implements PipelineStepHandler {
         hiringSignals,
         redditSignals,
         crunchbaseSignals,
-        signalCategoryDescriptions,
       });
 
       const signalStrength = clampScore(resp.signalStrength);
@@ -660,31 +656,6 @@ export class FinalScoringStep implements PipelineStepHandler {
     }
 
     return byLead;
-  }
-
-  /**
-   * Load company-defined signal category descriptions.
-   * These tell the AI what the company cares about for each signal type
-   * (e.g. "Job postings for Solidity developers..." for HIRING).
-   *
-   * Returns only categories that have a non-empty description.
-   */
-  private async loadSignalCategoryDescriptions(
-    companyId: string | null,
-  ): Promise<SignalCategoryDescriptionProto[]> {
-    if (!companyId) return [];
-
-    const configs = await this.prisma.signalCategoryConfig.findMany({
-      where: { companyId, enabled: true },
-      select: { category: true, description: true },
-    });
-
-    return configs
-      .filter((c) => c.description && c.description.trim().length > 0)
-      .map((c) => ({
-        category: c.category,
-        description: c.description,
-      }));
   }
 
   /**

@@ -19,6 +19,9 @@ export class ServiceCatalogRepository {
         subServices: {
           orderBy: { createdAt: "asc" },
         },
+        signalCategories: {
+          orderBy: { createdAt: "asc" },
+        },
       },
     });
   }

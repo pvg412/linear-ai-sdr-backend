@@ -364,6 +364,8 @@ function buildApifyInput(
   const industryIds = normalizeStringArray(query.industryIds);
   const excludeIndustryIds = normalizeStringArray(query.excludeIndustryIds);
 
+  const companyHeadcount = normalizeStringArray(query.companyHeadcount);
+
   const seniorityLevelIds = normalizeStringArray(query.seniorityLevelIds);
   const excludeSeniorityLevelIds = normalizeStringArray(
     query.excludeSeniorityLevelIds,
@@ -458,6 +460,8 @@ function buildApifyInput(
     excludeIndustryIds: excludeIndustryIds.length
       ? excludeIndustryIds
       : undefined,
+
+    companyHeadcount: companyHeadcount.length ? companyHeadcount : undefined,
 
     firstNames: firstNames.length ? firstNames : undefined,
     lastNames: lastNames.length ? lastNames : undefined,
