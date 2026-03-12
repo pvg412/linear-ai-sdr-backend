@@ -11,8 +11,12 @@ import type { ServiceCatalogRepository } from "@/modules/service-catalog/persist
 import { LEAD_RAG_TYPES } from "@/modules/lead-rag/lead-rag.types";
 import type { LeadRagIndexSyncService } from "@/modules/lead-rag/services/lead-rag-index-sync.service";
 
+import { ICP_TYPES } from "@/modules/icp/icp.types";
+import type { IcpRepository } from "@/modules/icp/persistence/icp.repository";
+
 import { CompanySize as ProtoCompanySize } from "@/generated/aisdr/v1/ai_sdr";
 import type {
+  IcpConfigProto,
   LeadProfileProto,
   ScoreLeadResponse,
   ServiceCatalogProto,
@@ -81,6 +85,8 @@ export class ScoringStep implements PipelineStepHandler {
     private readonly serviceCatalogRepo: ServiceCatalogRepository,
     @inject(LEAD_RAG_TYPES.LeadRagIndexSyncService)
     private readonly ragSync: LeadRagIndexSyncService,
+    @inject(ICP_TYPES.IcpRepository)
+    private readonly icpRepo: IcpRepository,
   ) {}
 
   async run(
@@ -144,6 +150,31 @@ export class ScoringStep implements PipelineStepHandler {
       "Service catalogs loaded",
     );
 
+    // ── Step 2b: Fetch ICP config ────────────────────────────────────
+    let icpConfigProto: IcpConfigProto | undefined;
+
+    if (ctx.companyId) {
+      const icpConfig = await this.icpRepo.getByCompanyId(ctx.companyId);
+      if (icpConfig) {
+        icpConfigProto = {
+          locations: icpConfig.locations,
+          companySizes: icpConfig.companySizes,
+          industries: icpConfig.industries.map((i) => ({
+            industryId: i.industryId,
+            label: i.label,
+          })),
+        };
+        tools.log.info(
+          {
+            icpLocations: icpConfig.locations.length,
+            icpIndustries: icpConfig.industries.length,
+            icpCompanySizes: icpConfig.companySizes.length,
+          },
+          "ICP config loaded for scoring",
+        );
+      }
+    }
+
     if (await tools.checkCancelled()) return cancelledResult();
 
     // ── Step 3: Batch-parallel scoring ───────────────────────────────
@@ -167,7 +198,7 @@ export class ScoringStep implements PipelineStepHandler {
       const batch = batches[batchIdx];
 
       const batchResults = await Promise.all(
-        batch.map((rl) => this.scoreOneLead(rl.leadId, leadMap, serviceCatalogsProto)),
+        batch.map((rl) => this.scoreOneLead(rl.leadId, leadMap, serviceCatalogsProto, icpConfigProto)),
       );
 
       for (const result of batchResults) {
@@ -310,6 +341,7 @@ export class ScoringStep implements PipelineStepHandler {
     leadId: string,
     leadMap: Map<string, Lead>,
     serviceCatalogs: ServiceCatalogProto[],
+    icpConfig: IcpConfigProto | undefined,
   ): Promise<ScoredLead> {
     const fullLead = leadMap.get(leadId);
     const profile = buildLeadProfile(leadId, fullLead);
@@ -319,6 +351,7 @@ export class ScoringStep implements PipelineStepHandler {
         requestId: "",
         lead: profile,
         serviceCatalogs,
+        icpConfig,
       });
 
       return {

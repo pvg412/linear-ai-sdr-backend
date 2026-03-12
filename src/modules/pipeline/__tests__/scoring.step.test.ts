@@ -5,6 +5,7 @@ import { ScoringStep } from "@/modules/pipeline/steps/scoring.step";
 import type { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 import type { ServiceCatalogRepository } from "@/modules/service-catalog/persistence/service-catalog.repository";
 import type { LeadRagIndexSyncService } from "@/modules/lead-rag/services/lead-rag-index-sync.service";
+import type { IcpRepository } from "@/modules/icp/persistence/icp.repository";
 
 import { makeCtx, makeTools } from "./step-test.helpers";
 
@@ -126,19 +127,34 @@ function createMockPrisma(opts?: {
   };
 }
 
+function createMockIcpRepo(icpConfig?: unknown) {
+  return {
+    getByCompanyId: vi.fn().mockResolvedValue(
+      icpConfig ?? {
+        locations: [],
+        companySizes: [],
+        industries: [],
+      },
+    ),
+    upsert: vi.fn().mockResolvedValue(undefined),
+  } as unknown as IcpRepository;
+}
+
 function buildStep(overrides?: {
   aiGrpcClient?: AiGrpcClient;
   serviceCatalogRepo?: ServiceCatalogRepository;
   ragSync?: LeadRagIndexSyncService;
+  icpRepo?: IcpRepository;
   prisma?: ReturnType<typeof createMockPrisma>;
 }) {
   const aiGrpcClient = overrides?.aiGrpcClient ?? createMockAiGrpcClient();
   const serviceCatalogRepo =
     overrides?.serviceCatalogRepo ?? createMockServiceCatalogRepo();
   const ragSync = overrides?.ragSync ?? createMockRagSync();
+  const icpRepo = overrides?.icpRepo ?? createMockIcpRepo();
   const mockPrisma = overrides?.prisma ?? createMockPrisma();
 
-  const step = new ScoringStep(aiGrpcClient, serviceCatalogRepo, ragSync);
+  const step = new ScoringStep(aiGrpcClient, serviceCatalogRepo, ragSync, icpRepo);
 
   Object.defineProperty(step, "prisma", {
     value: mockPrisma,
