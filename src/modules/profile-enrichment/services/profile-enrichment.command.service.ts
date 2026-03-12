@@ -13,6 +13,9 @@ import { FIELD_TO_LEAD_PROPERTY } from "./profile-enrichment.mapper";
 import { EnrichmentFieldStatus, LeadEnrichmentStatus } from "@prisma/client";
 import { LEAD_RAG_TYPES } from "@/modules/lead-rag/lead-rag.types";
 import { LeadRagIndexSyncService } from "@/modules/lead-rag/services/lead-rag-index-sync.service";
+import { BALANCE_TYPES } from "@/modules/balance/balance.types";
+import type { BillingService } from "@/modules/balance/services/billing.service";
+import { BILLING } from "@/config/billing.constants";
 
 export interface RequestEnrichmentResult {
   enrichmentRequestId: string;
@@ -45,6 +48,9 @@ export class ProfileEnrichmentCommandService {
     >,
     @inject(LEAD_RAG_TYPES.LeadRagIndexSyncService)
     private readonly leadRagIndexSync: LeadRagIndexSyncService,
+
+    @inject(BALANCE_TYPES.BillingService)
+    private readonly billingService: BillingService,
   ) { }
 
   async requestEnrichment(
@@ -78,7 +84,7 @@ export class ProfileEnrichmentCommandService {
         throw new UserFacingError({
           code: "CONFLICT",
           userMessage:
-            "There is already a pending enrichment request for this lead. Use force=true to override.",
+            "There is already a pending enrichment request for this lead.",
         });
       }
 
@@ -86,13 +92,19 @@ export class ProfileEnrichmentCommandService {
       await this.repository.cancelPendingEnrichment(existingRequest.id);
     }
 
-    // 3. Create new enrichment request
+    // 3. Billing — pre-check BEFORE creating DB record to avoid orphaned records.
+    await this.billingService.ensureSufficientBalance(userId, BILLING.PROFILE_ENRICHMENT_CENTS);
+
+    // 4. Create new enrichment request
     const enrichmentRequest = await this.repository.createEnrichmentRequest({
       leadId,
       requestedById: userId,
     });
 
-    // 4. Add job to queue
+    // Charge immediately after record creation, before enqueuing.
+    await this.billingService.chargeForProfileEnrichment(userId);
+
+    // 5. Add job to queue
     await this.queue.add(
       "profileEnrichment.run",
       {

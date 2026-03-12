@@ -4,6 +4,7 @@ import { BALANCE_TYPES } from "./balance.types";
 import { BalanceRepository } from "./persistence/balance.repository";
 import { BalanceCommandService } from "./services/balance.command.service";
 import { BalanceQueryService } from "./services/balance.query.service";
+import { BillingService } from "./services/billing.service";
 
 export function registerBalanceModule(container: Container): void {
   container
@@ -19,5 +20,10 @@ export function registerBalanceModule(container: Container): void {
   container
     .bind<BalanceQueryService>(BALANCE_TYPES.BalanceQueryService)
     .to(BalanceQueryService)
+    .inSingletonScope();
+
+  container
+    .bind<BillingService>(BALANCE_TYPES.BillingService)
+    .to(BillingService)
     .inSingletonScope();
 }

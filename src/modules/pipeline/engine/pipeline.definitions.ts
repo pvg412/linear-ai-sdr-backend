@@ -37,6 +37,7 @@ export const DEFAULT_COMPANY_PIPELINE: PipelineDefinition = {
       config: {
         includeCompanyResearch: true,
         includeProfileEnrichment: true,
+        includeLinkedinPosts: true,
       },
       timeoutMs: 10 * 60 * 1000, // 10 min
     },

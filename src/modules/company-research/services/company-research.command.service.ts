@@ -13,6 +13,9 @@ import {
 } from "@/infra/queue/company-research/company-research.queue";
 import type { CompanyResearchQuery } from "../schemas/company-research.schemas";
 import { CompanyResearchStatus } from "@prisma/client";
+import { BALANCE_TYPES } from "@/modules/balance/balance.types";
+import type { BillingService } from "@/modules/balance/services/billing.service";
+import { BILLING } from "@/config/billing.constants";
 
 @injectable()
 export class CompanyResearchCommandService {
@@ -21,6 +24,8 @@ export class CompanyResearchCommandService {
     private readonly repository: CompanyResearchRepository,
     @inject(QUEUE_TYPES.Redis)
     private readonly redis: Redis,
+    @inject(BALANCE_TYPES.BillingService)
+    private readonly billingService: BillingService,
   ) { }
 
   async requestCompanyResearch(
@@ -64,7 +69,7 @@ export class CompanyResearchCommandService {
       throw new UserFacingError({
         code: "CONFLICT",
         userMessage:
-          "There is already a pending research request for this lead. Use force=true to override.",
+          "There is already a pending research request for this lead.",
       });
     }
 
@@ -81,6 +86,14 @@ export class CompanyResearchCommandService {
       companyDomains.push(website.url);
     }
 
+    // Billing — pre-check BEFORE creating DB record to avoid orphaned records.
+    // Worst-case estimate: flat research fee + max possible LinkedIn post charges.
+    const willFetchLinkedinPosts = options.includeLinkedinPosts && !!lead.companyLinkedinUrl;
+    const worstCaseCents =
+      BILLING.COMPANY_RESEARCH_CENTS +
+      (willFetchLinkedinPosts ? options.maxResults * BILLING.LINKEDIN_POSTS_PER_POST_CENTS : 0);
+    await this.billingService.ensureSufficientBalance(userId, worstCaseCents);
+
     // Create research record
     const research = await this.repository.createCompanyResearch({
       leadId: lead.id,
@@ -90,6 +103,9 @@ export class CompanyResearchCommandService {
       recency: options.recency ?? null,
       maxResults: options.maxResults,
     });
+
+    // Charge the flat research fee immediately before enqueuing.
+    await this.billingService.chargeForCompanyResearch(userId);
 
     // Queue the job
     const queue = createCompanyResearchQueue(this.redis);

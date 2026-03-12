@@ -6,6 +6,7 @@ import { mapApifyResponseToFieldChanges } from "./profile-enrichment.mapper";
 import type { ProfileEnrichmentJobData } from "@/infra/queue/profile-enrichment/profile-enrichment.queue";
 import type { LoggerLike } from "@/infra/observability";
 import { LeadEnrichmentStatus } from "@prisma/client";
+import { UserFacingError } from "@/infra/userFacingError";
 
 @injectable()
 export class ProfileEnrichmentRunnerService {
@@ -90,17 +91,10 @@ export class ProfileEnrichmentRunnerService {
       );
 
       if (fieldChanges.length === 0) {
-        // No changes to review - mark as completed
-        lg.info({}, "No field changes detected, marking as completed");
-
-        await this.repository.updateEnrichmentRequestStatus(
-          enrichmentRequestId,
-          LeadEnrichmentStatus.COMPLETED,
-          {
-            errorMessage: "Profile is already up to date",
-          },
-        );
-        return;
+        throw new UserFacingError({
+          code: "PROFILE_ALREADY_UP_TO_DATE",
+          userMessage: "Profile is already up to date. No new information was found.",
+        });
       }
 
       // 6. Create field change records
@@ -119,6 +113,23 @@ export class ProfileEnrichmentRunnerService {
 
       lg.info({}, "Profile enrichment job completed, awaiting review");
     } catch (error) {
+      // "Already up to date" is a successful outcome, not a failure.
+      // Mark as COMPLETED with the user-facing message so the frontend can
+      // display it, and do NOT re-throw (prevents BullMQ retries).
+      if (
+        error instanceof UserFacingError &&
+        error.code === "PROFILE_ALREADY_UP_TO_DATE"
+      ) {
+        lg.info({}, "Profile enrichment: no changes detected, profile is up to date");
+
+        await this.repository.updateEnrichmentRequestStatus(
+          enrichmentRequestId,
+          LeadEnrichmentStatus.COMPLETED,
+          { errorMessage: error.userMessage },
+        );
+        return;
+      }
+
       lg.error({ err: error }, "Profile enrichment job failed");
 
       await this.repository.updateEnrichmentRequestStatus(

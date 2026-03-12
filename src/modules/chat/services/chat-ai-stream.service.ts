@@ -36,6 +36,9 @@ import { CHAT_CONSTANTS } from "@/config/constants";
 import { LEAD_CONVERSATIONS_TYPES } from "@/modules/lead-conversations/lead-conversations.types";
 import type { LeadConversationsRepository } from "@/modules/lead-conversations/persistence/lead-conversations.repository";
 import type { OutreachCadenceService } from "@/modules/lead-conversations/services/outreach-cadence.service";
+import { BALANCE_TYPES } from "@/modules/balance/balance.types";
+import type { BillingService } from "@/modules/balance/services/billing.service";
+import { BILLING } from "@/config/billing.constants";
 
 import {
   type Citation,
@@ -81,11 +84,19 @@ export class ChatAiStreamService {
 
     @inject(LEAD_CONVERSATIONS_TYPES.OutreachCadenceService)
     private readonly cadenceService: OutreachCadenceService,
+
+    @inject(BALANCE_TYPES.BillingService)
+    private readonly billingService: BillingService,
   ) { }
 
   async streamAssistantReply(input: StreamAssistantInput): Promise<void> {
     const requestId = randomUUID();
     const workspaceId = input.userId;
+
+    // 0) Billing — pre-check + charge before any AI work.
+    //    Covers: assistant.stream, outreach.prompt.apply, outreach.continue (per lead).
+    await this.billingService.ensureSufficientBalance(input.userId, BILLING.AI_CHAT_STREAM_CENTS);
+    await this.billingService.chargeForAiStream(input.userId);
 
     // 1) persist USER message (skip if we have outreach context - it already has USER JSON message)
     let userMsg: { id: string; createdAt: string | Date } | null = null;

@@ -22,6 +22,8 @@ import {
 import { getPrisma } from "@/infra/prisma";
 import { LEAD_CONVERSATIONS_TYPES } from "@/modules/lead-conversations/lead-conversations.types";
 import type { LeadConversationsRepository } from "@/modules/lead-conversations/persistence/lead-conversations.repository";
+import { BALANCE_TYPES } from "@/modules/balance/balance.types";
+import type { BillingService } from "@/modules/balance/services/billing.service";
 
 const env = loadEnv();
 
@@ -42,6 +44,9 @@ export class PipelineCommandService {
     private readonly queue: Queue<PipelineRunJobData, void, PipelineRunJobName>,
     @inject(LEAD_CONVERSATIONS_TYPES.LeadConversationsRepository)
     private readonly conversationsRepo: LeadConversationsRepository,
+
+    @inject(BALANCE_TYPES.BillingService)
+    private readonly billingService: BillingService,
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -118,6 +123,10 @@ export class PipelineCommandService {
         userMessage: `Too many concurrent pipeline runs (${runningCount}/${maxConcurrent}). Please wait for an existing run to finish.`,
       });
     }
+
+    /* 6b. Billing — pre-check + charge before creating the run record */
+    await this.billingService.ensureSufficientBalance(userId, 10_000);
+    await this.billingService.chargeForPipeline(userId);
 
     /* 7. Create PipelineRun + PipelineStepRun records */
     const defaults = definition.defaults;

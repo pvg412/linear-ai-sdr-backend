@@ -35,6 +35,9 @@ import { stripMentions } from "../utils/folder-mentions";
 import { LEAD_CONVERSATIONS_TYPES } from "@/modules/lead-conversations/lead-conversations.types";
 import type { LeadConversationsRepository } from "@/modules/lead-conversations/persistence/lead-conversations.repository";
 import type { OutreachCadenceService } from "@/modules/lead-conversations/services/outreach-cadence.service";
+import { BALANCE_TYPES } from "@/modules/balance/balance.types";
+import type { BillingService } from "@/modules/balance/services/billing.service";
+import { BILLING } from "@/config/billing.constants";
 
 type Json = Prisma.InputJsonValue;
 
@@ -72,6 +75,9 @@ export class ChatCommandService {
 
     @inject(LEAD_CONVERSATIONS_TYPES.OutreachCadenceService)
     private readonly outreachCadenceService: OutreachCadenceService,
+
+    @inject(BALANCE_TYPES.BillingService)
+    private readonly billingService: BillingService,
   ) { }
 
   async createThread(
@@ -242,11 +248,16 @@ export class ChatCommandService {
       authorUserId: userId,
     });
 
+    // Billing: pre-check balance before the gRPC call, charge after success.
+    await this.billingService.ensureSufficientBalance(userId, BILLING.PROMPT_PARSE_CENTS);
+
     const parsed = await this.chatPromptParser.parsePrompt({
       text: dto.text,
       provider,
       kind,
     });
+
+    await this.billingService.chargeForPromptParse(userId, "lead-search");
 
     const limit = parsed.suggestedLimit ?? 100;
 
@@ -447,6 +458,9 @@ export class ChatCommandService {
       select: { customInstructions: true },
     });
 
+    // Billing: pre-check balance before the gRPC call, charge after success.
+    await this.billingService.ensureSufficientBalance(userId, BILLING.PROMPT_PARSE_CENTS);
+
     console.log("[parseOutreachPrompt] calling chatPromptParser.parseOutreachContext", {
       suggestedChannel: dto.suggestedChannel,
       leadId: directory.firstLeadId,
@@ -464,6 +478,8 @@ export class ChatCommandService {
       customInstructions: user?.customInstructions ?? undefined,
       debug: false,
     });
+
+    await this.billingService.chargeForPromptParse(userId, "outreach");
 
     console.log("[parseOutreachPrompt] received from parser", {
       parsed,

@@ -20,6 +20,8 @@ import { LeadSearchLeadPersisterService } from "@/modules/lead-search/services/l
 import { LeadSearchNotifierService } from "@/modules/lead-search/services/lead-search.notifier.service";
 import { withLeadSearchAsyncContext } from "@/infra/async-context/leadSearchAsyncContext";
 import { getUserFacingMessage } from "@/infra/userFacingError";
+import { BALANCE_TYPES } from "@/modules/balance/balance.types";
+import type { BillingService } from "@/modules/balance/services/billing.service";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -51,6 +53,9 @@ export class LeadDbLeadSearchHandler {
 
     @inject(LEAD_SEARCH_TYPES.LeadSearchNotifierService)
     private readonly notifier: LeadSearchNotifierService,
+
+    @inject(BALANCE_TYPES.BillingService)
+    private readonly billingService: BillingService,
   ) {}
 
   async run(
@@ -249,6 +254,14 @@ export class LeadDbLeadSearchHandler {
       );
 
       const total = insertedLeadIds.length;
+
+      // Billing: charge per lead after successful persistence.
+      if (triggeredById) {
+        await this.billingService.chargeForLeadGeneration(triggeredById, total, lg);
+      } else {
+        lg.warn({ leadSearchId }, "LeadDbLeadSearchHandler: triggeredById is undefined, skipping billing");
+      }
+
       const status =
         total > 0 ? LeadSearchStatus.DONE : LeadSearchStatus.DONE_NO_RESULTS;
 

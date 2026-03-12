@@ -10,6 +10,8 @@ import type { CompanyResearchItemCategory } from "@prisma/client";
 import { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.types";
 import { mapCategoryToProto } from "../utils/category-mapping";
+import { BALANCE_TYPES } from "@/modules/balance/balance.types";
+import type { BillingService } from "@/modules/balance/services/billing.service";
 
 @injectable()
 export class CompanyResearchRunnerService {
@@ -22,6 +24,9 @@ export class CompanyResearchRunnerService {
     private readonly linkedinPostsClient: LinkedinPostsApifyClient,
     @inject(AI_GRPC_CLIENT_TYPES.AiGrpcClient)
     private readonly aiClient: AiGrpcClient,
+
+    @inject(BALANCE_TYPES.BillingService)
+    private readonly billingService: BillingService,
   ) { }
 
   async processJob(
@@ -163,6 +168,17 @@ export class CompanyResearchRunnerService {
                 category: item.category.toUpperCase() as CompanyResearchItemCategory,
                 source: "linkedin",
               });
+            }
+
+            // Billing: charge per LinkedIn post actually returned by Apify.
+            // Post-hoc, error-safe — Apify cost already incurred.
+            const linkedinPostsCount = linkedinResult.items.length;
+            if (jobData.triggeredById && linkedinPostsCount > 0) {
+              await this.billingService.chargeForLinkedinPosts(
+                jobData.triggeredById,
+                linkedinPostsCount,
+                lg,
+              );
             }
           }
         } else {

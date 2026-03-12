@@ -17,6 +17,8 @@ import { LeadSearchRunRepository } from "@/modules/lead-search/persistence/lead-
 import { LeadSearchLeadPersisterService } from "@/modules/lead-search/services/lead-search.lead-persister.service";
 import { LeadSearchNotifierService } from "@/modules/lead-search/services/lead-search.notifier.service";
 import { resolveScrapeQuery } from "@/modules/lead-search/services/scraper-query.resolver";
+import { BALANCE_TYPES } from "@/modules/balance/balance.types";
+import type { BillingService } from "@/modules/balance/services/billing.service";
 
 import type {
   LeadSearchJobData,
@@ -49,6 +51,9 @@ export class ScraperStepLeadSearchHandler {
 
     @inject(LEAD_SEARCH_TYPES.LeadSearchNotifierService)
     private readonly notifier: LeadSearchNotifierService,
+
+    @inject(BALANCE_TYPES.BillingService)
+    private readonly billingService: BillingService,
   ) { }
 
   async process(
@@ -161,6 +166,7 @@ export class ScraperStepLeadSearchHandler {
       leadSearchRunRepository: this.leadSearchRunRepository,
       persister: this.persister,
       notifier: this.notifier,
+      billingService: this.billingService,
     };
 
     try {

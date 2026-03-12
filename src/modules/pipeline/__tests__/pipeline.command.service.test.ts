@@ -8,6 +8,7 @@ import type { PipelineExecutor } from "@/modules/pipeline/engine/pipeline.execut
 import type { PipelineBroadcaster } from "@/modules/pipeline/engine/pipeline.broadcaster";
 import type { PipelineStepRegistry } from "@/modules/pipeline/engine/pipeline.registry";
 import type { LeadConversationsRepository } from "@/modules/lead-conversations/persistence/lead-conversations.repository";
+import type { BillingService } from "@/modules/balance/services/billing.service";
 
 /* ------------------------------------------------------------------ */
 /*  Mock factories                                                     */
@@ -85,6 +86,15 @@ function createMockConversationsRepo() {
   } as unknown as LeadConversationsRepository;
 }
 
+function createMockBillingService() {
+  return {
+    ensureSufficientBalance: vi.fn().mockResolvedValue(undefined),
+    chargeForPipeline: vi.fn().mockResolvedValue(undefined),
+    chargeForPromptParse: vi.fn().mockResolvedValue(undefined),
+    chargeForLeadGeneration: vi.fn().mockResolvedValue(undefined),
+  } as unknown as BillingService;
+}
+
 function createMockPrisma() {
   return {
     user: {
@@ -133,6 +143,7 @@ describe("PipelineCommandService", () => {
   let queue: ReturnType<typeof createMockQueue>;
   let conversationsRepo: ReturnType<typeof createMockConversationsRepo>;
   let mockPrisma: ReturnType<typeof createMockPrisma>;
+  let billingService: ReturnType<typeof createMockBillingService>;
 
   beforeEach(() => {
     repo = createMockRepo();
@@ -142,6 +153,7 @@ describe("PipelineCommandService", () => {
     queue = createMockQueue();
     conversationsRepo = createMockConversationsRepo();
     mockPrisma = createMockPrisma();
+    billingService = createMockBillingService();
 
     service = new PipelineCommandService(
       repo,
@@ -150,6 +162,7 @@ describe("PipelineCommandService", () => {
       registry as unknown as PipelineStepRegistry,
       queue as never,
       conversationsRepo,
+      billingService as unknown as BillingService,
     );
 
     /* Override the prisma field initialised via getPrisma() */

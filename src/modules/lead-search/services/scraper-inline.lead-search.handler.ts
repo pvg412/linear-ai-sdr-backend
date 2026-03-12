@@ -18,6 +18,8 @@ import { LeadSearchRunRepository } from "@/modules/lead-search/persistence/lead-
 import { LeadSearchLeadPersisterService } from "@/modules/lead-search/services/lead-search.lead-persister.service";
 import { LeadSearchNotifierService } from "@/modules/lead-search/services/lead-search.notifier.service";
 import { resolveScrapeQuery } from "@/modules/lead-search/services/scraper-query.resolver";
+import { BALANCE_TYPES } from "@/modules/balance/balance.types";
+import type { BillingService } from "@/modules/balance/services/billing.service";
 
 @injectable()
 export class ScraperInlineLeadSearchHandler {
@@ -36,6 +38,9 @@ export class ScraperInlineLeadSearchHandler {
 
     @inject(LEAD_SEARCH_TYPES.LeadSearchNotifierService)
     private readonly notifier: LeadSearchNotifierService,
+
+    @inject(BALANCE_TYPES.BillingService)
+    private readonly billingService: BillingService,
   ) {}
 
   async run(
@@ -192,6 +197,14 @@ export class ScraperInlineLeadSearchHandler {
         );
 
         const total = insertedLeadIds.length;
+
+        // Billing: charge per lead after successful persistence.
+        if (triggeredById) {
+          await this.billingService.chargeForLeadGeneration(triggeredById, total, lg);
+        } else {
+          lg.warn({ leadSearchId }, "ScraperInlineLeadSearchHandler: triggeredById is undefined, skipping billing");
+        }
+
         const doneStatus =
           total > 0 ? LeadSearchStatus.DONE : LeadSearchStatus.DONE_NO_RESULTS;
 

@@ -11,6 +11,8 @@ import type { ChatControllerDeps } from "./controller/chat.controller.types";
 import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";
 import { RealtimeHub } from "@/infra/realtime/realtimeHub";
 import { ChatAiStreamService } from "./services/chat-ai-stream.service";
+import { BALANCE_TYPES } from "@/modules/balance/balance.types";
+import type { BillingService } from "@/modules/balance/services/billing.service";
 
 const deps: ChatControllerDeps = {
   queryService: container.get<ChatQueryService>(CHAT_TYPES.ChatQueryService),
@@ -21,6 +23,7 @@ const deps: ChatControllerDeps = {
   aiStreamService: container.get<ChatAiStreamService>(
     CHAT_TYPES.ChatAiStreamService,
   ),
+  billingService: container.get<BillingService>(BALANCE_TYPES.BillingService),
 };
 
 export function registerChatRoutes(app: FastifyInstance): void {

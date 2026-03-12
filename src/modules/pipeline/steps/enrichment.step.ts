@@ -105,6 +105,7 @@ export class EnrichmentStep implements PipelineStepHandler {
 
     const includeCompanyResearch = config.includeCompanyResearch !== false;
     const includeProfileEnrichment = config.includeProfileEnrichment !== false;
+    const includeLinkedinPosts = config.includeLinkedinPosts !== false;
 
     tools.emitProgress(`Enriching ${runLeads.length} lead(s)...`, { total: runLeads.length });
 
@@ -124,7 +125,7 @@ export class EnrichmentStep implements PipelineStepHandler {
 
       const batchResults = await Promise.all(
         batch.map((rl) =>
-          this.enrichOneLead(rl.lead, ctx.createdById, includeProfileEnrichment, includeCompanyResearch, tools),
+          this.enrichOneLead(rl.lead, ctx.createdById, includeProfileEnrichment, includeCompanyResearch, includeLinkedinPosts, tools),
         ),
       );
 
@@ -301,6 +302,7 @@ export class EnrichmentStep implements PipelineStepHandler {
     userId: string,
     includeProfileEnrichment: boolean,
     includeCompanyResearch: boolean,
+    includeLinkedinPosts: boolean,
     tools: PipelineTools,
   ): Promise<LeadEnrichmentResult> {
     const result: LeadEnrichmentResult = {
@@ -329,7 +331,7 @@ export class EnrichmentStep implements PipelineStepHandler {
         const resp = await this.companyResearch.requestCompanyResearch(userId, lead.id, {
           recency: "month",
           maxResults: 5,
-          includeLinkedinPosts: false,
+          includeLinkedinPosts,
         });
         result.companyResearchEnqueued = true;
         result.companyResearchId = resp.companyResearchId;

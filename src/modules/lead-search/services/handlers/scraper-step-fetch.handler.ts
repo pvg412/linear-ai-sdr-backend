@@ -8,6 +8,7 @@ import type { LeadSearchRepository } from "@/modules/lead-search/persistence/lea
 import type { LeadSearchRunRepository } from "@/modules/lead-search/persistence/lead-search-run.repository";
 import type { LeadSearchLeadPersisterService } from "@/modules/lead-search/services/lead-search.lead-persister.service";
 import type { LeadSearchNotifierService } from "@/modules/lead-search/services/lead-search.notifier.service";
+import type { BillingService } from "@/modules/balance/services/billing.service";
 
 import {
   canComputeApifyResume,
@@ -24,6 +25,7 @@ export async function handleFetchStep(
     leadSearchRunRepository: LeadSearchRunRepository;
     persister: LeadSearchLeadPersisterService;
     notifier: LeadSearchNotifierService;
+    billingService: BillingService;
   },
 ): Promise<StepResult> {
   const {
@@ -38,7 +40,7 @@ export async function handleFetchStep(
     t0,
   } = ctx;
 
-  const { leadSearchRepository, leadSearchRunRepository, persister, notifier } =
+  const { leadSearchRepository, leadSearchRunRepository, persister, notifier, billingService } =
     deps;
 
   const fetchState = job.data.scraper as LeadSearchScraperJobState;
@@ -144,6 +146,14 @@ export async function handleFetchStep(
   });
 
   await leadSearchRepository.markDone(leadSearchId, total);
+
+  // Billing: charge per lead after successful persistence.
+  const triggeredByIdForBilling = job.data.triggeredById ?? null;
+  if (triggeredByIdForBilling) {
+    await billingService.chargeForLeadGeneration(triggeredByIdForBilling, total, lg);
+  } else {
+    lg.warn({ leadSearchId }, "ScraperStepFetchHandler: triggeredById is undefined, skipping billing");
+  }
 
   const doneStatus =
     total > 0 ? LeadSearchStatus.DONE : LeadSearchStatus.DONE_NO_RESULTS;
