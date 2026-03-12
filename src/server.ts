@@ -27,6 +27,7 @@ import { registerIcpRoutes } from "./modules/icp/icp.controller";
 import { registerPipelineRoutes } from "./modules/pipeline/pipeline.controller";
 import { registerAdminRoutes } from "./modules/admin/admin.controller";
 import { initAdminModule } from "./modules/admin/admin.module";
+import { registerBalanceRoutes } from "./modules/balance/balance.controller";
 import { UserFacingError } from "./infra/userFacingError";
 
 function getStatusCodeFromErrorCode(code: string): number {
@@ -169,6 +170,7 @@ export async function buildServer() {
   registerIcpRoutes(app);
   registerPipelineRoutes(app);
   registerAdminRoutes(app);
+  registerBalanceRoutes(app);
 
   return { app, env };
 }

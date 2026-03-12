@@ -202,6 +202,12 @@ model User {
   // Custom AI instructions for outreach personalization
   customInstructions String? @db.VarChar(500)
 
+  // Balance (stored in cents to avoid floating-point issues; display as dollars)
+  // WARNING: never update balanceCents directly — use BalanceCommandService.adjustBalance() only
+  balanceCents Int @default(0)
+
+  balanceAuditLogs BalanceAuditLog[]
+
   // Company association (self-referencing)
   companyId String?
   company   User?   @relation("CompanyMembers", fields: [companyId], references: [id])
@@ -235,6 +241,29 @@ model User {
   @@index([role])
   @@index([isActive])
   @@index([companyId])
+}
+
+// Audit trail for every balance change. Immutable — rows are never updated or deleted.
+model BalanceAuditLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Signed delta in cents: positive = credit, negative = debit
+  amountCents   Int
+  balanceBefore Int
+  balanceAfter  Int
+
+  // Human-readable reason for the change (e.g. "Manual top-up by admin")
+  reason String @db.VarChar(500)
+
+  // ID of the user (admin) who performed the operation
+  performedBy String
+
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model LeadSearch {

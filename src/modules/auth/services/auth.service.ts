@@ -12,7 +12,15 @@ export type AuthUser = {
   role: UserRole;
   companyName?: string | null;
   customInstructions?: string | null;
+  /** Balance in cents. Always present; use balanceDollars for display. */
+  balanceCents: number;
+  /** Balance formatted as a dollar string, e.g. "12.50". */
+  balanceDollars: string;
 };
+
+function centsToDollars(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
 
 export class AuthService {
   private readonly prisma = getPrisma();
@@ -55,7 +63,13 @@ export class AuthService {
     return {
       accessToken,
       expiresInSeconds,
-      user: { id: user.id, email: user.email, role: user.role },
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        balanceCents: user.balanceCents,
+        balanceDollars: centsToDollars(user.balanceCents),
+      },
     };
   }
 
@@ -71,7 +85,15 @@ export class AuthService {
         role: UserRole.ADMIN,
       },
     });
-    return { user: { id: user.id, email: user.email, role: user.role } };
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        balanceCents: user.balanceCents,
+        balanceDollars: centsToDollars(user.balanceCents),
+      },
+    };
   }
 
   async createSaleManager(
@@ -88,7 +110,15 @@ export class AuthService {
         ...(companyId && { companyId }),
       },
     });
-    return { user: { id: user.id, email: user.email, role: user.role } };
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        balanceCents: user.balanceCents,
+        balanceDollars: centsToDollars(user.balanceCents),
+      },
+    };
   }
 
   async createCompany(
@@ -105,7 +135,16 @@ export class AuthService {
         companyName,
       },
     });
-    return { user: { id: user.id, email: user.email, role: user.role, companyName: user.companyName } };
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        companyName: user.companyName,
+        balanceCents: user.balanceCents,
+        balanceDollars: centsToDollars(user.balanceCents),
+      },
+    };
   }
 
   async listCompanySaleManagers(
@@ -225,6 +264,8 @@ export class AuthService {
       role: user.role,
       companyName: user.companyName,
       customInstructions: user.customInstructions,
+      balanceCents: user.balanceCents,
+      balanceDollars: centsToDollars(user.balanceCents),
     };
   }
 
@@ -254,6 +295,8 @@ export class AuthService {
       email: updatedUser.email,
       role: updatedUser.role,
       companyName: updatedUser.companyName,
+      balanceCents: updatedUser.balanceCents,
+      balanceDollars: centsToDollars(updatedUser.balanceCents),
     };
   }
 
@@ -280,6 +323,8 @@ export class AuthService {
       role: updatedUser.role,
       companyName: updatedUser.companyName,
       customInstructions: updatedUser.customInstructions,
+      balanceCents: updatedUser.balanceCents,
+      balanceDollars: centsToDollars(updatedUser.balanceCents),
     };
   }
 

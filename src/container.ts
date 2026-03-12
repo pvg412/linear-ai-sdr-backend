@@ -24,6 +24,7 @@ import { registerHiringSignalsModule } from "./capabilities/hiring-signals/hirin
 import { registerRedditSignalsModule } from "./capabilities/reddit-signals/reddit-signals.module";
 import { registerCrunchbaseSignalsModule } from "./capabilities/crunchbase-signals/crunchbase-signals.module";
 import { registerPipelineModule } from "./modules/pipeline/pipeline.module";
+import { registerBalanceModule } from "./modules/balance/balance.module";
 
 const container = new Container();
 
@@ -50,5 +51,6 @@ registerHiringSignalsModule(container);
 registerRedditSignalsModule(container);
 registerCrunchbaseSignalsModule(container);
 registerPipelineModule(container);
+registerBalanceModule(container);
 
 export { container };
