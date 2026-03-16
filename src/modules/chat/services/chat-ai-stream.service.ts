@@ -91,7 +91,9 @@ export class ChatAiStreamService {
 
   async streamAssistantReply(input: StreamAssistantInput): Promise<void> {
     const requestId = randomUUID();
-    const workspaceId = input.userId;
+    // Use companyId as workspace so all users under the same company account
+    // (COMPANY + SALE_MANAGERs) share the same RAG/ChromaDB namespace.
+    const workspaceId = input.companyId ?? input.userId;
 
     // 0) Billing — pre-check + charge before any AI work.
     //    Covers: assistant.stream, outreach.prompt.apply, outreach.continue (per lead).
@@ -653,6 +655,7 @@ export class ChatAiStreamService {
    */
   async continueOutreach(input: {
     userId: string;
+    companyId?: string | null;
     threadId: string;
     directoryId: string;
     currentLeadId?: string;
@@ -731,6 +734,7 @@ export class ChatAiStreamService {
     // Use context from frontend (first apply) or defaults
     await this.streamAssistantReply({
       userId: input.userId,
+      companyId: input.companyId,
       threadId: input.threadId,
       text: input.outreachContext?.userPrompt ?? "", // Use saved userPrompt or empty
       clientMessageId: undefined,

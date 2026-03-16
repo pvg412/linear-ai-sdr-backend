@@ -1,4 +1,4 @@
-import { injectable, multiInject, optional } from "inversify";
+import { injectable, multiInject, optional, inject } from "inversify";
 import type { PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "@/infra/prisma";
@@ -8,6 +8,11 @@ import { REDDIT_SIGNAL_TYPES } from "@/capabilities/reddit-signals/reddit-signal
 import type { RedditSignalProvider } from "@/capabilities/reddit-signals/reddit-signal-provider.dto";
 import { CRUNCHBASE_SIGNAL_TYPES } from "@/capabilities/crunchbase-signals/crunchbase-signals.types";
 import type { CrunchbaseSignalProvider } from "@/capabilities/crunchbase-signals/crunchbase-signal-provider.dto";
+import { COMPANY_RESEARCH_TYPES } from "@/modules/company-research/company-research.types";
+import type { PerplexityClient } from "@/modules/company-research/services/perplexity.client";
+import type { LinkedinPostsApifyClient } from "@/modules/company-research/services/linkedin-posts-apify.client";
+import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.types";
+import type { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 
 import type { PipelineStepHandler } from "./step.interface";
 import type {
@@ -20,6 +25,7 @@ import { buildCompanyGroups, pluralise } from "./signals/signals.helpers";
 import { HiringSignalProcessor } from "./signals/hiring-signal.processor";
 import { RedditSignalProcessor } from "./signals/reddit-signal.processor";
 import { CrunchbaseSignalProcessor } from "./signals/crunchbase-signal.processor";
+import { CompanyResearchProcessor } from "./signals/company-research.processor";
 import {
   ALL_SIGNAL_CATEGORIES,
   SIGNAL_CATEGORY_PHASE_MAP,
@@ -27,14 +33,16 @@ import {
 } from "./signals/signal-category.map";
 
 /**
- * Signals step — hiring + Reddit + Crunchbase signal detection.
+ * Signals step — hiring + Reddit + Crunchbase signal detection
+ * + company research (Perplexity AI news + LinkedIn posts).
  *
  * For each unique company represented in the active pipeline leads,
  * queries each configured signal provider for hiring data, Reddit
- * presence, and Crunchbase company data. Results are stored in
- * `HiringSignal` / `RedditSignal` / `CrunchbaseSignal` tables for
- * downstream use (e.g. final-scoring can load them to compute a
- * signal-strength score).
+ * presence, Crunchbase company data, and company research (Perplexity
+ * + optional LinkedIn posts via Apify).
+ *
+ * Results are stored in their respective DB tables for downstream use
+ * (e.g. final-scoring loads them to compute a signal-strength score).
  *
  * Design constraints:
  * - All emitProgress messages are provider-agnostic (no brand names).
@@ -60,23 +68,58 @@ export class SignalsStep implements PipelineStepHandler {
     @multiInject(CRUNCHBASE_SIGNAL_TYPES.CrunchbaseSignalProvider)
     @optional()
     private readonly crunchbaseProviders: CrunchbaseSignalProvider[],
+
+    @inject(COMPANY_RESEARCH_TYPES.PerplexityClient)
+    @optional()
+    private readonly perplexityClient: PerplexityClient | null,
+
+    @inject(COMPANY_RESEARCH_TYPES.LinkedinPostsApifyClient)
+    @optional()
+    private readonly linkedinPostsClient: LinkedinPostsApifyClient | null,
+
+    @inject(AI_GRPC_CLIENT_TYPES.AiGrpcClient)
+    @optional()
+    private readonly aiGrpcClient: AiGrpcClient | null,
   ) {
     this.hiringProviders = hiringProviders ?? [];
     this.redditProviders = redditProviders ?? [];
     this.crunchbaseProviders = crunchbaseProviders ?? [];
+    this.perplexityClient = perplexityClient ?? null;
+    this.linkedinPostsClient = linkedinPostsClient ?? null;
+    this.aiGrpcClient = aiGrpcClient ?? null;
   }
 
   async run(
     ctx: PipelineContext,
-    _config: Record<string, unknown>,
+    config: Record<string, unknown>,
     tools: PipelineTools,
   ): Promise<PipelineStepResult> {
     const enabledHiring = this.hiringProviders.filter((p) => p.isEnabled());
     const enabledReddit = this.redditProviders.filter((p) => p.isEnabled());
     const enabledCrunchbase = this.crunchbaseProviders.filter((p) => p.isEnabled());
 
-    // ── 1. Skip fast if no providers are configured ──────────────────
-    if (enabledHiring.length === 0 && enabledReddit.length === 0 && enabledCrunchbase.length === 0) {
+    // ── Company research config flags ────────────────────────────────
+    const includeCompanyResearch = config.includeCompanyResearch !== false;
+    const includeLinkedinPosts = config.includeLinkedinPosts !== false;
+    const perplexityRecency = (config.perplexityRecency as "day" | "week" | "month" | "year") ?? "month";
+    const perplexityMaxResults = typeof config.perplexityMaxResults === "number" ? config.perplexityMaxResults : 5;
+
+    // Extract to locals so TypeScript can narrow nullability in the ternary below
+    const perplexityClient = this.perplexityClient;
+    const aiGrpcClient = this.aiGrpcClient;
+
+    const companyResearchEnabled =
+      includeCompanyResearch &&
+      !!perplexityClient &&
+      !!aiGrpcClient;
+
+    // ── 1. Skip fast if no providers/research configured ────────────
+    if (
+      enabledHiring.length === 0 &&
+      enabledReddit.length === 0 &&
+      enabledCrunchbase.length === 0 &&
+      !companyResearchEnabled
+    ) {
       tools.log.info(
         { pipelineRunId: ctx.pipelineRunId },
         "Signals step: no providers configured, skipping",
@@ -97,7 +140,7 @@ export class SignalsStep implements PipelineStepHandler {
     const redditEnabled = enabledReddit.length > 0 && !disabledPhases.has("reddit");
     const crunchbaseEnabled = enabledCrunchbase.length > 0 && !disabledPhases.has("crunchbase");
 
-    if (!hiringEnabled && !redditEnabled && !crunchbaseEnabled) {
+    if (!hiringEnabled && !redditEnabled && !crunchbaseEnabled && !companyResearchEnabled) {
       tools.log.info(
         { pipelineRunId: ctx.pipelineRunId },
         "Signals step: all categories disabled by company config, skipping",
@@ -112,15 +155,26 @@ export class SignalsStep implements PipelineStepHandler {
         hiringEnabled,
         redditEnabled,
         crunchbaseEnabled,
+        companyResearchEnabled,
         disabledPhases: [...disabledPhases],
       },
       "Signals step: category configuration resolved",
     );
 
-    // ── 2. Load active leads ─────────────────────────────────────────
+    // ── 2. Load active leads (include companyLinkedinUrl for research) ─
     const runLeads = await this.prisma.pipelineRunLead.findMany({
       where: { pipelineRunId: ctx.pipelineRunId, excluded: false },
-      include: { lead: { select: { id: true, fullName: true, company: true, companyDomain: true } } },
+      include: {
+        lead: {
+          select: {
+            id: true,
+            fullName: true,
+            company: true,
+            companyDomain: true,
+            companyLinkedinUrl: true,
+          },
+        },
+      },
       orderBy: { createdAt: "asc" },
     });
 
@@ -162,33 +216,74 @@ export class SignalsStep implements PipelineStepHandler {
 
     tools.emitProgress("Checking signals...", { companies: uniqueCompanies });
 
-    // ── 5. Run signal phases (only for enabled categories) ───────────
+    // ── 5. Run signal phases ─────────────────────────────────────────
     let cancelled = false;
+
+    // Resolve workspace ID: use companyId so that signals are indexed under the
+    // company account and visible to all users (COMPANY + SALE_MANAGERs).
+    const workspaceId = ctx.companyId ?? ctx.createdById;
 
     // Phase A: Hiring (category: HIRING)
     const hiringResult = hiringEnabled
-      ? await new HiringSignalProcessor(this.prisma, enabledHiring)
-          .process(companyGroups, ctx.pipelineRunId, tools)
+      ? await new HiringSignalProcessor(this.prisma, enabledHiring, aiGrpcClient)
+          .process(companyGroups, ctx.pipelineRunId, tools, workspaceId)
       : null;
 
     if (hiringResult?.cancelled) cancelled = true;
 
     // Phase B: Reddit (category: COMMUNITY)
     const redditResult = !cancelled && redditEnabled && activeSubreddits.length > 0
-      ? await new RedditSignalProcessor(this.prisma, enabledReddit)
-          .process(companyGroups, activeSubreddits, ctx.pipelineRunId, tools)
+      ? await new RedditSignalProcessor(this.prisma, enabledReddit, aiGrpcClient)
+          .process(companyGroups, activeSubreddits, ctx.pipelineRunId, tools, workspaceId)
       : null;
 
     if (redditResult?.cancelled) cancelled = true;
 
-    // Check cancellation between Reddit and Crunchbase (matches original behaviour)
+    // Check cancellation between Reddit and Crunchbase
     if (!cancelled) cancelled = await tools.checkCancelled();
 
     // Phase C: Crunchbase (category: FUNDING)
     const crunchbaseResult = !cancelled && crunchbaseEnabled
-      ? await new CrunchbaseSignalProcessor(this.prisma, enabledCrunchbase)
-          .process(companyGroups, ctx.pipelineRunId, tools)
+      ? await new CrunchbaseSignalProcessor(this.prisma, enabledCrunchbase, aiGrpcClient)
+          .process(companyGroups, ctx.pipelineRunId, tools, workspaceId)
       : null;
+
+    if (!cancelled) cancelled = await tools.checkCancelled();
+
+    // Phase D: Company Research (Perplexity + LinkedIn posts)
+    const leadById = new Map(
+      runLeads.map((rl) => [
+        rl.lead.id,
+        {
+          id: rl.lead.id,
+          fullName: rl.lead.fullName,
+          company: rl.lead.company,
+          companyDomain: rl.lead.companyDomain,
+          companyLinkedinUrl: rl.lead.companyLinkedinUrl,
+        },
+      ]),
+    );
+
+    const companyResearchResult =
+      !cancelled && companyResearchEnabled
+        ? await new CompanyResearchProcessor(
+            this.prisma,
+            perplexityClient,
+            this.linkedinPostsClient ?? this.createDisabledLinkedinClient(),
+            aiGrpcClient,
+          ).process(
+            companyGroups,
+            leadById,
+            workspaceId,
+            ctx.pipelineRunId,
+            tools,
+            {
+              includeLinkedinPosts: includeLinkedinPosts && !!this.linkedinPostsClient,
+              recency: perplexityRecency,
+              maxResults: perplexityMaxResults,
+            },
+          )
+        : null;
 
     // ── 6. Aggregate stats ───────────────────────────────────────────
     const companiesChecked = hiringResult?.companiesChecked ?? 0;
@@ -198,6 +293,9 @@ export class SignalsStep implements PipelineStepHandler {
     const totalRedditMentions = redditResult?.totalMentions ?? 0;
     const companiesWithCrunchbaseData = crunchbaseResult?.companiesWithData ?? 0;
     const companiesWithoutCrunchbaseData = crunchbaseResult?.companiesWithoutData ?? 0;
+    const companiesWithResearch = companyResearchResult?.companiesWithPerplexity ?? 0;
+    const companiesWithLinkedinPosts = companyResearchResult?.companiesWithLinkedinPosts ?? 0;
+    const totalLinkedinPosts = companyResearchResult?.totalLinkedinPosts ?? 0;
 
     // ── 7. Summary ───────────────────────────────────────────────────
     const parts: string[] = [];
@@ -216,6 +314,12 @@ export class SignalsStep implements PipelineStepHandler {
         `${companiesWithCrunchbaseData} ${pluralise("company", "companies", companiesWithCrunchbaseData)} with company data`,
       );
     }
+    if (companiesWithResearch > 0) {
+      parts.push(
+        `${companiesWithResearch} ${pluralise("company", "companies", companiesWithResearch)} researched` +
+          (companiesWithLinkedinPosts > 0 ? ` (${totalLinkedinPosts} LinkedIn ${pluralise("post", "posts", totalLinkedinPosts)})` : ""),
+      );
+    }
 
     const summaryMessage = parts.length > 0 ? `Found ${parts.join("; ")}` : "No signals found";
 
@@ -226,6 +330,9 @@ export class SignalsStep implements PipelineStepHandler {
       withCrunchbaseData: companiesWithCrunchbaseData,
       openRoles: totalOpenRoles,
       redditMentions: totalRedditMentions,
+      withResearch: companiesWithResearch,
+      withLinkedinPosts: companiesWithLinkedinPosts,
+      linkedinPosts: totalLinkedinPosts,
     });
 
     tools.log.info(
@@ -238,21 +345,37 @@ export class SignalsStep implements PipelineStepHandler {
         companiesWithoutCrunchbaseData,
         totalOpenRoles,
         totalRedditMentions,
+        companiesWithResearch,
+        companiesWithLinkedinPosts,
+        totalLinkedinPosts,
       },
       "Signals step completed",
     );
 
     // ── 8. Build per-lead signal details for WS data ─────────────────
-    const leadById = new Map(runLeads.map((rl) => [rl.lead.id, rl.lead]));
+    const leadByIdSimple = new Map(
+      runLeads.map((rl) => [
+        rl.lead.id,
+        {
+          id: rl.lead.id,
+          fullName: rl.lead.fullName,
+          company: rl.lead.company,
+          companyDomain: rl.lead.companyDomain,
+        },
+      ]),
+    );
 
     const hiringDetails = hiringResult
-      ? HiringSignalProcessor.buildWsDetails(hiringResult.detailsByLead, leadById)
+      ? HiringSignalProcessor.buildWsDetails(hiringResult.detailsByLead, leadByIdSimple)
       : [];
     const redditDetails = redditResult
-      ? RedditSignalProcessor.buildWsDetails(redditResult.detailsByLead, leadById)
+      ? RedditSignalProcessor.buildWsDetails(redditResult.detailsByLead, leadByIdSimple)
       : [];
     const crunchbaseDetails = crunchbaseResult
-      ? CrunchbaseSignalProcessor.buildWsDetails(crunchbaseResult.detailsByLead, leadById)
+      ? CrunchbaseSignalProcessor.buildWsDetails(crunchbaseResult.detailsByLead, leadByIdSimple)
+      : [];
+    const companyResearchDetails = companyResearchResult
+      ? CompanyResearchProcessor.buildWsDetails(companyResearchResult.detailsByLead, leadByIdSimple)
       : [];
 
     return {
@@ -264,6 +387,9 @@ export class SignalsStep implements PipelineStepHandler {
         companiesWithoutCrunchbaseData,
         totalOpenRoles,
         totalRedditMentions,
+        companiesWithResearch,
+        companiesWithLinkedinPosts,
+        totalLinkedinPosts,
         leadsProcessed: runLeads.length,
       },
       data: {
@@ -283,6 +409,13 @@ export class SignalsStep implements PipelineStepHandler {
             companiesFound: companiesWithCrunchbaseData,
             companiesNotFound: companiesWithoutCrunchbaseData,
             details: crunchbaseDetails,
+          },
+          companyResearch: {
+            leadsWithResearch: companyResearchResult?.detailsByLead.size ?? 0,
+            companiesResearched: companiesWithResearch,
+            companiesWithLinkedinPosts,
+            totalLinkedinPosts,
+            details: companyResearchDetails,
           },
         },
       },
@@ -333,5 +466,15 @@ export class SignalsStep implements PipelineStepHandler {
       // description is not used in the signals step (only for final scoring)
       description: null,
     }));
+  }
+
+  /**
+   * Returns a no-op LinkedIn client used when LinkedIn posts are disabled
+   * but a CompanyResearchProcessor instance is still needed.
+   */
+  private createDisabledLinkedinClient(): LinkedinPostsApifyClient {
+    return {
+      fetchCompanyPosts: () => Promise.resolve({ items: [] }),
+    } as unknown as LinkedinPostsApifyClient;
   }
 }

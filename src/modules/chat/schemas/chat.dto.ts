@@ -37,6 +37,8 @@ export interface ParseOutreachPromptDto {
   text: string;
   directoryId: string;
   suggestedChannel?: string;
+  /** Company-level workspace for RAG scoping; resolved by caller as companyId ?? userId. */
+  companyId?: string | null;
 }
 
 export interface ApplyOutreachContextDto {
@@ -65,6 +67,8 @@ export interface ChatPromptParser {
   parseOutreachContext(input: {
     text: string;
     userId: string;
+    /** Company-level workspace for ChromaDB scoping. */
+    companyId?: string | null;
     threadId: string;
     leadId: string;
     directoryId?: string;

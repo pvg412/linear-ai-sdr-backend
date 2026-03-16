@@ -23,6 +23,12 @@ export interface CrunchbaseSignalCompanyInfo {
 export interface CrunchbaseSignalBatchInput {
   /** Companies to look up in a single batch. */
   companies: CrunchbaseSignalCompanyInfo[];
+  /** Number of companies processed in parallel (Apify actor calls). Defaults to provider constant. */
+  concurrency?: number;
+  /** Maximum number of competitors extracted from org_similarity_list. Defaults to provider constant. */
+  maxCompetitors?: number;
+  /** Maximum number of technologies extracted from builtwith_tech_used_list. Defaults to provider constant. */
+  maxTechItems?: number;
 }
 
 /** Result for a single company's Crunchbase data. */

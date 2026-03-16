@@ -129,6 +129,8 @@ export class LinkedinPostsApifyClient {
     options: {
       maxPosts?: number;
       postedLimit?: "24h" | "week" | "month";
+      /** Maximum character length of post content text. Defaults to 500. */
+      maxContentChars?: number;
     } = {},
   ): Promise<LinkedinPostResult> {
     const client = this.getClient();
@@ -220,7 +222,7 @@ export class LinkedinPostsApifyClient {
       return {
         items: posts.map((post) => ({
           date: post.postedAt?.date ?? null,
-          summary: this.formatPostSummary(post),
+          summary: this.formatPostSummary(post, options.maxContentChars),
           sourceUrl: post.linkedinUrl,
           category: "linkedin_post" as const,
           engagement: post.engagement
@@ -247,12 +249,11 @@ export class LinkedinPostsApifyClient {
     }
   }
 
-  private formatPostSummary(post: LinkedinPost): string {
+  private formatPostSummary(post: LinkedinPost, maxLength: number = 500): string {
     const content = post.content?.trim() ?? "";
     const documentTitle = post.document?.title?.trim();
 
     // Truncate long content
-    const maxLength = 500;
     let summary =
       content.length > maxLength
         ? content.substring(0, maxLength) + "..."

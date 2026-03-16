@@ -156,47 +156,8 @@ export class PipelineQueryService {
         }
       : null;
 
-    /* Fetch company research results for enrichment summary */
-    const companyResearches = leadIds.length > 0
-      ? await this.prisma.companyResearch.findMany({
-          where: {
-            leadId: { in: leadIds },
-          },
-          include: { items: true },
-          orderBy: { createdAt: "desc" },
-        })
-      : [];
-
-    // Group by lead — take most recent research per lead
-    const enrichmentByLead = new Map<string, (typeof companyResearches)[number]>();
-    for (const cr of companyResearches) {
-      if (!enrichmentByLead.has(cr.leadId)) {
-        enrichmentByLead.set(cr.leadId, cr);
-      }
-    }
-
     const enrichment = {
       totalLeads: leadIds.length,
-      leadsWithResearch: enrichmentByLead.size,
-      companyResearch: Array.from(enrichmentByLead.entries())
-        .map(([leadId, cr]) => {
-          const rl = runLeadMap.get(leadId);
-          return {
-            leadId,
-            fullName: rl?.lead.fullName ?? null,
-            company: cr.company,
-            companyDomain: cr.companyDomain,
-            status: cr.status,
-            items: cr.items.map((item) => ({
-              date: item.date,
-              summary: item.summary,
-              sourceUrl: item.sourceUrl,
-              category: item.category,
-            })),
-          };
-        })
-        // Sort: leads with research items first, then by item count desc
-        .sort((a, b) => b.items.length - a.items.length),
     };
 
     /* Fetch hiring signal results for this run (with normalised job listings) */
@@ -409,6 +370,71 @@ export class PipelineQueryService {
       details: crunchbaseDetails,
     };
 
+    /* ── Company research (Perplexity + LinkedIn posts) ─────────────── */
+    const companyResearches = leadIds.length > 0
+      ? await this.prisma.companyResearch.findMany({
+          where: { leadId: { in: leadIds } },
+          include: { items: true },
+          orderBy: { createdAt: "desc" },
+        })
+      : [];
+
+    // Group by lead — take the most recent completed research per lead
+    const researchByLead = new Map<string, (typeof companyResearches)[number]>();
+    for (const cr of companyResearches) {
+      if (!researchByLead.has(cr.leadId)) {
+        researchByLead.set(cr.leadId, cr);
+      }
+    }
+
+    const companyResearchDetails = Array.from(researchByLead.entries())
+      .map(([leadId, cr]) => {
+        const rl = runLeadMap.get(leadId);
+        const perplexityItems = cr.items
+          .filter((i) => i.source === "perplexity")
+          .map((i) => ({
+            date: i.date,
+            summary: i.summary,
+            sourceUrl: i.sourceUrl,
+            category: i.category,
+          }));
+        const linkedinPosts = cr.items
+          .filter((i) => i.source === "linkedin")
+          .map((i) => ({
+            date: i.date,
+            summary: i.summary,
+            sourceUrl: i.sourceUrl,
+          }));
+        return {
+          leadId,
+          fullName: rl?.lead.fullName ?? null,
+          company: cr.company,
+          companyDomain: cr.companyDomain,
+          status: cr.status,
+          perplexityItems,
+          linkedinPosts,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.perplexityItems.length +
+          b.linkedinPosts.length -
+          (a.perplexityItems.length + a.linkedinPosts.length),
+      );
+
+    const totalLinkedinPosts = companyResearchDetails.reduce(
+      (sum, d) => sum + d.linkedinPosts.length,
+      0,
+    );
+
+    const companyResearch = {
+      leadsWithResearch: researchByLead.size,
+      companiesResearched: researchByLead.size,
+      companiesWithLinkedinPosts: companyResearchDetails.filter((d) => d.linkedinPosts.length > 0).length,
+      totalLinkedinPosts,
+      details: companyResearchDetails,
+    };
+
     /* Fetch live outreach state from junction table */
     const links = await this.repo.findOutreachDrafts(pipelineRunId);
 
@@ -463,6 +489,7 @@ export class PipelineQueryService {
       signals,
       redditSignals,
       crunchbaseSignals,
+      companyResearch,
       outreach,
       stepRuns: run.stepRuns,
       startedAt: run.startedAt,

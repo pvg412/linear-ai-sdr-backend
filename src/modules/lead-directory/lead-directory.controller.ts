@@ -11,6 +11,8 @@ import { LeadDirectoryError } from "./lead-directory.errors";
 import {
   AddLeadToDirectoryBodySchema,
   CreateLeadDirectoryBodySchema,
+  DirectoryIdParamsSchema,
+  DirectoryLeadParamsSchema,
   ListDirectoriesFlatQuerySchema,
   ListDirectoriesQuerySchema,
   ListDirectoryLeadsQuerySchema,
@@ -51,9 +53,11 @@ function handleError(reply: FastifyReply, err: unknown) {
     });
   }
 
+  // Do NOT expose internal error messages to clients — return a generic 500.
+  // Internal details are logged at debug level for later diagnosis.
   return reply.code(500).send({
     error: "INTERNAL",
-    message: err instanceof Error ? err.message : String(err),
+    message: "An unexpected error occurred",
   });
 }
 
@@ -125,7 +129,7 @@ export function registerLeadDirectoryRoutes(app: FastifyInstance) {
   app.get("/lead-directories/:directoryId", async (req, reply) => {
     try {
       const userId = requireRequestUserId(req);
-      const params = req.params as { directoryId: string };
+      const params = parseOrThrow(DirectoryIdParamsSchema, req.params);
 
       const dir = await qry.getDirectory(userId, params.directoryId);
       return reply.send({ directory: dir });
@@ -137,7 +141,7 @@ export function registerLeadDirectoryRoutes(app: FastifyInstance) {
   app.patch("/lead-directories/:directoryId", async (req, reply) => {
     try {
       const userId = requireRequestUserId(req);
-      const params = req.params as { directoryId: string };
+      const params = parseOrThrow(DirectoryIdParamsSchema, req.params);
       const body = parseOrThrow(UpdateLeadDirectoryBodySchema, req.body);
 
       const updated = await cmd.updateDirectory(
@@ -155,7 +159,7 @@ export function registerLeadDirectoryRoutes(app: FastifyInstance) {
   app.post("/lead-directories/:directoryId/move", async (req, reply) => {
     try {
       const userId = requireRequestUserId(req);
-      const params = req.params as { directoryId: string };
+      const params = parseOrThrow(DirectoryIdParamsSchema, req.params);
       const body = parseOrThrow(MoveLeadDirectoryBodySchema, req.body);
 
       const updated = await cmd.moveDirectory(
@@ -173,7 +177,7 @@ export function registerLeadDirectoryRoutes(app: FastifyInstance) {
   app.delete("/lead-directories/:directoryId", async (req, reply) => {
     try {
       const userId = requireRequestUserId(req);
-      const params = req.params as { directoryId: string };
+      const params = parseOrThrow(DirectoryIdParamsSchema, req.params);
 
       await cmd.deleteDirectory(userId, params.directoryId, lg);
       return reply.code(204).send();
@@ -185,7 +189,7 @@ export function registerLeadDirectoryRoutes(app: FastifyInstance) {
   app.post("/lead-directories/:directoryId/leads", async (req, reply) => {
     try {
       const user = requireRequestUser(req);
-      const params = req.params as { directoryId: string };
+      const params = parseOrThrow(DirectoryIdParamsSchema, req.params);
       const body = parseOrThrow(AddLeadToDirectoryBodySchema, req.body);
 
       await cmd.addLead(user.id, params.directoryId, body.leadId, {
@@ -203,7 +207,7 @@ export function registerLeadDirectoryRoutes(app: FastifyInstance) {
     async (req, reply) => {
       try {
         const userId = requireRequestUserId(req);
-        const params = req.params as { directoryId: string; leadId: string };
+        const params = parseOrThrow(DirectoryLeadParamsSchema, req.params);
 
         await cmd.removeLead(userId, params.directoryId, params.leadId, lg);
         return reply.code(204).send();
@@ -216,7 +220,7 @@ export function registerLeadDirectoryRoutes(app: FastifyInstance) {
   app.get("/lead-directories/:directoryId/leads", async (req, reply) => {
     try {
       const userId = requireRequestUserId(req);
-      const params = req.params as { directoryId: string };
+      const params = parseOrThrow(DirectoryIdParamsSchema, req.params);
       const q = parseOrThrow(ListDirectoryLeadsQuerySchema, req.query);
 
       const res = await qry.listLeads(userId, params.directoryId, {

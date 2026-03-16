@@ -43,32 +43,16 @@ import type {
   PipelineTools,
 } from "@/modules/pipeline/schemas/pipeline.dto";
 
+import { PIPELINE_CONFIG } from "@/modules/pipeline/pipeline.config";
+
 /* ------------------------------------------------------------------ */
-/*  Constants                                                          */
+/*  Constants (sourced from PIPELINE_CONFIG)                           */
 /* ------------------------------------------------------------------ */
 
-const ROLES = [
-  "Founder",
-  "Co-Founder",
-  "CEO",
-  "CTO",
-  "Chief Technology Officer",
-  "VP Engineering",
-  "Head of Engineering",
-  "Director of Engineering",
-  "VP Product",
-  "Head of Product",
-  "CPO",
-  "Chief Product Officer",
-  "Head of Innovation",
-  "Innovation Director",
-  "Head of Blockchain",
-  "Head of Digital Assets",
-];
-const HARDCODED_USER_TEXT = `Can you find 10 people with the following roles: ${ROLES.join(", ")}?`;
-const LEAD_LIMIT = 10;
-const POLL_INTERVAL_MS = 30_000; // 30 seconds
-const MAX_POLL_ATTEMPTS = 30; // 30 × 30s = 15 min max
+const { roles: ROLES, leadLimit: LEAD_LIMIT, pollIntervalMs: POLL_INTERVAL_MS, maxPollAttempts: MAX_POLL_ATTEMPTS } =
+  PIPELINE_CONFIG.leadGeneration;
+
+const HARDCODED_USER_TEXT = `Can you find ${LEAD_LIMIT} people with the following roles: ${ROLES.join(", ")}?`;
 
 /* ------------------------------------------------------------------ */
 /*  Step implementation                                                */
@@ -143,6 +127,7 @@ export class LeadGenerationStep implements PipelineStepHandler {
           .map((sc) => ({
             category: sc.category,
             description: sc.description,
+            expandedDescription: (sc as { expandedDescription?: string | null }).expandedDescription ?? "",
           })),
       }));
     }

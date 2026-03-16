@@ -12,6 +12,7 @@ import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.type
 import { mapCategoryToProto } from "../utils/category-mapping";
 import { BALANCE_TYPES } from "@/modules/balance/balance.types";
 import type { BillingService } from "@/modules/balance/services/billing.service";
+import { getPrisma } from "@/infra/prisma";
 
 @injectable()
 export class CompanyResearchRunnerService {
@@ -231,7 +232,7 @@ export class CompanyResearchRunnerService {
   private async indexCompanyResearchInAI(
     companyResearchId: string,
     _leadId: string,
-    userId: string,
+    triggeredById: string,
     logger: LoggerLike,
   ): Promise<void> {
     // Fetch the completed research with all items
@@ -242,10 +243,18 @@ export class CompanyResearchRunnerService {
       return;
     }
 
+    // Resolve company-level workspace ID so that all users under the same
+    // company account (COMPANY + SALE_MANAGERs) share the same RAG namespace.
+    const triggeredByUser = await getPrisma().user.findUnique({
+      where: { id: triggeredById },
+      select: { companyId: true },
+    });
+    const workspaceId = triggeredByUser?.companyId ?? triggeredById;
+
     // Call AI gRPC client
     await this.aiClient.upsertCompanyResearch({
       requestId: randomUUID(),
-      workspaceId: userId,
+      workspaceId,
       researchId: research.id,
       leadId: research.leadId,
       leadName: research.lead.fullName ?? `${research.lead.firstName} ${research.lead.lastName}`,

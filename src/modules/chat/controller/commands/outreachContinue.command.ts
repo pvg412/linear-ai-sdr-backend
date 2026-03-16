@@ -24,7 +24,7 @@ export class OutreachContinueCommandHandler implements WsCommandHandler {
   readonly type = "outreach.continue";
 
   async handle(context: WsContext, payload: unknown): Promise<void> {
-    const { socket, deps, threadId, userId } = context;
+    const { socket, deps, threadId, userId, companyId } = context;
     const typedPayload = payload as OutreachContinuePayload;
 
     console.log("[OutreachContinueCommand] Received request", {
@@ -67,6 +67,7 @@ export class OutreachContinueCommandHandler implements WsCommandHandler {
 
       await deps.aiStreamService.continueOutreach({
         userId,
+        companyId,
         threadId,
         directoryId: typedPayload.directoryId,
         currentLeadId: typedPayload.currentLeadId,

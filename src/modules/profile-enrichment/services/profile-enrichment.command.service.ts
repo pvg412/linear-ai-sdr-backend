@@ -16,6 +16,7 @@ import { LeadRagIndexSyncService } from "@/modules/lead-rag/services/lead-rag-in
 import { BALANCE_TYPES } from "@/modules/balance/balance.types";
 import type { BillingService } from "@/modules/balance/services/billing.service";
 import { BILLING } from "@/config/billing.constants";
+import { isP2002Unique, uniqueTarget, ensureLogger } from "@/infra/observability";
 
 export interface RequestEnrichmentResult {
   enrichmentRequestId: string;
@@ -57,6 +58,7 @@ export class ProfileEnrichmentCommandService {
     userId: string,
     leadId: string,
     force: boolean = false,
+    skipBilling: boolean = false,
   ): Promise<RequestEnrichmentResult> {
     // 1. Find the lead and validate it has linkedinUrl
     const lead = await this.repository.findLeadById(leadId);
@@ -93,7 +95,10 @@ export class ProfileEnrichmentCommandService {
     }
 
     // 3. Billing — pre-check BEFORE creating DB record to avoid orphaned records.
-    await this.billingService.ensureSufficientBalance(userId, BILLING.PROFILE_ENRICHMENT_CENTS);
+    //    Skipped when called from the pipeline (covered by the $100 flat fee).
+    if (!skipBilling) {
+      await this.billingService.ensureSufficientBalance(userId, BILLING.PROFILE_ENRICHMENT_CENTS);
+    }
 
     // 4. Create new enrichment request
     const enrichmentRequest = await this.repository.createEnrichmentRequest({
@@ -102,7 +107,10 @@ export class ProfileEnrichmentCommandService {
     });
 
     // Charge immediately after record creation, before enqueuing.
-    await this.billingService.chargeForProfileEnrichment(userId);
+    // Skipped when called from the pipeline (covered by the $100 flat fee).
+    if (!skipBilling) {
+      await this.billingService.chargeForProfileEnrichment(userId);
+    }
 
     // 5. Add job to queue
     await this.queue.add(
@@ -177,31 +185,54 @@ export class ProfileEnrichmentCommandService {
       }
 
       if (decision.action === "approve") {
-        // Update field change status
-        await this.repository.updateFieldChangeStatus(
-          decision.fieldChangeId,
-          "APPROVED",
-          userId,
-        );
-
-        // Apply value to Lead model
-        if (FIELD_TO_LEAD_PROPERTY[fieldChange.fieldName]) {
-          await this.repository.applyFieldChangeToLead(
-            leadId,
-            fieldChange.fieldName,
-            fieldChange.newValue,
-          );
-
-          // If it's an email field, also add to LeadEmail[]
-          if (fieldChange.fieldName === "email" && fieldChange.newValue) {
-            await this.repository.addOrUpdateLeadEmail(
+        try {
+          // Apply value to Lead model first — if this throws, we don't mark as APPROVED.
+          if (FIELD_TO_LEAD_PROPERTY[fieldChange.fieldName]) {
+            await this.repository.applyFieldChangeToLead(
               leadId,
+              fieldChange.fieldName,
               fieldChange.newValue,
             );
+
+            // If it's an email field, also add to LeadEmail[]
+            if (fieldChange.fieldName === "email" && fieldChange.newValue) {
+              await this.repository.addOrUpdateLeadEmail(
+                leadId,
+                fieldChange.newValue,
+              );
+            }
+          }
+
+          // Mark as APPROVED only after successful apply
+          await this.repository.updateFieldChangeStatus(
+            decision.fieldChangeId,
+            "APPROVED",
+            userId,
+          );
+
+          appliedFields.push(fieldChange.fieldName);
+        } catch (err) {
+          if (isP2002Unique(err)) {
+            // Another lead already has this value in a unique field (e.g. email).
+            // Reject this field change and continue applying the rest — do not
+            // abort the entire enrichment request over one conflicting field.
+            const target = uniqueTarget(err);
+            await this.repository.updateFieldChangeStatus(
+              decision.fieldChangeId,
+              EnrichmentFieldStatus.REJECTED,
+              userId,
+            );
+            rejectedFields.push(fieldChange.fieldName);
+
+            // Log enough context for debugging without exposing PII to the client.
+            ensureLogger().warn(
+              { leadId, fieldName: fieldChange.fieldName, uniqueTarget: target },
+              "Profile enrichment: field rejected due to unique constraint conflict",
+            );
+          } else {
+            throw err;
           }
         }
-
-        appliedFields.push(fieldChange.fieldName);
       } else {
         // Reject
         await this.repository.updateFieldChangeStatus(

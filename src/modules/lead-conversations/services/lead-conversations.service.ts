@@ -16,17 +16,25 @@ import type {
 import { UserFacingError } from "@/infra/userFacingError";
 import { RealtimeHub } from "@/infra/realtime/realtimeHub";
 import { REALTIME_TYPES } from "@/infra/realtime/realtime.types";
+import { getPrisma } from "@/infra/prisma";
+import { buildLeadVisibilityWhere } from "@/modules/lead/lead-visibility";
 
 export interface SaveAcceptedMessageInput extends CreateConversationMessageDto {
   userId: string;
+  userRole: string;
+  userCompanyId?: string | null;
 }
 
 export interface SaveCustomMessageInput extends SaveCustomMessageDto {
   userId: string;
+  userRole: string;
+  userCompanyId?: string | null;
 }
 
 export interface SaveLeadMessageInput extends CreateLeadMessageDto {
   userId: string;
+  userRole: string;
+  userCompanyId?: string | null;
 }
 
 export interface DeleteMessageInput {
@@ -38,6 +46,7 @@ export interface DeleteMessageInput {
 export interface GetHistoryInput extends GetConversationHistoryQueryDto {
   requestingUserId: string;
   requestingUserRole: UserRole;
+  requestingUserCompanyId?: string | null;
 }
 
 @injectable()
@@ -49,9 +58,40 @@ export class LeadConversationsService {
     private readonly realtimeHub: RealtimeHub,
   ) { }
 
+  /**
+   * Verify the requesting user has visibility into the given lead.
+   * Throws FORBIDDEN if the lead does not belong to the user's company.
+   * ADMIN users can access any lead.
+   */
+  private async assertLeadVisible(
+    userId: string,
+    role: string,
+    companyId: string | null | undefined,
+    leadId: string,
+  ): Promise<void> {
+    if (role === UserRole.ADMIN) return; // admins see all leads
+
+    const prisma = getPrisma();
+    const visibilityWhere = buildLeadVisibilityWhere({ ownerId: userId, role, companyId });
+
+    const lead = await prisma.lead.findFirst({
+      where: { id: leadId, ...visibilityWhere },
+      select: { id: true },
+    });
+
+    if (!lead) {
+      throw new UserFacingError({
+        code: "NOT_FOUND",
+        userMessage: "Lead not found",
+      });
+    }
+  }
+
   async saveAcceptedMessage(
     input: SaveAcceptedMessageInput,
   ): Promise<ConversationMessageResponse> {
+    await this.assertLeadVisible(input.userId, input.userRole, input.userCompanyId, input.leadId);
+
     if (input.chatMessageId) {
       const existing =
         await this.repository.findByChatMessageId(input.chatMessageId);
@@ -96,6 +136,8 @@ export class LeadConversationsService {
   async saveCustomMessage(
     input: SaveCustomMessageInput,
   ): Promise<ConversationMessageResponse> {
+    await this.assertLeadVisible(input.userId, input.userRole, input.userCompanyId, input.leadId);
+
     const existing = await this.repository.findByChatMessageId(
       input.chatMessageId,
     );
@@ -131,6 +173,8 @@ export class LeadConversationsService {
   async saveLeadMessage(
     input: SaveLeadMessageInput,
   ): Promise<ConversationMessageResponse> {
+    await this.assertLeadVisible(input.userId, input.userRole, input.userCompanyId, input.leadId);
+
     const message = await this.repository.createMessage({
       leadId: input.leadId,
       createdBy: input.userId,
@@ -154,6 +198,13 @@ export class LeadConversationsService {
   async getConversationHistory(
     input: GetHistoryInput,
   ): Promise<ConversationHistoryResponse> {
+    await this.assertLeadVisible(
+      input.requestingUserId,
+      input.requestingUserRole,
+      input.requestingUserCompanyId,
+      input.leadId,
+    );
+
     const { messages, total } = await this.repository.findByLeadId({
       leadId: input.leadId,
       limit: input.limit,

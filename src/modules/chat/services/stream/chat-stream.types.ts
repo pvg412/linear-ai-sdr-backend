@@ -49,6 +49,10 @@ export interface OutreachContextInput {
 
 export interface StreamAssistantInput {
   userId: string;
+  /** Company-level workspace ID for RAG/ChromaDB scoping.
+   *  Pass companyId for SALE_MANAGER users (parent company),
+   *  or null/undefined for COMPANY users (userId is used as fallback). */
+  companyId?: string | null;
   threadId: string;
   text: string;
   clientMessageId?: string;

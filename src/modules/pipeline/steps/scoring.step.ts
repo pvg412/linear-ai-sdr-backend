@@ -24,7 +24,7 @@ import type {
   SignalCategoryDescriptionProto,
 } from "@/generated/aisdr/v1/ai_sdr";
 
-import { SCORING_CONSTANTS } from "@/config/constants";
+import { PIPELINE_CONFIG } from "@/modules/pipeline/pipeline.config";
 
 import type { PipelineStepHandler } from "./step.interface";
 import type {
@@ -37,7 +37,7 @@ import type {
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const { SCORING_THRESHOLD, BATCH_SIZE } = SCORING_CONSTANTS;
+const { threshold: SCORING_THRESHOLD, batchSize: BATCH_SIZE } = PIPELINE_CONFIG.scoring;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -141,6 +141,7 @@ export class ScoringStep implements PipelineStepHandler {
           .map((sc): SignalCategoryDescriptionProto => ({
             category: sc.category,
             description: sc.description,
+            expandedDescription: (sc as { expandedDescription?: string | null }).expandedDescription ?? "",
           })),
       }));
     }
@@ -258,7 +259,9 @@ export class ScoringStep implements PipelineStepHandler {
       // Index passed leads in RAG for downstream outreach context
       tools.emitProgress(`Indexing ${passedLeadIds.length} leads in RAG...`);
 
-      await this.ragSync.enqueueUpsertLeads(ctx.createdById, passedLeadIds, {
+      // Use companyId as workspace so RAG documents are visible to all users
+      // under the same company account (COMPANY + SALE_MANAGERs).
+      await this.ragSync.enqueueUpsertLeads(ctx.companyId ?? ctx.createdById, passedLeadIds, {
         reason: "pipeline_scoring_passed",
         log: tools.log,
       });

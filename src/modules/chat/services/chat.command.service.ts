@@ -471,6 +471,7 @@ export class ChatCommandService {
     const parsed = await this.chatPromptParser.parseOutreachContext({
       text: dto.text,
       userId,
+      companyId: dto.companyId,
       threadId,
       leadId: directory.firstLeadId,
       directoryId: dto.directoryId,

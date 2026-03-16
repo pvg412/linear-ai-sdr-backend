@@ -5,6 +5,7 @@ import { requireRequestUser } from "@/infra/auth/requestUser";
 import { UserFacingError } from "@/infra/userFacingError";
 import { container } from "@/container";
 
+
 import { SIGNAL_CATEGORY_TYPES } from "./signal-category.types";
 import type { SignalCategoryRepository } from "./persistence/signal-category.repository";
 import {
@@ -13,6 +14,8 @@ import {
 } from "./schemas/signal-category.schemas";
 import { SERVICE_CATALOG_TYPES } from "../service-catalog/service-catalog.types";
 import type { ServiceCatalogRepository } from "../service-catalog/persistence/service-catalog.repository";
+import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.types";
+import type { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
@@ -59,10 +62,12 @@ export function registerSignalCategoryRoutes(app: FastifyInstance): void {
   const serviceCatalogRepo = container.get<ServiceCatalogRepository>(
     SERVICE_CATALOG_TYPES.ServiceCatalogRepository,
   );
+  const aiGrpcClient = container.get<AiGrpcClient>(
+    AI_GRPC_CLIENT_TYPES.AiGrpcClient,
+  );
 
   /**
    * Assert that the service catalog exists and belongs to the company.
-   * Returns the catalog id for convenience.
    */
   async function assertCatalogOwnership(
     companyId: string,
@@ -116,8 +121,11 @@ export function registerSignalCategoryRoutes(app: FastifyInstance): void {
    *
    * Upsert signal category configurations for a specific service catalog.
    * Accepts an array of categories with their descriptions and enabled flags.
-   * Only provided categories are updated — omitted ones keep their current
-   * state (or default).
+   * Only provided categories are updated — omitted ones keep their current state.
+   *
+   * After saving, calls ExpandSignalDescriptions gRPC to generate HyDE-expanded
+   * embeddings for semantic vector search. The expanded descriptions are cached
+   * in the DB so they don't need to be recomputed on every pipeline run.
    */
   app.put(
     "/company/service-catalog/:serviceCatalogId/signal-categories",
@@ -137,7 +145,57 @@ export function registerSignalCategoryRoutes(app: FastifyInstance): void {
         })),
       );
 
-      // Return full state after update
+      // ── Async: expand signal descriptions via HyDE (AI service) ───────
+      // Non-blocking: if gRPC fails, we log a warning and continue.
+      // The expandedDescription will remain null and the AI will fall back
+      // to using the raw description for ChromaDB embedding queries.
+      void (async () => {
+        try {
+          // Only expand enabled categories that have a non-empty description
+          const toExpand = categories
+            .filter((c) => c.enabled && c.description.trim().length > 0)
+            .map((c) => ({
+              catalogName: serviceCatalogId,
+              category: c.category,
+              description: c.description.trim(),
+            }));
+
+          if (toExpand.length === 0) return;
+
+          const expandResp = await aiGrpcClient.expandSignalDescriptions({
+            requestId: "",
+            descriptions: toExpand,
+            serviceContext: "",
+          });
+
+          // Persist expanded descriptions back to DB.
+          // Match by category (both catalogName and category are echoed back in the response).
+          await Promise.allSettled(
+            expandResp.expanded.map(async (expanded) => {
+              if (!expanded.expandedText?.trim()) return;
+              if (!expanded.category) return;
+
+              await repo.updateExpandedDescription(
+                serviceCatalogId,
+                expanded.category as SignalCategory,
+                expanded.expandedText.trim(),
+              );
+            }),
+          );
+
+          console.info(
+            "[signal-category] descriptions expanded and cached",
+            { serviceCatalogId, expanded: expandResp.expanded.length },
+          );
+        } catch (err) {
+          console.warn(
+            "[signal-category] ExpandSignalDescriptions gRPC failed (non-fatal)",
+            { serviceCatalogId, err: err instanceof Error ? err.message : String(err) },
+          );
+        }
+      })();
+
+      // Return full state after update (without waiting for HyDE expansion)
       const saved = await repo.listByServiceCatalog(serviceCatalogId);
       const savedMap = new Map(saved.map((s) => [s.category, s]));
 

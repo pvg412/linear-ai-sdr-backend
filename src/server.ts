@@ -105,43 +105,43 @@ export async function buildServer() {
   }
 
   // Health check endpoints (no auth required)
-  app.get("/health", async () => {
-    const checks: Record<string, boolean | string | number> = {
-      status: "healthy",
-      uptime: process.uptime(),
-    };
+  app.get("/health", async (_req, reply) => {
+    // Minimal response for load-balancer / k8s probes.
+    // We intentionally do NOT expose infrastructure details (DB status,
+    // Redis connectivity, process uptime) because these endpoints are
+    // unauthenticated and could be reached by external scanners.
+    // Internal observability tools should use authenticated admin APIs.
+    let dbOk = false;
+    const redisOk = true; // Redis is optional — default to true
 
-    // Check database
     try {
       const prisma = getPrisma();
       await prisma.$queryRaw`SELECT 1`;
-      checks.database = true;
+      dbOk = true;
     } catch {
-      checks.database = false;
-      checks.status = "unhealthy";
+      // DB down
     }
 
-    // Check Redis
     try {
       const redis = container.get<Redis>(QUEUE_TYPES.Redis);
       await redis.ping();
-      checks.redis = true;
     } catch {
-      checks.redis = false;
-      // Redis is optional, don't mark as unhealthy
+      // Redis optional
     }
 
-    return checks;
+    const healthy = dbOk && redisOk;
+    return reply.code(healthy ? 200 : 503).send({
+      status: healthy ? "healthy" : "unhealthy",
+    });
   });
 
-  app.get("/ready", async () => {
-    // Check if the service is ready to accept traffic
+  app.get("/ready", async (_req, reply) => {
     try {
       const prisma = getPrisma();
       await prisma.$queryRaw`SELECT 1`;
-      return { status: "ready" };
+      return reply.code(200).send({ status: "ready" });
     } catch {
-      return { status: "not_ready" };
+      return reply.code(503).send({ status: "not_ready" });
     }
   });
 

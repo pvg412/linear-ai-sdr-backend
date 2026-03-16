@@ -3,6 +3,7 @@ import { LeadProvider, LeadSearchKind } from "@prisma/client";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { LeadGenerationStep } from "@/modules/pipeline/steps/lead-generation.step";
+import { PIPELINE_CONFIG } from "@/modules/pipeline/pipeline.config";
 import type {
   PipelineContext,
   PipelineTools,
@@ -16,6 +17,12 @@ import type { LeadSearchRepository } from "@/modules/lead-search/persistence/lea
 import type { LeadSearchRunRepository } from "@/modules/lead-search/persistence/lead-search-run.repository";
 import type { LeadSearchLeadPersisterService } from "@/modules/lead-search/services/lead-search.lead-persister.service";
 import type { NormalizedLead } from "@/capabilities/shared/leadValidate";
+
+/* ------------------------------------------------------------------ */
+/*  Constants                                                          */
+/* ------------------------------------------------------------------ */
+
+const LEAD_LIMIT = PIPELINE_CONFIG.leadGeneration.leadLimit;
 
 /* ------------------------------------------------------------------ */
 /*  Fixtures                                                           */
@@ -266,9 +273,9 @@ describe("LeadGenerationStep", () => {
 
     const result = await step.run(makeCtx(), {}, tools);
 
-    // Should persist 10 leads to PipelineRunLead
+    // Should persist LEAD_LIMIT leads to PipelineRunLead
     expect(mockPrisma.pipelineRunLead.createMany).toHaveBeenCalledWith({
-      data: Array.from({ length: 10 }, (_, i) => ({
+      data: Array.from({ length: LEAD_LIMIT }, (_, i) => ({
         pipelineRunId: "run-1",
         leadId: `lead-id-${i}`,
       })),
@@ -276,7 +283,7 @@ describe("LeadGenerationStep", () => {
     });
     expect(result.outputSummary).toEqual(
       expect.objectContaining({
-        leadsFound: 10,
+        leadsFound: LEAD_LIMIT,
         source: "scraper",
         leadSearchId: "ls-1",
       }),
@@ -293,11 +300,11 @@ describe("LeadGenerationStep", () => {
     );
 
     // LeadSearch should be marked done
-    expect(leadSearchRepo.markDone).toHaveBeenCalledWith("ls-1", 10);
+    expect(leadSearchRepo.markDone).toHaveBeenCalledWith("ls-1", LEAD_LIMIT);
     expect(leadSearchRunRepo.markRunSuccess).toHaveBeenCalledWith(
       expect.objectContaining({
         runId: "lsr-1",
-        leadsCount: 10,
+        leadsCount: LEAD_LIMIT,
         externalRunId: "apify-run-1",
       }),
     );

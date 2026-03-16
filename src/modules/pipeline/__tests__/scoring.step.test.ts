@@ -352,7 +352,7 @@ describe("ScoringStep", () => {
               { id: "ss-2", name: "Vision", priority: 5, budgetMin: 5000, budgetMax: 50000 },
             ],
             signalCategoryDescriptions: [
-              { category: "HIRING", description: "AI engineers" },
+              { category: "HIRING", description: "AI engineers", expandedDescription: "" },
             ],
           },
         ],

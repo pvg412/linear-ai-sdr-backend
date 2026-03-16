@@ -33,7 +33,7 @@ export class OutreachPromptApplyCommandHandler implements WsCommandHandler {
   readonly type = "outreach.prompt.apply";
 
   async handle(context: WsContext, payload: unknown): Promise<void> {
-    const { socket, deps, threadId, userId, tag, stream } = context;
+    const { socket, deps, threadId, userId, companyId, tag, stream } = context;
     const typedPayload = payload as OutreachPromptApplyPayload;
 
     const outreachContext = {
@@ -86,6 +86,7 @@ export class OutreachPromptApplyCommandHandler implements WsCommandHandler {
     void deps.aiStreamService
       .streamAssistantReply({
         userId,
+        companyId,
         threadId,
         text: userPrompt,
         clientMessageId: typedPayload.clientMessageId ?? undefined,

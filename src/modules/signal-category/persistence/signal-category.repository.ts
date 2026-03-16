@@ -54,13 +54,16 @@ export class SignalCategoryRepository {
       update: {
         description: data.description,
         enabled: data.enabled,
+        // Clear expandedDescription on description change so AI will re-expand
+        expandedDescription: null,
       },
     });
   }
 
   /**
    * Upsert multiple signal category configs for a service catalog
-   * in a transaction.
+   * in a transaction. Clears expandedDescription on each upsert so that
+   * the controller can re-expand via ExpandSignalDescriptions gRPC after save.
    */
   async upsertMany(
     serviceCatalogId: string,
@@ -81,9 +84,28 @@ export class SignalCategoryRepository {
           update: {
             description: item.description,
             enabled: item.enabled,
+            // Clear expandedDescription on description change so it gets refreshed
+            expandedDescription: null,
           },
         }),
       ),
     );
+  }
+
+  /**
+   * Update the expandedDescription for a single signal category config.
+   * Called after ExpandSignalDescriptions gRPC returns results.
+   */
+  async updateExpandedDescription(
+    serviceCatalogId: string,
+    category: SignalCategory,
+    expandedDescription: string,
+  ) {
+    return this.prisma.signalCategoryConfig.update({
+      where: {
+        serviceCatalogId_category: { serviceCatalogId, category },
+      },
+      data: { expandedDescription },
+    });
   }
 }

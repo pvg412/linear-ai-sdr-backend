@@ -15,6 +15,10 @@ export interface RedditSignalSearchInput {
   leadId: string;
   /** Active subreddit names to search within (without "r/" prefix). */
   subreddits: string[];
+  /** Maximum posts/comments fetched per subreddit. Defaults to provider constant. */
+  maxPostsPerSubreddit?: number;
+  /** Maximum total posts retained per company. Defaults to provider constant. */
+  maxPostsPerCompany?: number;
 }
 
 export interface RedditSignalPostDto {
@@ -66,6 +70,10 @@ export interface RedditSignalBatchInput {
   companies: RedditSignalCompanyInfo[];
   /** Active subreddit names to search within (without "r/" prefix). */
   subreddits: string[];
+  /** Maximum posts/comments fetched per subreddit. Defaults to provider constant. */
+  maxPostsPerSubreddit?: number;
+  /** Maximum total posts retained per company. Defaults to provider constant. */
+  maxPostsPerCompany?: number;
 }
 
 export interface RedditSignalProvider {

@@ -1,5 +1,5 @@
-import { injectable, inject } from "inversify";
-import type { Redis } from "ioredis";
+import { injectable, inject, optional } from "inversify";
+import type { Queue } from "bullmq";
 
 import { getPrisma } from "@/infra/prisma";
 import { UserFacingError } from "@/infra/userFacingError";
@@ -7,9 +7,9 @@ import { COMPANY_RESEARCH_TYPES } from "../company-research.types";
 import { CompanyResearchRepository } from "../persistence/company-research.repository";
 import { QUEUE_TYPES } from "@/infra/queue/queue.types";
 import {
-  createCompanyResearchQueue,
   companyResearchJobOptions,
   type CompanyResearchJobData,
+  type CompanyResearchJobName,
 } from "@/infra/queue/company-research/company-research.queue";
 import type { CompanyResearchQuery } from "../schemas/company-research.schemas";
 import { CompanyResearchStatus } from "@prisma/client";
@@ -22,8 +22,9 @@ export class CompanyResearchCommandService {
   constructor(
     @inject(COMPANY_RESEARCH_TYPES.CompanyResearchRepository)
     private readonly repository: CompanyResearchRepository,
-    @inject(QUEUE_TYPES.Redis)
-    private readonly redis: Redis,
+    @inject(QUEUE_TYPES.CompanyResearchQueue)
+    @optional()
+    private readonly queue: Queue<CompanyResearchJobData, void, CompanyResearchJobName> | null,
     @inject(BALANCE_TYPES.BillingService)
     private readonly billingService: BillingService,
   ) { }
@@ -107,8 +108,14 @@ export class CompanyResearchCommandService {
     // Charge the flat research fee immediately before enqueuing.
     await this.billingService.chargeForCompanyResearch(userId);
 
-    // Queue the job
-    const queue = createCompanyResearchQueue(this.redis);
+    // Queue the job using the DI-managed singleton queue (avoids creating a new
+    // Redis connection on every request). Falls back gracefully if Redis is unavailable.
+    if (!this.queue) {
+      throw new UserFacingError({
+        code: "BAD_REQUEST",
+        userMessage: "Company research queue is unavailable (Redis not configured)",
+      });
+    }
     const jobData: CompanyResearchJobData = {
       companyResearchId: research.id,
       leadId: lead.id,
@@ -121,7 +128,7 @@ export class CompanyResearchCommandService {
       triggeredById: userId,
     };
 
-    await queue.add("companyResearch.run", jobData, companyResearchJobOptions());
+    await this.queue.add("companyResearch.run", jobData, companyResearchJobOptions());
 
     return {
       companyResearchId: research.id,

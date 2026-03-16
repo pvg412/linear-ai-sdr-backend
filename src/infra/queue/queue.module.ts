@@ -24,6 +24,11 @@ import {
   type PipelineRunJobData,
   type PipelineRunJobName,
 } from "./pipeline-run/pipeline-run.queue";
+import {
+  createCompanyResearchQueue,
+  type CompanyResearchJobData,
+  type CompanyResearchJobName,
+} from "./company-research/company-research.queue";
 
 const redis = tryCreateRedisClient();
 
@@ -60,6 +65,15 @@ export function registerQueueModule(container: Container) {
         Queue<PipelineRunJobData, void, PipelineRunJobName>
       >(QUEUE_TYPES.PipelineRunQueue)
       .toConstantValue(pipelineRunQueue);
+
+    // Company research queue registered as a singleton so we don't create a
+    // new Queue (and Redis connection) on every requestCompanyResearch() call.
+    const companyResearchQueue = createCompanyResearchQueue(redis);
+    container
+      .bind<
+        Queue<CompanyResearchJobData, void, CompanyResearchJobName>
+      >(QUEUE_TYPES.CompanyResearchQueue)
+      .toConstantValue(companyResearchQueue);
   } else {
     console.warn("[queue] REDIS_URL not set; LeadSearch will run inline");
   }

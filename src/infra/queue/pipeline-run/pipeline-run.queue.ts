@@ -43,6 +43,8 @@ export function pipelineRunJobOptions() {
       delay: env.PIPELINE_QUEUE_BACKOFF_MS,
     },
     removeOnComplete: true,
-    removeOnFail: false,
+    // Auto-trim failed jobs: keep the last 100 failures for max 7 days.
+    // Without this limit, failed jobs accumulate in Redis indefinitely.
+    removeOnFail: { count: 100, age: 7 * 24 * 3600 },
   };
 }

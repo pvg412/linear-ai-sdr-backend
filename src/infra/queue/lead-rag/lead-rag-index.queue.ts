@@ -32,6 +32,6 @@ export function leadRagIndexJobOptions() {
     attempts,
     backoff: { type: "exponential" as const, delay: backoffMs },
     removeOnComplete: true,
-    removeOnFail: false,
+    removeOnFail: { count: 200, age: 7 * 24 * 3600 },
   };
 }

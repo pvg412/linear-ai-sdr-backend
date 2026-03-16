@@ -73,6 +73,9 @@ export function registerLeadRoutes(app: FastifyInstance): void {
 
     const params = LeadIdParamsSchema.parse(req.params);
 
-    return await leadQueryService.getLeadDetail(user.id, params.leadId);
+    return await leadQueryService.getLeadDetail(user.id, params.leadId, {
+      role: user.role,
+      companyId: user.companyId,
+    });
   });
 }

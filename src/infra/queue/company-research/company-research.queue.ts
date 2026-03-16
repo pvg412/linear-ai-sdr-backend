@@ -35,6 +35,6 @@ export function companyResearchJobOptions() {
       delay: env.LEAD_SEARCH_QUEUE_BACKOFF_MS,
     },
     removeOnComplete: true,
-    removeOnFail: false,
+    removeOnFail: { count: 100, age: 7 * 24 * 3600 },
   };
 }

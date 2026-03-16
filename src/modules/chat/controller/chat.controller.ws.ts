@@ -65,6 +65,11 @@ async function initializeWsConnection(input: {
   const { socket, req, deps, tag } = input;
 
   const userId = await ensureUserId(req);
+  // companyId is set on req.user by the auth guard from the JWT payload.
+  // SALE_MANAGER: companyId points to the parent COMPANY account.
+  // COMPANY: companyId is null (their own userId serves as the workspace).
+  const companyId = req.user?.companyId ?? null;
+
   const params = req.params as { threadId: string };
   const threadId = params.threadId;
 
@@ -102,7 +107,7 @@ async function initializeWsConnection(input: {
     void handleIncomingWsMessage({
       socket,
       buf,
-      context: { socket, userId, threadId, tag, deps, stream },
+      context: { socket, userId, companyId, threadId, tag, deps, stream },
     }).catch((err) => {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(tag, "handler error", { message: msg });

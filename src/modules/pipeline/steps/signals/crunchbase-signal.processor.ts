@@ -1,3 +1,5 @@
+import { createHash } from "crypto";
+
 import type { PrismaClient } from "@prisma/client";
 
 import type {
@@ -5,9 +7,14 @@ import type {
   CrunchbaseSignalResult,
   CrunchbaseSignalCompanyInfo,
 } from "@/capabilities/crunchbase-signals/crunchbase-signal-provider.dto";
+import type { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
+import { LeadDocumentKind } from "@/generated/aisdr/v1/ai_sdr";
 import type { PipelineTools } from "@/modules/pipeline/schemas/pipeline.dto";
 
+import { PIPELINE_CONFIG } from "@/modules/pipeline/pipeline.config";
+
 import type { CompanyGroup, LeadInfo } from "./signals.helpers";
+import { crunchbaseSignalToRagText, signalDocId } from "./signal-rag-text";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -27,12 +34,14 @@ export class CrunchbaseSignalProcessor {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly providers: CrunchbaseSignalProvider[],
+    private readonly aiGrpcClient: AiGrpcClient | null = null,
   ) {}
 
   async process(
     companyGroups: Map<string, CompanyGroup>,
     pipelineRunId: string,
     tools: PipelineTools,
+    userId?: string,
   ): Promise<CrunchbasePhaseResult> {
     let companiesWithData = 0;
     let companiesWithoutData = 0;
@@ -54,6 +63,9 @@ export class CrunchbaseSignalProcessor {
       try {
         const crunchbaseResults = await provider.detectCrunchbaseSignalsBatch({
           companies: crunchbaseCompanies,
+          concurrency: PIPELINE_CONFIG.signals.crunchbaseConcurrency,
+          maxCompetitors: PIPELINE_CONFIG.signals.crunchbaseMaxCompetitors,
+          maxTechItems: PIPELINE_CONFIG.signals.crunchbaseMaxTechItems,
         });
 
         if (crunchbaseResults === null) {
@@ -85,6 +97,20 @@ export class CrunchbaseSignalProcessor {
 
             // Persist to DB
             await this.persistSignals(result, group.leadIds, pipelineRunId);
+
+            // RAG indexing — fire-and-forget per lead, non-fatal
+            for (const leadId of group.leadIds) {
+              const detail = detailsByLead.get(leadId);
+              if (!detail) continue;
+              try {
+                await this.indexInAi(leadId, group.companyName, detail, userId ?? "");
+              } catch (err) {
+                tools.log.warn(
+                  { leadId, company: group.companyName, err: (err as Error).message },
+                  "Signals step: Crunchbase RAG indexing failed (non-fatal)",
+                );
+              }
+            }
           }
         }
       } catch (err) {
@@ -169,6 +195,35 @@ export class CrunchbaseSignalProcessor {
   /* ---------------------------------------------------------------- */
   /*  Internal                                                          */
   /* ---------------------------------------------------------------- */
+
+  private async indexInAi(
+    leadId: string,
+    companyName: string,
+    result: CrunchbaseSignalResult,
+    workspaceId: string,
+  ): Promise<void> {
+    if (!this.aiGrpcClient) return;
+
+    const text = crunchbaseSignalToRagText(companyName, result);
+    const contentHash = createHash("sha256").update(text).digest("hex");
+
+    await this.aiGrpcClient.upsertLeadDocuments({
+      requestId: "",
+      workspaceId,
+      allowPartial: true,
+      documents: [
+        {
+          documentId: signalDocId("crunchbase", leadId),
+          leadId,
+          kind: LeadDocumentKind.LEAD_DOCUMENT_KIND_CRUNCHBASE_SIGNAL,
+          text,
+          metadata: { leadId, signalType: "crunchbase" },
+          updatedAtMs: String(Date.now()),
+          contentHash,
+        },
+      ],
+    });
+  }
 
   private async persistSignals(
     result: CrunchbaseSignalResult,

@@ -182,20 +182,17 @@ export class ProfileEnrichmentApifyClient {
       // Parse the first item
       const rawItem = items[0];
 
-      try {
-        const parsed = ApifyProfileEnrichmentResponseSchema.parse(rawItem);
-        return {
-          success: true,
-          data: parsed,
-        };
-      } catch (parseError) {
-        console.warn("Failed to parse Apify profile response:", parseError);
-        // Return raw data anyway, mapper will handle missing fields
-        return {
-          success: true,
-          data: rawItem as ApifyProfileEnrichmentResponse,
-        };
+      const parsed = ApifyProfileEnrichmentResponseSchema.safeParse(rawItem);
+      if (!parsed.success) {
+        // Schema validation failed — returning untyped raw data would cause
+        // silent type errors and garbage in the DB. Treat as a parse failure.
+        console.warn(
+          "Failed to parse Apify profile enrichment response (Zod validation):",
+          parsed.error.issues.slice(0, 3),
+        );
+        return { success: false, data: null };
       }
+      return { success: true, data: parsed.data };
     } catch (error) {
       if (error instanceof UserFacingError) throw error;
 

@@ -36,11 +36,11 @@ const SERVICE_KEY = "reddit-scraper";
  */
 const DAILY_REQUEST_LIMIT = 500;
 
-/** Maximum number of items to retrieve per subreddit search. */
-const MAX_ITEMS_PER_SUBREDDIT = 25;
+/** Fallback: maximum number of items to retrieve per subreddit search. */
+const DEFAULT_MAX_ITEMS_PER_SUBREDDIT = 25;
 
-/** Maximum number of posts to keep per company across all subreddits. */
-const MAX_POSTS_PER_COMPANY = 50;
+/** Fallback: maximum number of posts to keep per company across all subreddits. */
+const DEFAULT_MAX_POSTS_PER_COMPANY = 50;
 
 /** How many subreddit searches to run concurrently per company. */
 const SUBREDDIT_CONCURRENCY = 3;
@@ -112,6 +112,9 @@ export class RedditApifyProvider implements RedditSignalProvider {
       };
     }
 
+    const maxPostsPerSubreddit = input.maxPostsPerSubreddit ?? DEFAULT_MAX_ITEMS_PER_SUBREDDIT;
+    const maxPostsPerCompany = input.maxPostsPerCompany ?? DEFAULT_MAX_POSTS_PER_COMPANY;
+
     const allPosts: RedditSignalPostDto[] = [];
     const subredditsWithMatches = new Set<string>();
     let stopped = false;
@@ -134,7 +137,7 @@ export class RedditApifyProvider implements RedditSignalProvider {
         const rawPosts = await this.client.searchSubreddit(
           subreddit,
           searchKeyword,
-          MAX_ITEMS_PER_SUBREDDIT,
+          maxPostsPerSubreddit,
         );
 
         if (rawPosts.length > 0) {
@@ -163,7 +166,7 @@ export class RedditApifyProvider implements RedditSignalProvider {
     await runWithConcurrency(input.subreddits, SUBREDDIT_CONCURRENCY, processSubreddit);
 
     // Cap total posts to avoid bloating
-    const cappedPosts = allPosts.slice(0, MAX_POSTS_PER_COMPANY);
+    const cappedPosts = allPosts.slice(0, maxPostsPerCompany);
 
     return {
       providerKey: PROVIDER_KEY,
@@ -273,7 +276,7 @@ export class RedditApifyProvider implements RedditSignalProvider {
       const rawPosts = await this.client.searchBatch(
         input.subreddits,
         keywords,
-        MAX_ITEMS_PER_SUBREDDIT,
+        input.maxPostsPerSubreddit ?? DEFAULT_MAX_ITEMS_PER_SUBREDDIT,
       );
 
       lg.info(
@@ -326,8 +329,9 @@ export class RedditApifyProvider implements RedditSignalProvider {
       }
 
       // ── Finalize results: cap posts, count mentions ─────────────
+      const batchMaxPostsPerCompany = input.maxPostsPerCompany ?? DEFAULT_MAX_POSTS_PER_COMPANY;
       for (const result of resultsByCompany.values()) {
-        result.posts = result.posts.slice(0, MAX_POSTS_PER_COMPANY);
+        result.posts = result.posts.slice(0, batchMaxPostsPerCompany);
         result.totalMentions = result.posts.filter((p) => p.signalType === "mention").length;
         result.totalActivities = result.posts.filter((p) => p.signalType === "activity").length;
 

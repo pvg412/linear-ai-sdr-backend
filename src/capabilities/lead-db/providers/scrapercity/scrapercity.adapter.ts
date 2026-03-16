@@ -40,10 +40,13 @@ export class ScraperCityLeadDbAdapter implements LeadDbAdapter {
 
         const runId = await this.client.startApolloFilters(payload);
 
-        // Wait up to 3 days (259200 seconds/5s = 51840 attempts)
+        // Wait up to 1 hour (720 × 5 s). Previously this was 3 days (51_840
+        // attempts), which would block the BullMQ worker for days if ScraperCity
+        // got stuck. If the job exceeds 1 hour it will fail and BullMQ will retry
+        // according to the queue retry policy.
         const status = await this.client.waitForSucceeded(runId, {
           intervalMs: 5_000,
-          maxAttempts: 51_840,
+          maxAttempts: 720,
         });
 
         const rows = await this.client.downloadJsonRows(runId, status);

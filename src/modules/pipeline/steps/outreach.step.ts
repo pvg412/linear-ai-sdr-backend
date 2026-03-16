@@ -7,7 +7,7 @@ import { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
 import { AI_GRPC_CLIENT_TYPES } from "@/infra/ai-grpc-client/ai-grpc-client.types";
 import { LEAD_CONVERSATIONS_TYPES } from "@/modules/lead-conversations/lead-conversations.types";
 import type { LeadConversationsRepository } from "@/modules/lead-conversations/persistence/lead-conversations.repository";
-import { OUTREACH_CONSTANTS } from "@/config/constants";
+import { PIPELINE_CONFIG } from "@/modules/pipeline/pipeline.config";
 
 import type {
   ChatStreamRequest,
@@ -147,7 +147,7 @@ export class OutreachStep implements PipelineStepHandler {
     const scoreMap = new Map(finalScores.map((s) => [s.leadId, s]));
 
     /* -- Process in batches ---------------------------------------- */
-    const batchSize = OUTREACH_CONSTANTS.BATCH_SIZE;
+    const batchSize = PIPELINE_CONFIG.outreach.batchSize;
     const outreachDrafts: OutreachDraft[] = [];
     let leadsSucceeded = 0;
     let leadsFailed = 0;
@@ -323,7 +323,7 @@ export class OutreachStep implements PipelineStepHandler {
       requestId: "",
       userId: ctx.createdById,
       threadId: `pipeline-${ctx.pipelineRunId}`,
-      workspaceId: ctx.createdById,
+      workspaceId: ctx.companyId ?? ctx.createdById,
       leadId: lead.id,
       directoryId: "",
       text: "Generate a LinkedIn connection request message for this lead",
@@ -367,7 +367,7 @@ export class OutreachStep implements PipelineStepHandler {
 
     const req: ChatStreamRequest = {
       requestId,
-      workspaceId: ctx.createdById,
+      workspaceId: ctx.companyId ?? ctx.createdById,
       threadId: `pipeline-${ctx.pipelineRunId}`,
       userId: ctx.createdById,
       userMessage: {
@@ -398,7 +398,7 @@ export class OutreachStep implements PipelineStepHandler {
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
-      OUTREACH_CONSTANTS.STREAM_TIMEOUT_MS,
+      PIPELINE_CONFIG.outreach.streamTimeoutMs,
     );
 
     try {

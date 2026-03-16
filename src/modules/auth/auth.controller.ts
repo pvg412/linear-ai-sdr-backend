@@ -16,17 +16,91 @@ import {
 import { UserRole } from "@prisma/client";
 import { getUserFacingMessage } from "@/infra/userFacingError";
 
+/* ------------------------------------------------------------------ */
+/*  Simple in-memory rate limiter for the login endpoint               */
+/*                                                                     */
+/*  Tracks failed attempt counts per IP within a sliding window.       */
+/*  If an IP exceeds MAX_ATTEMPTS within WINDOW_MS, all subsequent     */
+/*  login requests from that IP are blocked until the window resets.   */
+/*                                                                     */
+/*  For multi-instance deployments a shared Redis counter is ideal,    */
+/*  but this provides meaningful protection for single-process setups. */
+/* ------------------------------------------------------------------ */
+
+const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 10;           // max failed attempts per window
+
+interface RateLimitEntry {
+  count: number;
+  windowStart: number;
+}
+
+const loginAttempts = new Map<string, RateLimitEntry>();
+
+/** Returns the client IP from Fastify request (trusts X-Forwarded-For when set). */
+function getClientIp(req: { ip?: string; headers?: Record<string, unknown> }): string {
+  const xff = req.headers?.["x-forwarded-for"];
+  if (typeof xff === "string") return xff.split(",")[0]?.trim() ?? req.ip ?? "unknown";
+  return req.ip ?? "unknown";
+}
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+
+  if (!entry || now - entry.windowStart > LOGIN_RATE_LIMIT_WINDOW_MS) {
+    return false;
+  }
+  return entry.count >= LOGIN_RATE_LIMIT_MAX_ATTEMPTS;
+}
+
+function recordFailedAttempt(ip: string): void {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+
+  if (!entry || now - entry.windowStart > LOGIN_RATE_LIMIT_WINDOW_MS) {
+    loginAttempts.set(ip, { count: 1, windowStart: now });
+  } else {
+    entry.count++;
+  }
+}
+
+function clearAttempts(ip: string): void {
+  loginAttempts.delete(ip);
+}
+
+// Periodically clean up stale entries to prevent unbounded memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of loginAttempts.entries()) {
+    if (now - entry.windowStart > LOGIN_RATE_LIMIT_WINDOW_MS) {
+      loginAttempts.delete(ip);
+    }
+  }
+}, 5 * 60 * 1000).unref();
+
 export function registerAuthRoutes(app: FastifyInstance, envArg?: Env) {
   const env = envArg ?? loadEnv();
   const service = new AuthService();
 
   app.post("/auth/login", async (request, reply) => {
+    // Rate limiting: block IPs that have too many failed attempts
+    const ip = getClientIp(request as { ip?: string; headers?: Record<string, unknown> });
+    if (isRateLimited(ip)) {
+      return reply.code(429).send({
+        message: "Too many failed login attempts. Please try again in 15 minutes.",
+      });
+    }
+
     const body = loginBodySchema.parse(request.body);
 
     try {
       const result = await service.login(body.email, body.password, env);
+      // Successful login resets the failed-attempt counter for this IP
+      clearAttempts(ip);
       return reply.code(200).send(result);
     } catch (e: unknown) {
+      recordFailedAttempt(ip);
       const message = getUserFacingMessage(e) ?? "Invalid credentials";
       return reply.code(401).send({ message });
     }

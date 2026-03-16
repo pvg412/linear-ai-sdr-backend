@@ -68,6 +68,21 @@ export class BillingService {
   }
 
   /**
+   * Compensating refund for a failed pipeline start.
+   * Credits back PIPELINE_RUN_CENTS when `createRun` or `queue.add` throws
+   * after the charge has already been deducted. Call in the catch block only.
+   * Failures are swallowed so the original error is not masked.
+   */
+  async refundPipelineCharge(userId: string): Promise<void> {
+    await this.balanceCommandService.adjustBalance({
+      userId,
+      amountCents: BILLING.PIPELINE_RUN_CENTS, // positive = credit back
+      reason: `Pipeline charge refund (start failed) — ${centsToBillingDollars(BILLING.PIPELINE_RUN_CENTS)}`,
+      performedById: userId,
+    });
+  }
+
+  /**
    * $0.01 charge for a single AI prompt parse (lead-search or outreach).
    * Call AFTER a successful gRPC parsePrompt / parseOutreachContext call.
    */

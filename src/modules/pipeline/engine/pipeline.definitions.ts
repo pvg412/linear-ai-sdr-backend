@@ -1,4 +1,5 @@
 import type { PipelineDefinition } from "@/modules/pipeline/schemas/pipeline.dto";
+import { PIPELINE_CONFIG as C } from "@/modules/pipeline/pipeline.config";
 
 /* ------------------------------------------------------------------ */
 /*  Built-in pipeline definitions                                     */
@@ -6,8 +7,10 @@ import type { PipelineDefinition } from "@/modules/pipeline/schemas/pipeline.dto
 
 /**
  * Default full pipeline:
- * lead-generation → scoring (initial) → enrichment → signals
- *   → scoring (final) → outreach
+ * lead-generation → scoring (initial) → enrichment (profile) → signals
+ *   (hiring + Reddit + Crunchbase + company research) → scoring (final) → outreach
+ *
+ * All tuneable parameters come from PIPELINE_CONFIG (pipeline.config.ts).
  */
 export const DEFAULT_COMPANY_PIPELINE: PipelineDefinition = {
   key: "default-company-pipeline",
@@ -22,53 +25,57 @@ export const DEFAULT_COMPANY_PIPELINE: PipelineDefinition = {
       id: "lead-generation",
       displayName: "Lead Generation",
       config: {},
-      timeoutMs: 15 * 60 * 1000, // 15 min (APIFY runs ~2-5 min for 100 leads)
+      timeoutMs: C.leadGeneration.timeoutMs,
     },
     {
       type: "scoring",
       id: "scoring-initial",
       displayName: "Initial Scoring",
-      config: { model: "default", _stepId: "scoring-initial" },
+      config: { _stepId: "scoring-initial" },
     },
     {
       type: "enrichment",
       id: "enrichment",
-      displayName: "Enrichment & Company Research",
+      displayName: "Profile Enrichment",
       config: {
-        includeCompanyResearch: true,
-        includeProfileEnrichment: true,
-        includeLinkedinPosts: true,
+        includeProfileEnrichment: C.enrichment.includeProfileEnrichment,
       },
-      timeoutMs: 10 * 60 * 1000, // 10 min
+      timeoutMs: C.enrichment.timeoutMs,
     },
     {
       type: "signals",
       id: "signals",
       displayName: "Signals Detection",
-      config: {},
-      timeoutMs: 20 * 60 * 1000, // 20 min (Reddit batch scraper: up to 5min per batch of 10 companies)
+      config: {
+        includeCompanyResearch: C.signals.includeCompanyResearch,
+        includeLinkedinPosts: C.signals.includeLinkedinPosts,
+        perplexityRecency: C.signals.perplexityRecency,
+        perplexityMaxResults: C.signals.perplexityMaxResults,
+      },
+      timeoutMs: C.signals.timeoutMs,
     },
     {
       type: "final-scoring",
       id: "scoring-final",
       displayName: "Final Scoring",
-      config: {
-        model: "default",
-        _stepId: "scoring-final",
-      },
+      config: { _stepId: "scoring-final" },
     },
     {
       type: "outreach",
       id: "outreach",
       displayName: "Outreach",
-      config: { channel: "linkedin" },
-      timeoutMs: 15 * 60 * 1000, // 15 min (two sequential gRPC calls per lead: parse + stream)
+      config: { channel: C.outreach.channel },
+      timeoutMs: C.outreach.timeoutMs,
     },
   ],
   defaults: {
-    onError: "stop",
-    retryPolicy: { maxAttempts: 2, backoffMs: 3000, backoffType: "exponential" },
-    timeoutMs: 5 * 60 * 1000,
+    onError: C.execution.defaultOnError,
+    retryPolicy: {
+      maxAttempts: C.execution.retryMaxAttempts,
+      backoffMs: C.execution.retryBackoffMs,
+      backoffType: C.execution.retryBackoffType,
+    },
+    timeoutMs: C.execution.defaultTimeoutMs,
   },
 };
 

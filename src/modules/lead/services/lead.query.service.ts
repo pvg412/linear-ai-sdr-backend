@@ -5,6 +5,7 @@ import { LeadRepository } from "../persistence/lead.repository";
 import { LeadPaginationFilters } from "../schemas/lead.schemas";
 import { getPrisma } from "@/infra/prisma";
 import { UserFacingError } from "@/infra/userFacingError";
+import { buildLeadVisibilityWhere } from "../lead-visibility";
 
 @injectable()
 export class LeadQueryService {
@@ -93,13 +94,29 @@ export class LeadQueryService {
     });
   }
 
-  async getLeadDetail(userId: string, leadId: string) {
+  async getLeadDetail(
+    userId: string,
+    leadId: string,
+    opts: { role?: string; companyId?: string | null } = {},
+  ) {
     await this.assertUserExists(userId);
 
     const prisma = getPrisma();
 
-    const lead = await prisma.lead.findUnique({
-      where: { id: leadId },
+    // Build visibility filter so that a user can only access leads they own
+    // or leads belonging to their company. This prevents IDOR attacks where
+    // an authenticated user could access any lead by guessing its ID.
+    const visibilityWhere = buildLeadVisibilityWhere({
+      ownerId: userId,
+      role: opts.role,
+      companyId: opts.companyId,
+    });
+
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id: leadId,
+        ...visibilityWhere,
+      },
       include: {
         emails: {
           orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],

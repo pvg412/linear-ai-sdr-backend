@@ -1,3 +1,5 @@
+import { createHash } from "crypto";
+
 import type { PrismaClient } from "@prisma/client";
 
 import type {
@@ -5,16 +7,27 @@ import type {
   HiringSignalResult,
   SignalJobDto,
 } from "@/capabilities/hiring-signals/signal-provider.dto";
+import type { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
+import { LeadDocumentKind } from "@/generated/aisdr/v1/ai_sdr";
+import type { LeadDocument } from "@/generated/aisdr/v1/ai_sdr";
+import { RAG_CONSTANTS } from "@/config/constants";
 import type { PipelineTools } from "@/modules/pipeline/schemas/pipeline.dto";
+import { PIPELINE_CONFIG } from "@/modules/pipeline/pipeline.config";
 
 import type { CompanyGroup, LeadInfo } from "./signals.helpers";
 import { runWithConcurrency } from "./signals.helpers";
+import {
+  hiringJobToRagText,
+  hiringSignalSummaryText,
+  signalDocId,
+  signalItemKey,
+} from "./signal-rag-text";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                               */
+/*  Constants (sourced from PIPELINE_CONFIG)                           */
 /* ------------------------------------------------------------------ */
 
-const COMPANY_CONCURRENCY = 5;
+const COMPANY_CONCURRENCY = PIPELINE_CONFIG.signals.hiringConcurrency;
 
 export type HiringLeadDetail = {
   openJobCount: number;
@@ -39,12 +52,14 @@ export class HiringSignalProcessor {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly providers: SignalProvider[],
+    private readonly aiGrpcClient: AiGrpcClient | null = null,
   ) {}
 
   async process(
     companyGroups: Map<string, CompanyGroup>,
     pipelineRunId: string,
     tools: PipelineTools,
+    userId?: string,
   ): Promise<HiringPhaseResult> {
     let companiesChecked = 0;
     let companiesWithSignals = 0;
@@ -93,6 +108,19 @@ export class HiringSignalProcessor {
         }
 
         await this.persistSignals(hiringResults, group.leadIds, pipelineRunId);
+
+        // RAG indexing — fire-and-forget per lead, non-fatal
+        for (const [leadId, detail] of detailsByLead) {
+          if (!group.leadIds.includes(leadId)) continue;
+          try {
+            await this.indexInAi(leadId, group.companyName, detail, userId ?? "");
+          } catch (err) {
+            tools.log.warn(
+              { leadId, company: group.companyName, err: (err as Error).message },
+              "Signals step: hiring RAG indexing failed (non-fatal)",
+            );
+          }
+        }
       }
 
       companiesChecked++;
@@ -157,6 +185,58 @@ export class HiringSignalProcessor {
   /* ---------------------------------------------------------------- */
   /*  Internal                                                          */
   /* ---------------------------------------------------------------- */
+
+  private async indexInAi(
+    leadId: string,
+    companyName: string,
+    detail: HiringLeadDetail,
+    workspaceId: string,
+  ): Promise<void> {
+    if (!this.aiGrpcClient) return;
+
+    const nowMs = String(Date.now());
+
+    const makeDoc = (documentId: string, text: string): LeadDocument => ({
+      documentId,
+      leadId,
+      kind: LeadDocumentKind.LEAD_DOCUMENT_KIND_HIRING_SIGNAL,
+      text,
+      metadata: { leadId, signalType: "hiring", companyName },
+      updatedAtMs: nowMs,
+      contentHash: createHash("sha256").update(text).digest("hex"),
+    });
+
+    // 1. Summary document (aggregate stats, no individual job listings)
+    const documents: LeadDocument[] = [
+      makeDoc(
+        signalDocId("hiring", leadId),
+        hiringSignalSummaryText(companyName, detail),
+      ),
+    ];
+
+    // 2. One document per job listing
+    for (const job of detail.jobs) {
+      const key = signalItemKey([
+        job.externalId,
+        // fallback: derive key from content when externalId is absent
+        job.externalId == null
+          ? `${job.jobTitle ?? ""}|${job.datePosted ?? ""}|${job.companyName ?? ""}`
+          : null,
+      ]);
+      documents.push(makeDoc(signalDocId("hiring", leadId, key), hiringJobToRagText(companyName, job)));
+    }
+
+    // 3. Send in batches of RAG_CONSTANTS.SIGNAL_BATCH_SIZE
+    for (let i = 0; i < documents.length; i += RAG_CONSTANTS.SIGNAL_BATCH_SIZE) {
+      const batch = documents.slice(i, i + RAG_CONSTANTS.SIGNAL_BATCH_SIZE);
+      await this.aiGrpcClient.upsertLeadDocuments({
+        requestId: "",
+        workspaceId,
+        allowPartial: true,
+        documents: batch,
+      });
+    }
+  }
 
   private async fetchSignals(
     group: CompanyGroup,

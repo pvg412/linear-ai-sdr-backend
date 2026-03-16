@@ -16,7 +16,7 @@ export class OutreachPromptParseCommandHandler implements WsCommandHandler {
   readonly type = "outreach.prompt.parse";
 
   async handle(context: WsContext, payload: unknown): Promise<void> {
-    const { socket, deps, threadId, userId, tag } = context;
+    const { socket, deps, threadId, userId, companyId, tag } = context;
     const typedPayload = payload as OutreachPromptParsePayload;
 
     const suggestedChannel = typedPayload.suggestedChannel
@@ -37,6 +37,7 @@ export class OutreachPromptParseCommandHandler implements WsCommandHandler {
         text: typedPayload.text,
         directoryId: typedPayload.directoryId,
         suggestedChannel,
+        companyId,
       },
     );
 

@@ -34,14 +34,14 @@ const SERVICE_KEY = "crunchbase-scraper";
  */
 const DAILY_REQUEST_LIMIT = 200;
 
-/** Maximum number of competitors to extract from org_similarity_list. */
-const MAX_COMPETITORS = 5;
+/** Fallback: maximum number of competitors to extract from org_similarity_list. */
+const DEFAULT_MAX_COMPETITORS = 5;
 
-/** Maximum number of technologies to extract from builtwith_tech_used_list. */
-const MAX_TECH_ITEMS = 15;
+/** Fallback: maximum number of technologies to extract from builtwith_tech_used_list. */
+const DEFAULT_MAX_TECH_ITEMS = 15;
 
-/** Number of companies to process in parallel (Apify actor calls). */
-const COMPANY_CONCURRENCY = 3;
+/** Fallback: number of companies to process in parallel (Apify actor calls). */
+const DEFAULT_COMPANY_CONCURRENCY = 3;
 
 function utcDateString(): string {
   return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
@@ -116,6 +116,10 @@ export class CrunchbaseApifyProvider implements CrunchbaseSignalProvider {
       return new Map();
     }
 
+    const concurrency = input.concurrency ?? DEFAULT_COMPANY_CONCURRENCY;
+    const maxCompetitors = input.maxCompetitors ?? DEFAULT_MAX_COMPETITORS;
+    const maxTechItems = input.maxTechItems ?? DEFAULT_MAX_TECH_ITEMS;
+
     lg.info(
       { companies: input.companies.length },
       "[CrunchbaseApify] Starting per-company lookup",
@@ -160,7 +164,7 @@ export class CrunchbaseApifyProvider implements CrunchbaseSignalProvider {
             { companyName: company.companyName, permalink: rawResult.identifier?.permalink },
             "[CrunchbaseApify] Company found",
           );
-          return { key, result: mapToResult(company.companyName, rawResult) };
+          return { key, result: mapToResult(company.companyName, rawResult, maxCompetitors, maxTechItems) };
         } else {
           lg.info(
             { companyName: company.companyName, slugsTried: candidateSlugs.length },
@@ -193,7 +197,7 @@ export class CrunchbaseApifyProvider implements CrunchbaseSignalProvider {
     // Run with concurrency limit to avoid overwhelming Apify
     const results = await runWithConcurrency(
       input.companies,
-      COMPANY_CONCURRENCY,
+      concurrency,
       processCompany,
     );
 
@@ -299,6 +303,8 @@ function buildNotFoundResult(companyName: string): CrunchbaseSignalResult {
 function mapToResult(
   companyName: string,
   raw: CrunchbaseCompanyResult,
+  maxCompetitors: number = DEFAULT_MAX_COMPETITORS,
+  maxTechItems: number = DEFAULT_MAX_TECH_ITEMS,
 ): CrunchbaseSignalResult {
   const funding = raw.funding_rounds_summary;
   const growth = raw.growth_and_heat;
@@ -318,10 +324,10 @@ function mapToResult(
   const categories = extractCategories(raw);
 
   // ── Top competitors from org_similarity_list ──────────────────────
-  const topCompetitors = extractCompetitors(raw);
+  const topCompetitors = extractCompetitors(raw, maxCompetitors);
 
   // ── Tech stack from builtwith_tech_used_list ──────────────────────
-  const techStack = extractTechStack(raw);
+  const techStack = extractTechStack(raw, maxTechItems);
 
   // ── Layoffs ───────────────────────────────────────────────────────
   const hadLayoffs = Array.isArray(raw.layoff_list) && raw.layoff_list.length > 0;
@@ -392,16 +398,16 @@ function extractCategories(raw: CrunchbaseCompanyResult): string | null {
 
 /**
  * Extract top competitor names from org_similarity_list (sorted by score desc).
- * Returns up to MAX_COMPETITORS names, comma-separated.
+ * Returns up to maxCompetitors names, comma-separated.
  */
-function extractCompetitors(raw: CrunchbaseCompanyResult): string | null {
+function extractCompetitors(raw: CrunchbaseCompanyResult, maxCompetitors: number = DEFAULT_MAX_COMPETITORS): string | null {
   const list = raw.org_similarity_list;
   if (!Array.isArray(list) || list.length === 0) return null;
 
   const competitors = list
     .filter((item) => item?.target?.value)
     .sort((a, b) => (b?.score ?? 0) - (a?.score ?? 0))
-    .slice(0, MAX_COMPETITORS)
+    .slice(0, maxCompetitors)
     .map((item) => item!.target!.value!);
 
   return competitors.length > 0 ? competitors.join(",") : null;
@@ -409,14 +415,14 @@ function extractCompetitors(raw: CrunchbaseCompanyResult): string | null {
 
 /**
  * Extract technology names from builtwith_tech_used_list.
- * Returns up to MAX_TECH_ITEMS names, comma-separated.
+ * Returns up to maxTechItems names, comma-separated.
  */
-function extractTechStack(raw: CrunchbaseCompanyResult): string | null {
+function extractTechStack(raw: CrunchbaseCompanyResult, maxTechItems: number = DEFAULT_MAX_TECH_ITEMS): string | null {
   const list = raw.builtwith_tech_used_list;
   if (!Array.isArray(list) || list.length === 0) return null;
 
   const techs = list
-    .slice(0, MAX_TECH_ITEMS)
+    .slice(0, maxTechItems)
     .map((item) => item?.identifier?.value)
     .filter((v): v is string => Boolean(v));
 

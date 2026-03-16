@@ -10,10 +10,6 @@ import type { ServiceCatalogRepository } from "@/modules/service-catalog/persist
 
 import { CompanySize as ProtoCompanySize } from "@/generated/aisdr/v1/ai_sdr";
 import type {
-  CompanyResearchItemProto,
-  CrunchbaseSignalProto,
-  HiringSignalProto,
-  RedditSignalProto,
   LeadProfileProto,
   ScoreLeadFinalResponse,
   ServiceCatalogProto,
@@ -21,9 +17,7 @@ import type {
   SignalCategoryDescriptionProto,
 } from "@/generated/aisdr/v1/ai_sdr";
 
-
-import { mapCategoryToProto } from "@/modules/company-research/utils/category-mapping";
-import { FINAL_SCORING_CONSTANTS } from "@/config/constants";
+import { PIPELINE_CONFIG } from "@/modules/pipeline/pipeline.config";
 
 import type { PipelineStepHandler } from "./step.interface";
 import type {
@@ -37,10 +31,10 @@ import type {
 /* ------------------------------------------------------------------ */
 
 const {
-  BATCH_SIZE,
-  ICP_FIT_WEIGHT,
-  SIGNAL_STRENGTH_WEIGHT,
-} = FINAL_SCORING_CONSTANTS;
+  batchSize: BATCH_SIZE,
+  icpFitWeight: ICP_FIT_WEIGHT,
+  signalStrengthWeight: SIGNAL_STRENGTH_WEIGHT,
+} = PIPELINE_CONFIG.finalScoring;
 
 /** stepInstanceId written by the initial scoring step. */
 const INITIAL_SCORING_STEP_ID = "scoring-initial";
@@ -82,15 +76,16 @@ interface FinalScoringProgress {
  * re-evaluate ICP fit.
  *
  * Signal strength (0-100) is computed by the AI via the `ScoreLeadFinal`
- * gRPC method, which receives the lead profile, service catalogs,
- * company research, and hiring signals for context.
+ * gRPC method. The AI service retrieves signals (company research, hiring,
+ * Reddit, Crunchbase) from ChromaDB using workspace_id + lead_id scoping,
+ * so the backend no longer needs to load and send raw signal data.
  *
  * The composite final score is:
  *   finalScore = round(icpFit * ICP_FIT_WEIGHT + signalStrength * SIGNAL_STRENGTH_WEIGHT)
  *
  * If a lead has no initial score, icpFit defaults to 0.
- * If a lead's company has no hiring signals, signalStrength depends on
- * the AI's evaluation of other context (likely 0).
+ * If the AI cannot retrieve signals, signalStrength depends on whatever
+ * was indexed in ChromaDB (likely 0 if nothing was indexed).
  *
  * All leads pass through (no threshold filtering) — the purpose of
  * final scoring is ranking, not elimination.
@@ -141,6 +136,11 @@ export class FinalScoringStep implements PipelineStepHandler {
     // ── Step 2: Fetch service catalogs (with signal category descriptions) ─
     tools.emitProgress("Loading service catalogs...");
 
+    // Resolve workspace ID: use companyId (the company account) so that
+    // signals indexed under the company are retrievable regardless of which
+    // user (COMPANY or SALE_MANAGER) triggered the pipeline.
+    const workspaceId = ctx.companyId ?? ctx.createdById;
+
     let serviceCatalogsProto: ServiceCatalogProto[] = [];
     if (ctx.companyId) {
       const catalogs = await this.serviceCatalogRepo.listByCompany(ctx.companyId);
@@ -161,28 +161,19 @@ export class FinalScoringStep implements PipelineStepHandler {
           .map((sc): SignalCategoryDescriptionProto => ({
             category: sc.category,
             description: sc.description,
+            expandedDescription: (sc as { expandedDescription?: string | null }).expandedDescription ?? "",
           })),
       }));
     }
 
     tools.log.info(
-      { companyId: ctx.companyId, catalogCount: serviceCatalogsProto.length },
+      { companyId: ctx.companyId, workspaceId, catalogCount: serviceCatalogsProto.length },
       "Service catalogs loaded for final scoring",
-    );
-
-    // ── Step 3: Fetch company research data ──────────────────────────
-    tools.emitProgress("Loading company research data...");
-
-    const companyResearchByLead = await this.loadCompanyResearch(leadIds);
-
-    tools.log.info(
-      { leadsWithResearch: companyResearchByLead.size },
-      "Company research data loaded",
     );
 
     if (await tools.checkCancelled()) return cancelledResult();
 
-    // ── Step 4: Load ICP fit from initial scoring ────────────────────
+    // ── Step 3: Load ICP fit from initial scoring ────────────────────
     tools.emitProgress("Loading initial ICP scores...");
 
     const initialScoresByLead = await this.loadInitialScores(leadIds, ctx.pipelineRunId);
@@ -192,39 +183,11 @@ export class FinalScoringStep implements PipelineStepHandler {
       "Initial ICP scores loaded for final scoring",
     );
 
-    // ── Step 5: Load hiring signals ─────────────────────────────────
-    tools.emitProgress("Loading hiring signals...");
-
-    const hiringSignalsByLead = await this.loadHiringSignals(leadIds, ctx.pipelineRunId);
-
-    tools.log.info(
-      { leadsWithSignals: hiringSignalsByLead.size },
-      "Hiring signals loaded for final scoring",
-    );
-
-    // ── Step 5b: Load Reddit signals ────────────────────────────────
-    tools.emitProgress("Loading Reddit signals...");
-
-    const redditSignalsByLead = await this.loadRedditSignals(leadIds, ctx.pipelineRunId);
-
-    tools.log.info(
-      { leadsWithRedditSignals: redditSignalsByLead.size },
-      "Reddit signals loaded for final scoring",
-    );
-
-    // ── Step 5c: Load Crunchbase signals ─────────────────────────────
-    tools.emitProgress("Loading Crunchbase signals...");
-
-    const crunchbaseSignalsByLead = await this.loadCrunchbaseSignals(leadIds, ctx.pipelineRunId);
-
-    tools.log.info(
-      { leadsWithCrunchbaseSignals: crunchbaseSignalsByLead.size },
-      "Crunchbase signals loaded for final scoring",
-    );
-
     if (await tools.checkCancelled()) return cancelledResult();
 
-    // ── Step 6: Batch-parallel signal strength scoring ───────────────
+    // ── Step 4: Batch-parallel signal strength scoring ───────────────
+    // The AI service retrieves signals from ChromaDB via workspace_id + lead_id,
+    // so we no longer load raw signal data from the DB here.
     tools.emitProgress("Evaluating signal strength via AI...", { total: runLeads.length });
 
     const scoredLeads: FinalScoredLead[] = [];
@@ -250,10 +213,7 @@ export class FinalScoringStep implements PipelineStepHandler {
             initial?.score ?? 0,
             initial?.reasoning ?? "",
             serviceCatalogsProto,
-            companyResearchByLead.get(rl.leadId) ?? [],
-            hiringSignalsByLead.get(rl.leadId),
-            redditSignalsByLead.get(rl.leadId),
-            crunchbaseSignalsByLead.get(rl.leadId),
+            workspaceId,
           );
         }),
       );
@@ -271,12 +231,12 @@ export class FinalScoringStep implements PipelineStepHandler {
       );
     }
 
-    // ── Step 7: Persist all scores to DB ─────────────────────────────
+    // ── Step 5: Persist all scores to DB ─────────────────────────────
     tools.emitProgress("Saving final scores to database...");
 
     await this.persistScores(scoredLeads, ctx.pipelineRunId, stepInstanceId);
 
-    // ── Step 8: Log summary ────────────────────────────────────────────
+    // ── Step 6: Log summary ────────────────────────────────────────────
     const totalFinalScore = scoredLeads.reduce((sum, s) => sum + s.finalScore, 0);
     const averageFinalScore = scoredLeads.length > 0
       ? Math.round(totalFinalScore / scoredLeads.length)
@@ -299,7 +259,7 @@ export class FinalScoringStep implements PipelineStepHandler {
       { completed: scoredLeads.length, total: runLeads.length },
     );
 
-    // ── Step 9: Return result ────────────────────────────────────────
+    // ── Step 7: Return result ────────────────────────────────────────
     return {
       outputSummary: {
         total: scoredLeads.length,
@@ -335,6 +295,9 @@ export class FinalScoringStep implements PipelineStepHandler {
    * Evaluate signal strength for a single lead via gRPC ScoreLeadFinal,
    * then compute the composite finalScore from icpFit + signalStrength.
    *
+   * The AI service retrieves all signals (company research, hiring, Reddit,
+   * Crunchbase) from ChromaDB using workspace_id + lead_id scoping.
+   *
    * `icpFit` and `icpReasoning` are loaded from the initial scoring
    * step's LeadScore row and passed in — the AI is NOT asked to
    * re-evaluate ICP fit here.
@@ -348,10 +311,7 @@ export class FinalScoringStep implements PipelineStepHandler {
     icpFit: number,
     icpReasoning: string,
     serviceCatalogs: ServiceCatalogProto[],
-    companyResearchItems: CompanyResearchItemProto[],
-    hiringSignals?: HiringSignalProto,
-    redditSignals?: RedditSignalProto,
-    crunchbaseSignals?: CrunchbaseSignalProto,
+    workspaceId: string,
   ): Promise<FinalScoredLead> {
     const fullLead = leadMap.get(leadId);
     const profile = buildLeadProfile(leadId, fullLead);
@@ -361,10 +321,8 @@ export class FinalScoringStep implements PipelineStepHandler {
         requestId: "",
         lead: profile,
         serviceCatalogs,
-        companyResearchItems,
-        hiringSignals,
-        redditSignals,
-        crunchbaseSignals,
+        workspaceId,
+        leadId,
       });
 
       const signalStrength = clampScore(resp.signalStrength);
@@ -424,238 +382,6 @@ export class FinalScoringStep implements PipelineStepHandler {
     }
 
     return result;
-  }
-
-  /**
-   * Load completed company research items for the given lead IDs.
-   * Returns a map of leadId -> CompanyResearchItemProto[].
-   */
-  private async loadCompanyResearch(
-    leadIds: string[],
-  ): Promise<Map<string, CompanyResearchItemProto[]>> {
-    const researches = await this.prisma.companyResearch.findMany({
-      where: {
-        leadId: { in: leadIds },
-        status: "COMPLETED",
-      },
-      include: { items: true },
-      orderBy: { createdAt: "desc" },
-    });
-
-    const result = new Map<string, CompanyResearchItemProto[]>();
-
-    for (const research of researches) {
-      // Use the most recent completed research per lead
-      if (result.has(research.leadId)) continue;
-
-      const items: CompanyResearchItemProto[] = research.items.map((item, idx) => ({
-        index: idx + 1,
-        date: item.date ?? "",
-        summary: item.summary,
-        sourceUrl: item.sourceUrl,
-        category: mapCategoryToProto(item.category),
-        sourceName: item.source ?? "",
-      }));
-
-      result.set(research.leadId, items);
-    }
-
-    return result;
-  }
-
-  /**
-   * Load hiring signals for the given lead IDs within a pipeline run.
-   * Aggregates signals from all providers per lead into a single
-   * HiringSignalProto suitable for the gRPC request.
-   *
-   * Returns a map of leadId -> HiringSignalProto (only for leads that
-   * have at least one signal).
-   */
-  private async loadHiringSignals(
-    leadIds: string[],
-    pipelineRunId: string,
-  ): Promise<Map<string, HiringSignalProto>> {
-    const signals = await this.prisma.hiringSignal.findMany({
-      where: {
-        leadId: { in: leadIds },
-        pipelineRunId,
-      },
-      include: {
-        jobs: {
-          include: { locations: true },
-        },
-      },
-    });
-
-    // Group by leadId and merge results from multiple providers
-    const byLead = new Map<string, HiringSignalProto>();
-
-    for (const signal of signals) {
-      const existing = byLead.get(signal.leadId);
-
-      const signalJobs = signal.jobs.map((job) => ({
-        jobTitle: job.jobTitle ?? "",
-        team: job.team ?? "",
-        jobType: job.jobType ?? "",
-        locationType: job.locationType ?? "",
-        datePosted: job.datePosted ?? "",
-        requirementsSummary: job.requirementsSummary ?? "",
-        skills: job.skills,
-        technologies: job.technologies,
-        jobCategories: job.jobCategories,
-        locations: job.locations.map((loc) => ({
-          city: loc.city ?? "",
-          region: loc.region ?? "",
-          country: loc.country ?? "",
-        })),
-      }));
-
-      if (existing) {
-        // Merge: sum job counts, union departments/titles, concat jobs
-        existing.openJobCount += signal.openJobCount;
-        const deptSet = new Set([...existing.departments, ...signal.departments]);
-        existing.departments = Array.from(deptSet);
-        const titleSet = new Set([...existing.topJobTitles, ...signal.topJobTitles]);
-        existing.topJobTitles = Array.from(titleSet).slice(0, 10);
-        existing.jobs.push(...signalJobs);
-      } else {
-        byLead.set(signal.leadId, {
-          companyName: signal.companyName,
-          openJobCount: signal.openJobCount,
-          departments: [...signal.departments],
-          topJobTitles: signal.topJobTitles.slice(0, 10),
-          jobs: signalJobs,
-        });
-      }
-    }
-
-    return byLead;
-  }
-
-  /**
-   * Load Reddit signals for the given lead IDs within a pipeline run.
-   * Aggregates signals from all providers per lead into a single
-   * RedditSignalProto suitable for the gRPC request.
-   *
-   * Returns a map of leadId -> RedditSignalProto (only for leads that
-   * have at least one signal).
-   */
-  private async loadRedditSignals(
-    leadIds: string[],
-    pipelineRunId: string,
-  ): Promise<Map<string, RedditSignalProto>> {
-    const signals = await this.prisma.redditSignal.findMany({
-      where: {
-        leadId: { in: leadIds },
-        pipelineRunId,
-      },
-      include: { posts: true },
-    });
-
-    const byLead = new Map<string, RedditSignalProto>();
-
-    for (const signal of signals) {
-      const signalPosts = signal.posts.map((post: {
-        subreddit: string;
-        postType: string;
-        signalType: string;
-        title: string | null;
-        content: string | null;
-        author: string | null;
-        url: string | null;
-        score: number | null;
-        numComments: number | null;
-        createdUtc: string | null;
-      }) => ({
-        subreddit: post.subreddit,
-        postType: post.postType,
-        signalType: post.signalType,
-        title: post.title ?? "",
-        content: post.content ?? "",
-        author: post.author ?? "",
-        url: post.url ?? "",
-        score: post.score ?? 0,
-        numComments: post.numComments ?? 0,
-        createdUtc: post.createdUtc ?? "",
-      }));
-
-      const existing = byLead.get(signal.leadId);
-      if (existing) {
-        existing.totalMentions += signal.totalMentions;
-        existing.totalActivities += signal.totalActivities;
-        const subSet = new Set([...existing.subredditsFound, ...signal.subredditsFound]);
-        existing.subredditsFound = Array.from(subSet);
-        existing.posts.push(...signalPosts);
-      } else {
-        byLead.set(signal.leadId, {
-          companyName: signal.companyName,
-          totalMentions: signal.totalMentions,
-          totalActivities: signal.totalActivities,
-          subredditsFound: [...signal.subredditsFound],
-          posts: signalPosts,
-        });
-      }
-    }
-
-    return byLead;
-  }
-
-  /**
-   * Load Crunchbase signals from the DB and map to proto format.
-   * Returns a map of leadId → CrunchbaseSignalProto.
-   *
-   * Only one CrunchbaseSignal row per lead is expected (unique constraint
-   * on [pipelineRunId, leadId, providerKey]). Leads with `crunchbaseFound: false`
-   * are still included so the AI can see that Crunchbase was checked but no data was found.
-   */
-  private async loadCrunchbaseSignals(
-    leadIds: string[],
-    pipelineRunId: string,
-  ): Promise<Map<string, CrunchbaseSignalProto>> {
-    const rows = await this.prisma.crunchbaseSignal.findMany({
-      where: {
-        leadId: { in: leadIds },
-        pipelineRunId,
-      },
-    });
-
-    const byLead = new Map<string, CrunchbaseSignalProto>();
-
-    for (const row of rows) {
-      // First row per lead wins (normally just one per provider)
-      if (byLead.has(row.leadId)) continue;
-
-      byLead.set(row.leadId, {
-        companyName: row.companyName,
-        crunchbaseFound: row.crunchbaseFound,
-        crunchbasePermalink: row.crunchbasePermalink ?? "",
-        fundingTotalUsd: row.fundingTotalUsd ?? 0,
-        lastFundingAt: row.lastFundingAt ?? "",
-        lastFundingType: row.lastFundingType ?? "",
-        numFundingRounds: row.numFundingRounds ?? 0,
-        growthScore: row.growthScore ?? 0,
-        heatScore: row.heatScore ?? 0,
-        fundingPrediction: row.fundingPrediction ?? 0,
-        fundingPrediction0To5: row.fundingPrediction0to5 ?? 0,
-        fundingPrediction6To11: row.fundingPrediction6to11 ?? 0,
-        fundingPrediction12To24: row.fundingPrediction12to24 ?? 0,
-        fundingPrediction24Plus: row.fundingPrediction24plus ?? 0,
-        employeeCountEnum: row.employeeCountEnum ?? "",
-        semrushVisits: row.semrushVisits ?? 0,
-        shortDescription: row.shortDescription ?? "",
-        foundedOn: row.foundedOn ?? "",
-        operatingStatus: row.operatingStatus ?? "",
-        categories: row.categories ?? "",
-        numInvestors: row.numInvestors ?? 0,
-        topCompetitors: row.topCompetitors ?? "",
-        hadLayoffs: row.hadLayoffs,
-        techStack: row.techStack ?? "",
-        ipoPrediction: row.ipoPrediction ?? 0,
-        acquisitionPrediction: row.acquisitionPrediction ?? 0,
-      });
-    }
-
-    return byLead;
   }
 
   /**

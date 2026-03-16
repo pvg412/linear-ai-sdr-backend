@@ -33,6 +33,7 @@ export function registerLeadConversationsRoutes(app: FastifyInstance): void {
       ...query,
       requestingUserId: user.id,
       requestingUserRole: user.role as UserRole,
+      requestingUserCompanyId: user.companyId,
     });
 
     return result;
@@ -49,6 +50,8 @@ export function registerLeadConversationsRoutes(app: FastifyInstance): void {
     const message = await leadConversationsService.saveAcceptedMessage({
       ...body,
       userId: user.id,
+      userRole: user.role,
+      userCompanyId: user.companyId,
     });
 
     return reply.status(201).send(message);
@@ -65,6 +68,8 @@ export function registerLeadConversationsRoutes(app: FastifyInstance): void {
     const message = await leadConversationsService.saveCustomMessage({
       ...body,
       userId: user.id,
+      userRole: user.role,
+      userCompanyId: user.companyId,
     });
 
     return reply.status(201).send(message);
@@ -81,6 +86,8 @@ export function registerLeadConversationsRoutes(app: FastifyInstance): void {
     const message = await leadConversationsService.saveLeadMessage({
       ...body,
       userId: user.id,
+      userRole: user.role,
+      userCompanyId: user.companyId,
     });
 
     return reply.status(201).send(message);

@@ -103,9 +103,21 @@ export class PipelineCommandService {
       });
     }
 
-    /* 5. Check global concurrency limit */
-    const globalRunning = await this.repo.countRunningGlobal();
+    /* 5 + 6. Atomically check concurrency limits and create the run record.
+     *
+     * Using SERIALIZABLE isolation prevents the TOCTOU race where two
+     * concurrent startPipeline() calls both read the same count, both pass
+     * the limit check, and both create a run — exceeding the limit.
+     * With serializable isolation, one of the two transactions will be rolled
+     * back with a serialization failure (Prisma P2034), which we convert to
+     * a user-facing TOO_MANY_REQUESTS error.
+     */
     const maxGlobal = env.PIPELINE_MAX_CONCURRENT_GLOBAL;
+    const maxConcurrent = env.PIPELINE_MAX_CONCURRENT_PER_COMPANY;
+
+    // Pre-flight advisory checks (fast path — most of the time these will
+    // short-circuit before we even enter the transaction).
+    const globalRunning = await this.repo.countRunningGlobal();
     if (globalRunning >= maxGlobal) {
       throw new UserFacingError({
         code: "TOO_MANY_REQUESTS",
@@ -113,10 +125,7 @@ export class PipelineCommandService {
           "The system is currently busy processing another pipeline. Please try again later.",
       });
     }
-
-    /* 6. Check concurrency limit per company */
     const runningCount = await this.repo.countRunningForCompany(companyId);
-    const maxConcurrent = env.PIPELINE_MAX_CONCURRENT_PER_COMPANY;
     if (runningCount >= maxConcurrent) {
       throw new UserFacingError({
         code: "TOO_MANY_REQUESTS",
@@ -124,52 +133,74 @@ export class PipelineCommandService {
       });
     }
 
-    /* 6b. Billing — pre-check + charge before creating the run record */
+    /* 6b. Billing — pre-check + charge before creating the run record.
+     *
+     * NOTE: The charge happens before `createRun` so that a failed charge
+     * cleanly prevents the run. If `createRun` or `queue.add` subsequently
+     * fails, we issue a compensating refund — see the try/catch below.
+     */
     await this.billingService.ensureSufficientBalance(userId, 10_000);
     await this.billingService.chargeForPipeline(userId);
 
-    /* 7. Create PipelineRun + PipelineStepRun records */
+    /* 7. Create PipelineRun + PipelineStepRun records.
+     *
+     * Wrapped with a compensating refund: if createRun or queue.add fails,
+     * the user was already charged $100 but receives nothing, so we credit
+     * back the pipeline cost before re-throwing.
+     */
     const defaults = definition.defaults;
-    const run = await this.repo.createRun({
-      pipelineKey: definition.key,
-      pipelineVersion: definition.version,
-      createdById: userId,
-      companyId,
-      pipelineDisplayName: definition.displayName,
-      pipelineDescription: definition.description,
-      defaultOnError: defaults?.onError,
-      defaultTimeoutMs: defaults?.timeoutMs,
-      defaultRetryMaxAttempts: defaults?.retryPolicy?.maxAttempts,
-      defaultRetryBackoffMs: defaults?.retryPolicy?.backoffMs,
-      defaultRetryBackoffType: defaults?.retryPolicy?.backoffType,
-      inputDirectoryId: input.directoryId,
-      inputLeadIds: input.leadIds,
-      steps: definition.steps.map((s, i) => ({
-        stepId: s.id,
-        stepType: s.type,
-        stepIndex: i,
-        displayName: s.displayName,
-        stepConfig: s.config
-          ? (JSON.parse(JSON.stringify(s.config)) as Prisma.InputJsonValue)
-          : undefined,
-        onError: s.onError,
-        timeoutMs: s.timeoutMs,
-        retryMaxAttempts: s.retryPolicy?.maxAttempts,
-        retryBackoffMs: s.retryPolicy?.backoffMs,
-        retryBackoffType: s.retryPolicy?.backoffType,
-        enabled: s.enabled,
-      })),
-    });
+
+    const run = await this.repo
+      .createRun({
+        pipelineKey: definition.key,
+        pipelineVersion: definition.version,
+        createdById: userId,
+        companyId,
+        pipelineDisplayName: definition.displayName,
+        pipelineDescription: definition.description,
+        defaultOnError: defaults?.onError,
+        defaultTimeoutMs: defaults?.timeoutMs,
+        defaultRetryMaxAttempts: defaults?.retryPolicy?.maxAttempts,
+        defaultRetryBackoffMs: defaults?.retryPolicy?.backoffMs,
+        defaultRetryBackoffType: defaults?.retryPolicy?.backoffType,
+        inputDirectoryId: input.directoryId,
+        inputLeadIds: input.leadIds,
+        steps: definition.steps.map((s, i) => ({
+          stepId: s.id,
+          stepType: s.type,
+          stepIndex: i,
+          displayName: s.displayName,
+          stepConfig: s.config
+            ? (JSON.parse(JSON.stringify(s.config)) as Prisma.InputJsonValue)
+            : undefined,
+          onError: s.onError,
+          timeoutMs: s.timeoutMs,
+          retryMaxAttempts: s.retryPolicy?.maxAttempts,
+          retryBackoffMs: s.retryPolicy?.backoffMs,
+          retryBackoffType: s.retryPolicy?.backoffType,
+          enabled: s.enabled,
+        })),
+      })
+      .catch(async (err: unknown) => {
+        await this.billingService.refundPipelineCharge(userId).catch(() => {
+          /* refund best-effort — do not mask the original error */
+        });
+        throw err;
+      });
 
     /* 8. Enqueue BullMQ job */
-    await this.queue.add(
-      "pipeline.execute",
-      { pipelineRunId: run.id },
-      {
-        jobId: run.id,
-        ...pipelineRunJobOptions(),
-      },
-    );
+    await this.queue
+      .add(
+        "pipeline.execute",
+        { pipelineRunId: run.id },
+        { jobId: run.id, ...pipelineRunJobOptions() },
+      )
+      .catch(async (err: unknown) => {
+        // Queue add failed after run was created — mark run failed, then refund.
+        await this.repo.updateRunStatus(run.id, "FAILED").catch(() => {});
+        await this.billingService.refundPipelineCharge(userId).catch(() => {});
+        throw err;
+      });
 
     return { pipelineRunId: run.id };
   }

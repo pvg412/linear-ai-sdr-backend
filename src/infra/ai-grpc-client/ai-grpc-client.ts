@@ -8,6 +8,8 @@ import type {
   ChatStreamRequest,
   DeleteLeadDocumentsRequest,
   DeleteLeadDocumentsResponse,
+  ExpandSignalDescriptionsRequest,
+  ExpandSignalDescriptionsResponse,
   ParseLeadSearchPromptRequest,
   ParseLeadSearchPromptResponse,
   ParseLeadSearchPromptWithServiceCatalogsRequest,
@@ -45,6 +47,7 @@ export type UnaryTimeouts = Partial<{
   companyResearchMs: number;
   scoreLeadMs: number;
   scoreLeadFinalMs: number;
+  expandSignalDescriptionsMs: number;
 }>;
 
 export interface AiGrpcClientOptions {
@@ -122,6 +125,7 @@ export class AiGrpcClient {
       companyResearchMs: opts.timeouts?.companyResearchMs ?? 120_000,
       scoreLeadMs: opts.timeouts?.scoreLeadMs ?? 120_000,
       scoreLeadFinalMs: opts.timeouts?.scoreLeadFinalMs ?? 120_000,
+      expandSignalDescriptionsMs: opts.timeouts?.expandSignalDescriptionsMs ?? 120_000,
     };
 
     const insecure = opts.insecure ?? true;
@@ -335,6 +339,24 @@ export class AiGrpcClient {
       (r, md, opt, cb) => this.client.scoreLeadFinal(r, md, opt, cb),
       normalized,
       this.timeouts.scoreLeadFinalMs,
+    );
+  }
+
+  /**
+   * Expand human-readable signal descriptions into HyDE-style hypothetical
+   * documents for better semantic (vector) search quality.
+   * Call once when signal descriptions are saved; store the result and pass
+   * `expandedDescription` on every ScoreLeadFinal / ScoreLead call.
+   */
+  expandSignalDescriptions(
+    req: ExpandSignalDescriptionsRequest,
+  ): Promise<ExpandSignalDescriptionsResponse> {
+    const normalized = withRequestId(req);
+    return this.unary(
+      "expandSignalDescriptions",
+      (r, md, opt, cb) => this.client.expandSignalDescriptions(r, md, opt, cb),
+      normalized,
+      this.timeouts.expandSignalDescriptionsMs,
     );
   }
 

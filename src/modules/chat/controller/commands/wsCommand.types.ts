@@ -11,6 +11,11 @@ export type WsContext = {
   socket: ChatWsSocket;
   threadId: string;
   userId: string;
+  /** Company-level workspace ID for RAG scoping.
+   *  COMPANY role: null (their own userId serves as the workspace).
+   *  SALE_MANAGER role: the parent company's user ID.
+   *  Consumers should resolve effective workspace as: companyId ?? userId */
+  companyId: string | null;
   tag: string;
   deps: ChatControllerDeps;
   stream: StreamState;

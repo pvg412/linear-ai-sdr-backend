@@ -3,6 +3,7 @@ import type { Redis } from "ioredis";
 
 import { container } from "@/container";
 import { ensureLogger, type LoggerLike } from "@/infra/observability";
+import { getPrisma } from "@/infra/prisma";
 import { PIPELINE_TYPES } from "@/modules/pipeline/pipeline.types";
 import type { PipelineExecutor } from "@/modules/pipeline/engine/pipeline.executor";
 import {
@@ -52,6 +53,38 @@ export function startPipelineRunWorker(args: {
       },
       "Pipeline run job failed",
     );
+
+    // If this is the final failure attempt (all BullMQ retries exhausted),
+    // update the DB run status to FAILED so the frontend doesn't show an
+    // eternally "running" pipeline and the concurrency counter resets.
+    const pipelineRunId = job?.data.pipelineRunId;
+    const maxAttempts = job?.opts?.attempts ?? 1;
+    const attemptsStarted = job?.attemptsStarted ?? 1;
+
+    if (pipelineRunId && attemptsStarted >= maxAttempts) {
+      const prisma = getPrisma();
+      prisma.pipelineRun
+        .updateMany({
+          where: {
+            id: pipelineRunId,
+            // Only update if still in an active state (avoid overwriting CANCELLED, SUCCEEDED)
+            status: { in: ["PENDING", "RUNNING"] },
+          },
+          data: {
+            status: "FAILED",
+            finishedAt: new Date(),
+          },
+        })
+        .catch((dbErr: unknown) => {
+          lg.error(
+            {
+              pipelineRunId,
+              err: dbErr instanceof Error ? dbErr.message : String(dbErr),
+            },
+            "Pipeline run worker: failed to mark run as FAILED after BullMQ exhausted retries",
+          );
+        });
+    }
   });
 
   worker.on("error", (err) => {

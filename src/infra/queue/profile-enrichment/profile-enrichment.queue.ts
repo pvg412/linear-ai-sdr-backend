@@ -24,12 +24,15 @@ export function profileEnrichmentJobOptions() {
   const env = loadEnv();
 
   return {
+    // Note: profile enrichment intentionally reuses lead-search env vars for
+    // retry config. Add PROFILE_ENRICHMENT_QUEUE_ATTEMPTS/BACKOFF_MS to env.ts
+    // when independent tuning is needed.
     attempts: env.LEAD_SEARCH_QUEUE_ATTEMPTS,
     backoff: {
       type: "exponential" as const,
       delay: env.LEAD_SEARCH_QUEUE_BACKOFF_MS,
     },
     removeOnComplete: true,
-    removeOnFail: false,
+    removeOnFail: { count: 100, age: 7 * 24 * 3600 },
   };
 }

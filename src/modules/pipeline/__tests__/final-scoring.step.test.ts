@@ -91,38 +91,6 @@ function makeDbLead(i: number) {
   };
 }
 
-function makeCompanyResearch(
-  leadId: string,
-  opts?: {
-    status?: string;
-    items?: { date: string; summary: string; sourceUrl: string; category: string; source: string }[];
-    createdAt?: Date;
-  },
-) {
-  return {
-    id: `cr-${leadId}`,
-    leadId,
-    status: opts?.status ?? "COMPLETED",
-    createdAt: opts?.createdAt ?? new Date("2026-01-15"),
-    items: opts?.items ?? [
-      {
-        date: "2026-01-10",
-        summary: "Company raised Series B",
-        sourceUrl: "https://example.com/news",
-        category: "NEWS",
-        source: "perplexity",
-      },
-      {
-        date: "2026-01-05",
-        summary: "New product launch",
-        sourceUrl: "https://example.com/blog",
-        category: "BLOG",
-        source: "perplexity",
-      },
-    ],
-  };
-}
-
 function makeRunLeads(count: number, leads?: ReturnType<typeof makeDbLead>[]) {
   const dbLeads = leads ?? Array.from({ length: count }, (_, i) => makeDbLead(i));
   return dbLeads.map((l) => ({
@@ -134,60 +102,6 @@ function makeRunLeads(count: number, leads?: ReturnType<typeof makeDbLead>[]) {
     excluded: false,
     excludedByStepId: null,
   }));
-}
-
-/** Hiring signal factory for test data */
-function makeHiringSignal(leadId: string, opts?: {
-  openJobCount?: number;
-  departments?: string[];
-  topJobTitles?: string[];
-  providerKey?: string;
-  companyName?: string;
-  jobs?: {
-    jobTitle?: string;
-    team?: string;
-    datePosted?: string;
-    skills?: string[];
-    technologies?: string[];
-    jobCategories?: string[];
-    locations?: { city?: string; region?: string; country?: string }[];
-  }[];
-}) {
-  return {
-    id: `hs-${leadId}`,
-    createdAt: new Date(),
-    leadId,
-    pipelineRunId: "run-1",
-    providerKey: opts?.providerKey ?? "test-provider",
-    companyName: opts?.companyName ?? "Test Company",
-    openJobCount: opts?.openJobCount ?? 5,
-    departments: opts?.departments ?? ["Engineering"],
-    topJobTitles: opts?.topJobTitles ?? ["Software Engineer"],
-    jobs: (opts?.jobs ?? [{ jobTitle: "Software Engineer", datePosted: "2026-02-01" }]).map((j, idx) => ({
-      id: `hsj-${leadId}-${idx}`,
-      createdAt: new Date(),
-      hiringSignalId: `hs-${leadId}`,
-      externalId: null,
-      jobTitle: j.jobTitle ?? null,
-      team: j.team ?? null,
-      jobType: null,
-      locationType: null,
-      datePosted: j.datePosted ?? null,
-      companyName: null,
-      companySlug: null,
-      requirementsSummary: null,
-      skills: j.skills ?? [],
-      technologies: j.technologies ?? [],
-      jobCategories: j.jobCategories ?? [],
-      locations: (j.locations ?? []).map((l, li) => ({
-        id: `hsjl-${leadId}-${idx}-${li}`,
-        jobId: `hsj-${leadId}-${idx}`,
-        city: l.city ?? null,
-        region: l.region ?? null,
-        country: l.country ?? null,
-      })),
-    })),
-  };
 }
 
 /**
@@ -215,11 +129,17 @@ function makeInitialScores(
   });
 }
 
+/**
+ * Minimal mock Prisma for FinalScoringStep.
+ *
+ * NOTE: The new implementation no longer loads signals (company research,
+ * hiring, Reddit, Crunchbase) from the DB — the AI service retrieves them
+ * from ChromaDB using workspace_id + lead_id. Only pipelineRunLead and
+ * leadScore are needed.
+ */
 function createMockPrisma(opts?: {
   leadCount?: number;
   leads?: ReturnType<typeof makeDbLead>[];
-  companyResearches?: ReturnType<typeof makeCompanyResearch>[];
-  hiringSignals?: ReturnType<typeof makeHiringSignal>[];
   /** Override initial ICP scores per lead. If omitted, all leads get DEFAULT_ICP_SCORE. */
   initialScoreOverrides?: Record<string, { score: number; reasoning: string }>;
   /** Set to true to simulate leads without initial scores. */
@@ -228,35 +148,13 @@ function createMockPrisma(opts?: {
   const leads = opts?.leads
     ?? Array.from({ length: opts?.leadCount ?? 30 }, (_, i) => makeDbLead(i));
   const runLeads = makeRunLeads(leads.length, leads);
-  const companyResearches = opts?.companyResearches ?? [];
-  const hiringSignals = opts?.hiringSignals ?? [];
   const initialScores = opts?.noInitialScores
     ? []
     : makeInitialScores(leads, opts?.initialScoreOverrides);
 
   return {
-    lead: {
-      findMany: vi.fn().mockImplementation(
-        (args: { where: { id: { in: string[] } } }) => {
-          const ids = new Set(args.where.id.in);
-          return Promise.resolve(leads.filter((l) => ids.has(l.id)));
-        },
-      ),
-    },
     pipelineRunLead: {
       findMany: vi.fn().mockResolvedValue(runLeads),
-    },
-    companyResearch: {
-      findMany: vi.fn().mockResolvedValue(companyResearches),
-    },
-    hiringSignal: {
-      findMany: vi.fn().mockResolvedValue(hiringSignals),
-    },
-    redditSignal: {
-      findMany: vi.fn().mockResolvedValue([]),
-    },
-    crunchbaseSignal: {
-      findMany: vi.fn().mockResolvedValue([]),
     },
     leadScore: {
       findMany: vi.fn().mockResolvedValue(initialScores),
@@ -295,11 +193,6 @@ describe("FinalScoringStep", () => {
   });
 
   it("happy path: combines ICP from initial scoring with signal strength from AI", async () => {
-    const companyResearches = [
-      makeCompanyResearch("lead-0"),
-      makeCompanyResearch("lead-1"),
-    ];
-
     const { step, aiGrpcClient, mockPrisma } = buildStep({
       aiGrpcClient: createMockAiGrpcClient({
         "lead-0": { signalStrength: 60 },
@@ -307,7 +200,6 @@ describe("FinalScoringStep", () => {
       }),
       prisma: createMockPrisma({
         leadCount: 3,
-        companyResearches,
         initialScoreOverrides: {
           "lead-0": { score: 90, reasoning: "Excellent ICP match" },
           "lead-1": { score: 60, reasoning: "Moderate fit" },
@@ -327,12 +219,15 @@ describe("FinalScoringStep", () => {
     // gRPC called for each lead (signal strength evaluation)
     expect(aiGrpcClient.scoreLeadFinal).toHaveBeenCalledTimes(3);
 
-    // lead-0 has company research items passed to gRPC
+    // Each gRPC call passes workspaceId and leadId for ChromaDB retrieval.
+    // The AI service uses these to look up signals (company research, hiring, etc.)
+    // from ChromaDB — the backend no longer loads and sends them directly.
     const call0 = (aiGrpcClient.scoreLeadFinal as ReturnType<typeof vi.fn>).mock.calls.find(
       (c: unknown[]) => (c[0] as { lead: { id: string } }).lead.id === "lead-0",
     );
     expect(call0).toBeDefined();
-    expect((call0![0] as { companyResearchItems: unknown[] }).companyResearchItems).toHaveLength(2);
+    expect((call0![0] as { workspaceId: string }).workspaceId).toBe("company-1");
+    expect((call0![0] as { leadId: string }).leadId).toBe("lead-0");
 
     // DB persistence includes all component fields: ICP from initial scoring + signal from AI
     expect(mockPrisma.leadScore.createMany).toHaveBeenCalledWith(
@@ -363,59 +258,49 @@ describe("FinalScoringStep", () => {
     expect(mockPrisma.leadScore.createMany).not.toHaveBeenCalled();
   });
 
-  it("lead with no company research sends empty items to gRPC", async () => {
+  it("sends workspaceId and leadId to gRPC for ChromaDB signal retrieval", async () => {
+    // The new protocol: instead of loading signals from DB and passing them
+    // to gRPC, the backend sends workspace_id + lead_id so the AI service can
+    // retrieve signals from ChromaDB on its own.
     const { step, aiGrpcClient } = buildStep({
-      prisma: createMockPrisma({ leadCount: 1, companyResearches: [] }),
+      prisma: createMockPrisma({ leadCount: 1 }),
     });
 
-    const ctx = makeCtx();
+    const ctx = makeCtx(); // companyId: "company-1"
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-final" }, tools);
 
     expect(aiGrpcClient.scoreLeadFinal).toHaveBeenCalledWith(
       expect.objectContaining({
-        companyResearchItems: [],
+        workspaceId: "company-1",
+        leadId: "lead-0",
       }),
     );
   });
 
-  it("multiple researches per lead uses most recent COMPLETED one", async () => {
-    const olderResearch = makeCompanyResearch("lead-0", {
-      createdAt: new Date("2026-01-01"),
-      items: [{ date: "2025-12-01", summary: "Old news", sourceUrl: "https://old.com", category: "NEWS", source: "perplexity" }],
-    });
-    const newerResearch = makeCompanyResearch("lead-0", {
-      createdAt: new Date("2026-02-01"),
-      items: [{ date: "2026-01-20", summary: "Recent news", sourceUrl: "https://recent.com", category: "NEWS", source: "perplexity" }],
-    });
-    newerResearch.id = "cr-lead-0-new";
-
+  it("workspaceId falls back to createdById when companyId is null", async () => {
     const { step, aiGrpcClient } = buildStep({
-      prisma: createMockPrisma({ leadCount: 1, companyResearches: [newerResearch, olderResearch] }),
+      prisma: createMockPrisma({ leadCount: 1 }),
     });
 
-    const ctx = makeCtx();
+    // companyId: null → workspaceId should be createdById ("user-1")
+    const ctx = makeCtx({ companyId: null });
     const tools = makeTools();
 
     await step.run(ctx, { _stepId: "scoring-final" }, tools);
 
-    const call = (aiGrpcClient.scoreLeadFinal as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
-    const items = (call[0] as { companyResearchItems: { summary: string }[] }).companyResearchItems;
-    expect(items).toHaveLength(1);
-    expect(items[0].summary).toBe("Recent news");
+    expect(aiGrpcClient.scoreLeadFinal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "user-1",
+        leadId: "lead-0",
+      }),
+    );
   });
 
-  it("company research items mapped to proto correctly", async () => {
-    const research = makeCompanyResearch("lead-0", {
-      items: [
-        { date: "2026-01-10", summary: "News item", sourceUrl: "https://news.com", category: "NEWS", source: "perplexity" },
-        { date: "", summary: "Blog post", sourceUrl: "https://blog.com", category: "BLOG", source: "linkedin" },
-      ],
-    });
-
+  it("each lead gets its own leadId in the gRPC call", async () => {
     const { step, aiGrpcClient } = buildStep({
-      prisma: createMockPrisma({ leadCount: 1, companyResearches: [research] }),
+      prisma: createMockPrisma({ leadCount: 3 }),
     });
 
     const ctx = makeCtx();
@@ -423,13 +308,13 @@ describe("FinalScoringStep", () => {
 
     await step.run(ctx, { _stepId: "scoring-final" }, tools);
 
-    const call = (aiGrpcClient.scoreLeadFinal as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
-    const items = (call[0] as { companyResearchItems: { index: number; sourceName: string; summary: string }[] }).companyResearchItems;
-    expect(items).toHaveLength(2);
-    expect(items[0].index).toBe(1);
-    expect(items[1].index).toBe(2);
-    expect(items[0].sourceName).toBe("perplexity");
-    expect(items[1].sourceName).toBe("linkedin");
+    expect(aiGrpcClient.scoreLeadFinal).toHaveBeenCalledTimes(3);
+
+    const calls = (aiGrpcClient.scoreLeadFinal as ReturnType<typeof vi.fn>).mock.calls;
+    const leadIds = calls.map((c: unknown[]) => (c[0] as { leadId: string }).leadId);
+    expect(leadIds).toContain("lead-0");
+    expect(leadIds).toContain("lead-1");
+    expect(leadIds).toContain("lead-2");
   });
 
   it("gRPC error preserves ICP fit from initial scoring, sets signalStrength=0", async () => {
@@ -635,11 +520,12 @@ describe("FinalScoringStep", () => {
     const ctx = makeCtx();
     const tools = makeTools();
 
-    // checkCancelled calls:
-    //   (1) after company research loaded
-    //   (2) after hiring signals loaded
-    //   (3) before batch 0
-    //   (4) before batch 1 — cancel here
+    // checkCancelled is called 5 times total for 25 leads (BATCH_SIZE=10, 3 batches):
+    //   call 1: after service catalogs loaded
+    //   call 2: after initial ICP scores loaded
+    //   call 3: before batch 0 → false → batch 0 processes (10 leads scored)
+    //   call 4: before batch 1 → true  → partial scores persisted, return cancelled
+    //   call 5: before batch 2 (never reached)
     let callCount = 0;
     vi.mocked(tools.checkCancelled).mockImplementation(() => {
       callCount++;
@@ -650,6 +536,7 @@ describe("FinalScoringStep", () => {
 
     expect(result.outputSummary.total).toBe(0);
     expect(result.outputSummary.cancelled).toBe(true);
+    // Partial scores from batch 0 should have been persisted
     expect(mockPrisma.leadScore.createMany).toHaveBeenCalled();
   });
 
@@ -705,53 +592,16 @@ describe("FinalScoringStep", () => {
     );
   });
 
-  it("hiring signals are loaded from DB and passed to gRPC", async () => {
-    const signals = [
-      makeHiringSignal("lead-0", {
-        openJobCount: 8,
-        departments: ["Engineering", "Product"],
-        topJobTitles: ["Backend Engineer", "PM"],
-        jobs: [
-          { jobTitle: "Backend Engineer", datePosted: "2026-02-20", skills: ["Node.js"], technologies: ["AWS"] },
-        ],
-      }),
-    ];
-
-    const { step, aiGrpcClient } = buildStep({
-      prisma: createMockPrisma({ leadCount: 2, hiringSignals: signals }),
-    });
-    const ctx = makeCtx();
-    const tools = makeTools();
-
-    await step.run(ctx, { _stepId: "scoring-final" }, tools);
-
-    // lead-0 should have hiringSignals populated
-    const call0 = (aiGrpcClient.scoreLeadFinal as ReturnType<typeof vi.fn>).mock.calls.find(
-      (c: unknown[]) => (c[0] as { lead: { id: string } }).lead.id === "lead-0",
-    );
-    expect(call0).toBeDefined();
-    const req0 = call0![0] as { hiringSignals?: { openJobCount: number; departments: string[] } };
-    expect(req0.hiringSignals).toBeDefined();
-    expect(req0.hiringSignals!.openJobCount).toBe(8);
-    expect(req0.hiringSignals!.departments).toEqual(["Engineering", "Product"]);
-
-    // lead-1 should have no hiring signals (undefined)
-    const call1 = (aiGrpcClient.scoreLeadFinal as ReturnType<typeof vi.fn>).mock.calls.find(
-      (c: unknown[]) => (c[0] as { lead: { id: string } }).lead.id === "lead-1",
-    );
-    expect(call1).toBeDefined();
-    const req1 = call1![0] as { hiringSignals?: unknown };
-    expect(req1.hiringSignals).toBeUndefined();
-  });
-
-  it("lead with no hiring signals gets signalStrength from AI (may be 0)", async () => {
+  it("lead with zero signal strength gets correct finalScore", async () => {
+    // Verifies the gRPC response signalStrength=0 is used in computation, not
+    // silently treated as "missing". This replaces the old "no hiring signals" test
+    // which checked DB-loaded signals — now the AI handles signal retrieval.
     const { step, mockPrisma } = buildStep({
       aiGrpcClient: createMockAiGrpcClient({
-        "lead-0": { signalStrength: 0, signalReasoning: "No hiring signals" },
+        "lead-0": { signalStrength: 0, signalReasoning: "No relevant signals found in index" },
       }),
       prisma: createMockPrisma({
         leadCount: 1,
-        hiringSignals: [],
         initialScoreOverrides: {
           "lead-0": { score: 80, reasoning: "Good" },
         },

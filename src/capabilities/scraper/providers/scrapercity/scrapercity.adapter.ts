@@ -150,9 +150,12 @@ export class ScraperCityScraperAdapter implements ScraperAdapter {
         });
 
         const status = await pollUntil({
-          //24 hours
+          // 10 minutes max (120 × 5 s). Email validation is best-effort and
+          // wrapped in try/catch above — a long poll blocks the BullMQ worker
+          // thread. Previously this was 80 hours (57_600 attempts), which could
+          // deadlock the worker if the validator got stuck.
           intervalMs: 5_000,
-          maxAttempts: 57_600,
+          maxAttempts: 120,
           task: async () => this.client.getStatus(runId),
           isDone: (s) => {
             const v = String(s.status ?? "").toUpperCase();

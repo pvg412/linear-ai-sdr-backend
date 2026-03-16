@@ -2,12 +2,10 @@ import { inject, injectable } from "inversify";
 import type { PrismaClient, Lead } from "@prisma/client";
 import { EnrichmentFieldStatus } from "@prisma/client";
 
-import { COMPANY_RESEARCH_TYPES } from "@/modules/company-research/company-research.types";
-import type { CompanyResearchCommandService } from "@/modules/company-research/services/company-research.command.service";
 import { PROFILE_ENRICHMENT_TYPES } from "@/modules/profile-enrichment/profile-enrichment.types";
 import type { ProfileEnrichmentCommandService } from "@/modules/profile-enrichment/services/profile-enrichment.command.service";
 
-import { ENRICHMENT_CONSTANTS } from "@/config/constants";
+import { PIPELINE_CONFIG } from "@/modules/pipeline/pipeline.config";
 import { getPrisma } from "@/infra/prisma";
 
 import type { PipelineStepHandler } from "./step.interface";
@@ -21,12 +19,10 @@ import type {
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const { BATCH_SIZE, POLL_INTERVAL_MS } = ENRICHMENT_CONSTANTS;
+const { batchSize: BATCH_SIZE, pollIntervalMs: POLL_INTERVAL_MS } = PIPELINE_CONFIG.enrichment;
 
 /** Terminal statuses for enrichment — data is available once reached */
 const ENRICHMENT_TERMINAL = new Set(["COMPLETED", "FAILED", "AWAITING_REVIEW"]);
-/** Terminal statuses for company research */
-const COMPANY_RESEARCH_TERMINAL = new Set(["COMPLETED", "FAILED"]);
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -35,11 +31,8 @@ const COMPANY_RESEARCH_TERMINAL = new Set(["COMPLETED", "FAILED"]);
 interface LeadEnrichmentResult {
   leadId: string;
   profileEnqueued: boolean;
-  companyResearchEnqueued: boolean;
   /** enrichmentRequestId returned by the service (for polling) */
   enrichmentRequestId?: string;
-  /** companyResearchId returned by the service (for polling) */
-  companyResearchId?: string;
   errors: string[];
 }
 
@@ -47,7 +40,6 @@ interface EnrichmentProgress {
   completed: number;
   total: number;
   profileRequests: number;
-  companyResearchRequests: number;
   errors: number;
 }
 
@@ -56,20 +48,22 @@ interface EnrichmentProgress {
 /* ------------------------------------------------------------------ */
 
 /**
- * Enrichment step — profile enrichment + company research.
+ * Enrichment step — profile enrichment (LinkedIn profile scraping via Apify).
  *
- * For each lead that passed scoring, enqueues two BullMQ jobs:
- *   1. Profile enrichment (LinkedIn profile scraping via Apify)
- *   2. Company research (Perplexity AI + LinkedIn posts)
+ * For each lead that passed scoring, enqueues a BullMQ job for
+ * profile enrichment.
  *
  * Processing is batched: leads within a batch run in parallel,
  * batches run sequentially. Progress is emitted after each batch.
  *
  * After all jobs are enqueued, the step polls the database until
- * every enrichment request and company research request reaches
- * a terminal status (COMPLETED, FAILED, or AWAITING_REVIEW for
- * enrichment). This ensures downstream steps have enrichment data
- * available in the DB.
+ * every enrichment request reaches a terminal status (COMPLETED,
+ * FAILED, or AWAITING_REVIEW). This ensures downstream steps have
+ * enrichment data available in the DB.
+ *
+ * Note: Company research (Perplexity AI + LinkedIn posts) has been
+ * moved to the signals step (signals.step.ts) so it can be
+ * displayed alongside other signals in the UI.
  */
 @injectable()
 export class EnrichmentStep implements PipelineStepHandler {
@@ -78,8 +72,6 @@ export class EnrichmentStep implements PipelineStepHandler {
   private readonly prisma: PrismaClient = getPrisma();
 
   constructor(
-    @inject(COMPANY_RESEARCH_TYPES.CompanyResearchCommandService)
-    private readonly companyResearch: CompanyResearchCommandService,
     @inject(PROFILE_ENRICHMENT_TYPES.ProfileEnrichmentCommandService)
     private readonly profileEnrichment: ProfileEnrichmentCommandService,
   ) {}
@@ -99,13 +91,11 @@ export class EnrichmentStep implements PipelineStepHandler {
     if (runLeads.length === 0) {
       tools.emitProgress("No leads to enrich");
       return {
-        outputSummary: { totalLeads: 0, profileRequests: 0, companyResearchRequests: 0, errors: 0 },
+        outputSummary: { totalLeads: 0, profileRequests: 0, errors: 0 },
       };
     }
 
-    const includeCompanyResearch = config.includeCompanyResearch !== false;
     const includeProfileEnrichment = config.includeProfileEnrichment !== false;
-    const includeLinkedinPosts = config.includeLinkedinPosts !== false;
 
     tools.emitProgress(`Enriching ${runLeads.length} lead(s)...`, { total: runLeads.length });
 
@@ -113,7 +103,6 @@ export class EnrichmentStep implements PipelineStepHandler {
 
     const allResults: LeadEnrichmentResult[] = [];
     let profileRequests = 0;
-    let companyResearchRequests = 0;
     let errorCount = 0;
 
     const batches = createBatches(runLeads, BATCH_SIZE);
@@ -125,14 +114,13 @@ export class EnrichmentStep implements PipelineStepHandler {
 
       const batchResults = await Promise.all(
         batch.map((rl) =>
-          this.enrichOneLead(rl.lead, ctx.createdById, includeProfileEnrichment, includeCompanyResearch, includeLinkedinPosts, tools),
+          this.enrichOneLead(rl.lead, ctx.createdById, includeProfileEnrichment, tools),
         ),
       );
 
       for (const result of batchResults) {
         allResults.push(result);
         if (result.profileEnqueued) profileRequests++;
-        if (result.companyResearchEnqueued) companyResearchRequests++;
         errorCount += result.errors.length;
       }
 
@@ -140,13 +128,12 @@ export class EnrichmentStep implements PipelineStepHandler {
         completed: allResults.length,
         total: runLeads.length,
         profileRequests,
-        companyResearchRequests,
         errors: errorCount,
       };
 
       tools.emitProgress(
         `Enriching leads: ${progress.completed}/${progress.total} enqueued ` +
-          `(${progress.profileRequests} profile, ${progress.companyResearchRequests} company research)`,
+          `(${progress.profileRequests} profile)`,
         progress,
       );
     }
@@ -156,16 +143,13 @@ export class EnrichmentStep implements PipelineStepHandler {
     const enrichmentIds = allResults
       .map((r) => r.enrichmentRequestId)
       .filter((id): id is string => !!id);
-    const companyResearchIds = allResults
-      .map((r) => r.companyResearchId)
-      .filter((id): id is string => !!id);
 
-    if (enrichmentIds.length > 0 || companyResearchIds.length > 0) {
+    if (enrichmentIds.length > 0) {
       tools.emitProgress(
-        `Waiting for ${enrichmentIds.length} enrichment + ${companyResearchIds.length} company research jobs to complete...`,
+        `Waiting for ${enrichmentIds.length} enrichment job(s) to complete...`,
       );
 
-      await this.pollForCompletion(enrichmentIds, companyResearchIds, tools);
+      await this.pollForCompletion(enrichmentIds, tools);
     }
 
     // ── Phase 2.5: Auto-approve enrichment field changes ────────────
@@ -184,104 +168,24 @@ export class EnrichmentStep implements PipelineStepHandler {
       );
     }
 
-    // ── Phase 3: Fetch completed company research results ──────────
-
-    const companyResearchByLead: Record<string, {
-      company: string;
-      items: Array<{
-        date: string | null;
-        summary: string;
-        sourceUrl: string;
-        category: string;
-      }>;
-    }> = {};
-
-    if (companyResearchIds.length > 0) {
-      tools.emitProgress("Collecting company research results...");
-
-      const researchRecords = await this.prisma.companyResearch.findMany({
-        where: { id: { in: companyResearchIds }, status: "COMPLETED" },
-        select: {
-          leadId: true,
-          company: true,
-          items: {
-            select: {
-              date: true,
-              summary: true,
-              sourceUrl: true,
-              category: true,
-            },
-            orderBy: { createdAt: "asc" },
-          },
-        },
-      });
-
-      for (const record of researchRecords) {
-        companyResearchByLead[record.leadId] = {
-          company: record.company,
-          items: record.items.map((item) => ({
-            date: item.date,
-            summary: item.summary,
-            sourceUrl: item.sourceUrl,
-            category: item.category.toLowerCase(),
-          })),
-        };
-      }
-
-      tools.log.info(
-        { leadsWithResearch: Object.keys(companyResearchByLead).length },
-        "Company research results collected",
-      );
-    }
-
     // ── Log summary ──────────────────────────────────────────────────
 
     tools.log.info(
       {
         totalLeads: runLeads.length,
         profileRequests,
-        companyResearchRequests,
         errors: errorCount,
       },
       "Enrichment step completed",
     );
 
-    // ── Build lead lookup for enrichment data ─────────────────────────
-
-    const leadLookup = new Map(
-      runLeads.map((rl) => [rl.leadId, rl.lead]),
-    );
-
     // ── Return result ────────────────────────────────────────────────
-
-    const companyResearchList = Object.entries(companyResearchByLead)
-      .map(([leadId, research]) => {
-        const lead = leadLookup.get(leadId);
-        return {
-          leadId,
-          fullName: lead?.fullName ?? null,
-          company: research.company,
-          companyDomain: lead?.companyDomain ?? null,
-          status: "COMPLETED",
-          items: research.items,
-        };
-      })
-      // Sort: leads with research items first, then by item count desc
-      .sort((a, b) => b.items.length - a.items.length);
 
     return {
       outputSummary: {
         totalLeads: runLeads.length,
         profileRequests,
-        companyResearchRequests,
         errors: errorCount,
-      },
-      data: {
-        enrichment: {
-          totalLeads: runLeads.length,
-          leadsWithResearch: Object.keys(companyResearchByLead).length,
-          companyResearch: companyResearchList,
-        },
       },
     };
   }
@@ -291,31 +195,26 @@ export class EnrichmentStep implements PipelineStepHandler {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Enrich a single lead: profile enrichment first, then company research.
-   * Each operation is independently caught — one failure does not
-   * prevent the other from running.
-   *
-   * Returns the request IDs so the caller can poll for completion.
+   * Enrich a single lead: profile enrichment.
+   * Returns the request ID so the caller can poll for completion.
    */
   private async enrichOneLead(
     lead: Lead,
     userId: string,
     includeProfileEnrichment: boolean,
-    includeCompanyResearch: boolean,
-    includeLinkedinPosts: boolean,
     tools: PipelineTools,
   ): Promise<LeadEnrichmentResult> {
     const result: LeadEnrichmentResult = {
       leadId: lead.id,
       profileEnqueued: false,
-      companyResearchEnqueued: false,
       errors: [],
     };
 
-    /* 1. Profile Enrichment (requires linkedinUrl) */
+    /* Profile Enrichment (requires linkedinUrl) */
     if (includeProfileEnrichment && lead.linkedinUrl) {
       try {
-        const resp = await this.profileEnrichment.requestEnrichment(userId, lead.id);
+        // skipBilling=true: pipeline flat fee ($100) covers enrichment costs.
+        const resp = await this.profileEnrichment.requestEnrichment(userId, lead.id, false, true);
         result.profileEnqueued = true;
         result.enrichmentRequestId = resp.enrichmentRequestId;
       } catch (err) {
@@ -325,41 +224,21 @@ export class EnrichmentStep implements PipelineStepHandler {
       }
     }
 
-    /* 2. Company Research (requires company name) */
-    if (includeCompanyResearch && lead.company) {
-      try {
-        const resp = await this.companyResearch.requestCompanyResearch(userId, lead.id, {
-          recency: "month",
-          maxResults: 5,
-          includeLinkedinPosts,
-        });
-        result.companyResearchEnqueued = true;
-        result.companyResearchId = resp.companyResearchId;
-      } catch (err) {
-        const msg = `Company research failed for lead ${lead.id}: ${(err as Error).message}`;
-        tools.log.warn({ leadId: lead.id, error: msg }, msg);
-        result.errors.push(msg);
-      }
-    }
-
     return result;
   }
 
   /**
-   * Poll DB until all enrichment requests and company research requests
-   * reach terminal statuses. The step's overall timeout (configured in
-   * pipeline definition, default 10 min) acts as the max wait — this
-   * loop does not enforce its own ceiling.
+   * Poll DB until all enrichment requests reach terminal statuses.
+   * The step's overall timeout acts as the max wait — this loop does
+   * not enforce its own ceiling.
    */
   private async pollForCompletion(
     enrichmentIds: string[],
-    companyResearchIds: string[],
     tools: PipelineTools,
   ): Promise<void> {
     const pendingEnrichment = new Set(enrichmentIds);
-    const pendingResearch = new Set(companyResearchIds);
 
-    while (pendingEnrichment.size > 0 || pendingResearch.size > 0) {
+    while (pendingEnrichment.size > 0) {
       if (await tools.checkCancelled()) {
         tools.log.info({}, "Enrichment polling cancelled");
         return;
@@ -367,45 +246,25 @@ export class EnrichmentStep implements PipelineStepHandler {
 
       await sleep(POLL_INTERVAL_MS);
 
-      // ── Check enrichment requests ──────────────────────────────────
-      if (pendingEnrichment.size > 0) {
-        const rows = await this.prisma.leadEnrichmentRequest.findMany({
-          where: { id: { in: [...pendingEnrichment] } },
-          select: { id: true, status: true },
-        });
+      const rows = await this.prisma.leadEnrichmentRequest.findMany({
+        where: { id: { in: [...pendingEnrichment] } },
+        select: { id: true, status: true },
+      });
 
-        for (const row of rows) {
-          if (ENRICHMENT_TERMINAL.has(row.status)) {
-            pendingEnrichment.delete(row.id);
-          }
-        }
-      }
-
-      // ── Check company research requests ────────────────────────────
-      if (pendingResearch.size > 0) {
-        const rows = await this.prisma.companyResearch.findMany({
-          where: { id: { in: [...pendingResearch] } },
-          select: { id: true, status: true },
-        });
-
-        for (const row of rows) {
-          if (COMPANY_RESEARCH_TERMINAL.has(row.status)) {
-            pendingResearch.delete(row.id);
-          }
+      for (const row of rows) {
+        if (ENRICHMENT_TERMINAL.has(row.status)) {
+          pendingEnrichment.delete(row.id);
         }
       }
 
       tools.emitProgress(
-        `Waiting for enrichment: ${pendingEnrichment.size} profile + ${pendingResearch.size} company research remaining`,
-        {
-          pendingEnrichment: pendingEnrichment.size,
-          pendingResearch: pendingResearch.size,
-        },
+        `Waiting for enrichment: ${pendingEnrichment.size} profile enrichment remaining`,
+        { pendingEnrichment: pendingEnrichment.size },
       );
     }
 
     tools.log.info(
-      { enrichmentIds: enrichmentIds.length, companyResearchIds: companyResearchIds.length },
+      { enrichmentIds: enrichmentIds.length },
       "All enrichment jobs completed",
     );
   }

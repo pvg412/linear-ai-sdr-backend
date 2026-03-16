@@ -1,6 +1,17 @@
 import { z } from "zod";
 
 const IdSchema = z.string().min(1);
+
+/** Validates URL path params that contain a directoryId. */
+export const DirectoryIdParamsSchema = z.object({
+  directoryId: IdSchema,
+});
+
+/** Validates URL path params that contain both directoryId and leadId. */
+export const DirectoryLeadParamsSchema = z.object({
+  directoryId: IdSchema,
+  leadId: IdSchema,
+});
 const DirectoryNameSchema = z
   .string()
   .trim()

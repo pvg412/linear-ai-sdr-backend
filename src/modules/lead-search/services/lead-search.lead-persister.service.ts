@@ -62,20 +62,6 @@ export class LeadSearchLeadPersisterService {
 
       leadIds.push(leadId);
 
-      await this.prisma.leadSearchLead.upsert({
-        where: {
-          leadSearchId_leadId: {
-            leadSearchId: input.leadSearchId,
-            leadId,
-          },
-        },
-        create: {
-          leadSearchId: input.leadSearchId,
-          leadId,
-        },
-        update: {},
-      });
-
       if (input.runId && lead.raw != null) {
         rawItems.push({
           leadId,
@@ -83,6 +69,19 @@ export class LeadSearchLeadPersisterService {
           raw: lead.raw,
         });
       }
+    }
+
+    // Batch-insert lead-search associations in one query instead of N individual
+    // upserts. Using createMany + skipDuplicates is equivalent to the previous
+    // per-lead upsert({ update: {} }) and avoids N roundtrips to the DB.
+    if (leadIds.length > 0) {
+      await this.prisma.leadSearchLead.createMany({
+        data: leadIds.map((leadId) => ({
+          leadSearchId: input.leadSearchId,
+          leadId,
+        })),
+        skipDuplicates: true,
+      });
     }
 
     // Persist raw for the whole run in one object (best-effort).
@@ -265,18 +264,42 @@ export class LeadSearchLeadPersisterService {
       }
     }
 
-    // 2) Create new lead
+    // 2) Create new lead.
+    //
+    // The lead record and its provider reference are created inside a single
+    // $transaction so that a crash between the two never leaves a lead without
+    // a provider ref (which would prevent deduplication on the next import).
+    // Email statuses / lead emails / company websites are best-effort and
+    // remain outside the transaction intentionally — they can be re-derived
+    // from raw data and should not block lead creation on failure.
     try {
-      const created = await this.prisma.lead.create({
-        data: {
-          origin: LeadOrigin.PROVIDER,
-          createdById: input.createdById ?? null,
-          ...(email ? { email } : {}),
-          ...this.pickLeadFields(incoming),
-        },
+      const created = await this.prisma.$transaction(async (tx) => {
+        const lead = await tx.lead.create({
+          data: {
+            origin: LeadOrigin.PROVIDER,
+            createdById: input.createdById ?? null,
+            ...(email ? { email } : {}),
+            ...this.pickLeadFields(incoming),
+          },
+        });
+
+        // Immediately link provider reference within the same transaction
+        // so deduplication works correctly on the next import.
+        if (externalId) {
+          await tx.leadProviderRef.upsert({
+            where: {
+              provider_externalId: { provider: input.provider, externalId },
+            },
+            create: { leadId: lead.id, provider: input.provider, externalId },
+            update: {},
+          });
+        }
+
+        return lead;
       });
 
-      await this.ensureProviderRef(created.id, input.provider, externalId);
+      // Best-effort calls outside the transaction — failures are logged,
+      // not propagated, so they never roll back the lead creation.
       await this.ensureEmailStatus(created.id, incoming.emailStatus);
       await this.upsertLeadEmails(created.id, incoming.emails);
       await this.upsertLeadCompanyWebsites(

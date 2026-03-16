@@ -45,6 +45,7 @@ type RealtimeSocket = {
   readonly readyState: number;
   on(event: "close" | "error", listener: () => void): void;
   send(data: string): void;
+  close?(): void;
 };
 
 function extractWsSocket(conn: unknown): RealtimeSocket {
@@ -213,6 +214,9 @@ export function registerPipelineRoutes(app: FastifyInstance): void {
           type: "error",
           payload: { code: "UNAUTHORIZED", message: "Authentication required" },
         });
+        // Close the socket so resources are released — previously the socket
+        // stayed open indefinitely after sending the error.
+        try { socket.close?.(); } catch { /* ignore */ }
         return;
       }
 
@@ -223,6 +227,7 @@ export function registerPipelineRoutes(app: FastifyInstance): void {
           type: "error",
           payload: { code: "BAD_REQUEST", message: "Missing pipelineRunId" },
         });
+        try { socket.close?.(); } catch { /* ignore */ }
         return;
       }
 
@@ -234,6 +239,7 @@ export function registerPipelineRoutes(app: FastifyInstance): void {
           type: "error",
           payload: { code: "FORBIDDEN", message: "Access denied" },
         });
+        try { socket.close?.(); } catch { /* ignore */ }
         return;
       }
 

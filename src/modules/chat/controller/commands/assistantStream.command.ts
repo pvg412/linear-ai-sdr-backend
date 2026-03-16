@@ -14,7 +14,7 @@ export class AssistantStreamCommandHandler implements WsCommandHandler {
   readonly type = "assistant.stream";
 
   handle(context: WsContext, payload: unknown): Promise<void> {
-    const { socket, deps, threadId, userId, tag, stream } = context;
+    const { socket, deps, threadId, userId, companyId, tag, stream } = context;
     const typedPayload = payload as AssistantStreamPayload;
 
     // Ack immediately so UI gets confirmation
@@ -47,6 +47,7 @@ export class AssistantStreamCommandHandler implements WsCommandHandler {
     void deps.aiStreamService
       .streamAssistantReply({
         userId,
+        companyId,
         threadId,
         text: typedPayload.text,
         clientMessageId: typedPayload.clientMessageId ?? undefined,

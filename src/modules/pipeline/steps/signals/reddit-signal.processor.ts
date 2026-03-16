@@ -1,3 +1,5 @@
+import { createHash } from "crypto";
+
 import type { PrismaClient } from "@prisma/client";
 
 import type {
@@ -6,16 +8,27 @@ import type {
   RedditSignalPostDto,
   RedditSignalCompanyInfo,
 } from "@/capabilities/reddit-signals/reddit-signal-provider.dto";
+import type { AiGrpcClient } from "@/infra/ai-grpc-client/ai-grpc-client";
+import { LeadDocumentKind } from "@/generated/aisdr/v1/ai_sdr";
+import type { LeadDocument } from "@/generated/aisdr/v1/ai_sdr";
+import { RAG_CONSTANTS } from "@/config/constants";
 import type { PipelineTools } from "@/modules/pipeline/schemas/pipeline.dto";
+import { PIPELINE_CONFIG } from "@/modules/pipeline/pipeline.config";
 
 import type { CompanyGroup, LeadInfo } from "./signals.helpers";
 import { createBatches } from "./signals.helpers";
+import {
+  redditPostToRagText,
+  redditSignalSummaryText,
+  signalDocId,
+  signalItemKey,
+} from "./signal-rag-text";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                               */
+/*  Constants (sourced from PIPELINE_CONFIG)                           */
 /* ------------------------------------------------------------------ */
 
-const REDDIT_COMPANY_BATCH_SIZE = 10;
+const REDDIT_COMPANY_BATCH_SIZE = PIPELINE_CONFIG.signals.redditBatchSize;
 
 export type RedditLeadDetail = {
   totalMentions: number;
@@ -38,6 +51,7 @@ export class RedditSignalProcessor {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly providers: RedditSignalProvider[],
+    private readonly aiGrpcClient: AiGrpcClient | null = null,
   ) {}
 
   async process(
@@ -45,6 +59,7 @@ export class RedditSignalProcessor {
     activeSubreddits: string[],
     pipelineRunId: string,
     tools: PipelineTools,
+    userId?: string,
   ): Promise<RedditPhaseResult> {
     let companiesWithSignals = 0;
     let totalMentions = 0;
@@ -104,6 +119,20 @@ export class RedditSignalProcessor {
 
               // Persist Reddit results for this company
               await this.persistSignals([result], group.leadIds, pipelineRunId);
+
+              // RAG indexing — fire-and-forget per lead, non-fatal
+              for (const leadId of group.leadIds) {
+                const detail = detailsByLead.get(leadId);
+                if (!detail) continue;
+                try {
+                  await this.indexInAi(leadId, group.companyName, detail, userId ?? "");
+                } catch (err) {
+                  tools.log.warn(
+                    { leadId, company: group.companyName, err: (err as Error).message },
+                    "Signals step: Reddit RAG indexing failed (non-fatal)",
+                  );
+                }
+              }
             }
           }
         } catch (err) {
@@ -166,6 +195,58 @@ export class RedditSignalProcessor {
   /*  Internal                                                          */
   /* ---------------------------------------------------------------- */
 
+  private async indexInAi(
+    leadId: string,
+    companyName: string,
+    detail: RedditLeadDetail,
+    workspaceId: string,
+  ): Promise<void> {
+    if (!this.aiGrpcClient) return;
+
+    const nowMs = String(Date.now());
+
+    const makeDoc = (documentId: string, text: string): LeadDocument => ({
+      documentId,
+      leadId,
+      kind: LeadDocumentKind.LEAD_DOCUMENT_KIND_REDDIT_SIGNAL,
+      text,
+      metadata: { leadId, signalType: "reddit", companyName },
+      updatedAtMs: nowMs,
+      contentHash: createHash("sha256").update(text).digest("hex"),
+    });
+
+    // 1. Summary document (aggregate stats, no individual posts)
+    const documents: LeadDocument[] = [
+      makeDoc(
+        signalDocId("reddit", leadId),
+        redditSignalSummaryText(companyName, detail),
+      ),
+    ];
+
+    // 2. One document per Reddit post/comment
+    for (const post of detail.posts) {
+      const key = signalItemKey([
+        post.url,
+        // fallback: derive key from content when url is absent
+        post.url == null
+          ? `${post.subreddit}|${post.title ?? ""}|${post.createdUtc ?? ""}`
+          : null,
+      ]);
+      documents.push(makeDoc(signalDocId("reddit", leadId, key), redditPostToRagText(companyName, post)));
+    }
+
+    // 3. Send in batches of RAG_CONSTANTS.SIGNAL_BATCH_SIZE
+    for (let i = 0; i < documents.length; i += RAG_CONSTANTS.SIGNAL_BATCH_SIZE) {
+      const batch = documents.slice(i, i + RAG_CONSTANTS.SIGNAL_BATCH_SIZE);
+      await this.aiGrpcClient.upsertLeadDocuments({
+        requestId: "",
+        workspaceId,
+        allowPartial: true,
+        documents: batch,
+      });
+    }
+  }
+
   private async fetchSingle(
     group: CompanyGroup,
     providers: RedditSignalProvider[],
@@ -224,6 +305,8 @@ export class RedditSignalProcessor {
         const results = await provider.detectRedditSignalsBatch({
           companies,
           subreddits,
+          maxPostsPerSubreddit: PIPELINE_CONFIG.signals.redditMaxPostsPerSubreddit,
+          maxPostsPerCompany: PIPELINE_CONFIG.signals.redditMaxPostsPerCompany,
         });
 
         if (!results || results.size === 0) {

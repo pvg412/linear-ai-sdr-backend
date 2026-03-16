@@ -42,6 +42,8 @@ export class ChatAiPromptParserService implements ChatPromptParser {
   async parseOutreachContext(input: {
     text: string;
     userId: string;
+    /** Company-level workspace for ChromaDB scoping (companyId ?? userId). */
+    companyId?: string | null;
     threadId: string;
     leadId: string;
     directoryId?: string;
@@ -83,7 +85,7 @@ export class ChatAiPromptParserService implements ChatPromptParser {
       requestId: "",
       userId: input.userId,
       threadId: input.threadId,
-      workspaceId: input.userId, // workspace_id = user_id
+      workspaceId: input.companyId ?? input.userId,
       leadId: input.leadId,
       directoryId: input.directoryId ?? "",
       text: cleanedText,
